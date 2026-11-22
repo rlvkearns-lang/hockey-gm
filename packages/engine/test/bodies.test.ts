@@ -13,4 +13,11 @@ describe('bodies', () => {
     const c = resolveBodies([a, b, far], () => mv(85));
     expect(c).toHaveLength(1); expect(c[0]!.closing).toBeCloseTo(3);
   });
+  it('separates bodies sitting at exactly the same spot', () => {
+    const a = at(5, 2), b = at(5, 2);
+    const c = resolveBodies([a, b], () => mv(85));
+    expect(c).toHaveLength(1);
+    expect(Number.isFinite(a.pos.x) && Number.isFinite(b.pos.x) && Number.isFinite(a.pos.y) && Number.isFinite(b.pos.y)).toBe(true);
+    expect(dist(a.pos, b.pos)).toBeGreaterThanOrEqual(2 * mv(85).radius - 1e-9);
+  });
 });

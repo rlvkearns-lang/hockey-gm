@@ -2,6 +2,7 @@ import type { Movement } from './skating';
 import type { SkaterState } from './types';
 
 /**
+ * Single pass; the caller clamps to the boards afterwards.
  * Push overlapping on-ice bodies apart, the lighter one giving more.
  * Returns each contact with the closing speed along the line between centres (0 if already parting).
  */
@@ -18,12 +19,12 @@ export function resolveBodies(
       const b = skaters[j]!;
       if (!b.onIce) continue;
       const mb = move(b.id);
-      let dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
-      let d = Math.hypot(dx, dy);
+      const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
+      const d = Math.hypot(dx, dy);
       const min = ma.radius + mb.radius;
       if (d >= min) continue;
-      if (d < 1e-9) { dx = 1; dy = 0; d = 1; }
-      const nx = dx / d, ny = dy / d;
+      // Coincident centres: separate along +x, but keep d = 0 for the overlap.
+      const nx = d < 1e-9 ? 1 : dx / d, ny = d < 1e-9 ? 0 : dy / d;
       const closing = Math.max(0, (a.vel.x - b.vel.x) * nx + (a.vel.y - b.vel.y) * ny);
       const overlap = min - d;
       const total = ma.mass + mb.mass;

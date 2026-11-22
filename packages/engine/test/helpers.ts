@@ -3,7 +3,9 @@ import { SKATER_ATTRS, type SkaterAttrs } from '../src/attributes';
 import { DT } from '../src/constants';
 import { stepPuck } from '../src/puck';
 import type { Puck, PuckEvent } from '../src/puck';
-import type { GameSetup, TeamDef } from '../src/types';
+import type { GameSetup, PlayerDef, SkaterState, TeamDef } from '../src/types';
+import { movementOf, stepSkater } from '../src/skating';
+import type { Movement } from '../src/skating';
 
 export const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 
@@ -43,9 +45,6 @@ export function runUntilEvent(puck: Puck): PuckEvent & Partial<{ y: number; z: n
 }
 
 // ---- skating helpers ----
-import { movementOf, stepSkater } from '../src/skating';
-import type { Movement } from '../src/skating';
-import type { PlayerDef, SkaterState } from '../src/types';
 
 /** A PlayerDef with every attribute 70, overridable (attrs partially, top-level fields directly). */
 export function def(overrides: Partial<Omit<PlayerDef, 'attrs'>> & { [K in keyof SkaterAttrs]?: number } = {}): PlayerDef {

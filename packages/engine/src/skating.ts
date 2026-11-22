@@ -56,7 +56,6 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
         else if (Math.abs(wrapAngle(toFace - travel)) > BACKWARD_ANGLE) { backward = true; wantFacing = toFace; }
       }
     }
-    if (!hasGoal && !s.faceTarget) wantFacing = s.facing;
 
     // Turn, slower at speed.
     const maxTurn = (m.turnRate / (1 + speed / 6)) * dt;
