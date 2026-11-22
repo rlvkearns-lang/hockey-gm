@@ -387,6 +387,7 @@ export function resolveOnNet(
     resolveBoards(pk.pos, pk.vel, 0.05, 0);
     state.carrierId = null;
     state.lastTouch = { id: g.id, side: defSide };
+    state.icingWatch = null; // the goalie played it
     return 'save';
   }
 

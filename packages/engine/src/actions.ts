@@ -36,6 +36,7 @@ const MAX_TOUCHES = 6;
 
 /** `id` of `side` has the puck: a new team starts a new chain; a new player of the same team joins it. */
 export function recordTouch(state: GameState, id: string, side: Side): void {
+  state.icingWatch = null;
   const t = state.touches;
   state.lastAttackTouch[side] = id;
   if (t.side !== side) { t.side = side; t.ids.length = 0; t.ids.push(id); return; }
@@ -54,9 +55,14 @@ function skaterById(state: GameState, id: string): SkaterState {
   throw new Error(`no skater ${id}`);
 }
 
-/** The carrier lets the puck go with this velocity; it becomes loose and he cannot re-take it at once. */
+/**
+ * The carrier lets the puck go with this velocity; it becomes loose and he cannot re-take it at once. Released from
+ * his own half (behind the centre line), it is watched for icing until someone touches it.
+ */
 function release(state: GameState, from: SkaterState, vx: number, vy: number, vz: number): void {
   const p = state.puck;
+  state.icingWatch = p.pos.x * state.attackDir[from.side] < 0
+    ? { side: from.side, fromX: p.pos.x, fromY: p.pos.y, tick: state.tick } : null;
   p.vel.x = vx;
   p.vel.y = vy;
   p.z = 0;
@@ -66,6 +72,11 @@ function release(state: GameState, from: SkaterState, vx: number, vy: number, vz
   state.possession = from.side;
   state.pendingPass = null;
   blockPickup(state, [from.id]);
+}
+
+/** `fromId` (the carrier) lets the puck go with velocity (vx, vy, vz) m/s: the release behind every pass, shot and dump. */
+export function releasePuck(state: GameState, fromId: string, vx: number, vy: number, vz: number): void {
+  release(state, skaterById(state, fromId), vx, vy, vz);
 }
 
 const event = (state: GameState, e: Omit<GameEvent, 'tick' | 'period' | 'clock'>): GameEvent =>

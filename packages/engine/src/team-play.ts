@@ -1,6 +1,6 @@
 import { composite } from './attributes';
 import { DT } from './constants';
-import { RINK, resolveBoards, resolveNets, zoneOf } from './rink';
+import { clipToNets, RINK, resolveBoards, resolveNets, zoneOf } from './rink';
 import type { GameState, PlayerDef, Position, Side, SkaterState, Tactics } from './types';
 import { dist, hypot2, type Vec2 } from './vec';
 
@@ -17,6 +17,8 @@ const ONSIDE_MARGIN = 1;
 const ONSIDE_BRAKE = 6;
 /** Typical top speed (m/s), to turn a safe approach speed into a speedCap fraction. */
 const TYPICAL_TOP_SPEED = 9;
+/** Under a delayed offside, the offending team skates to this far (m) outside the blue line to tag up. */
+const TAG_UP_MARGIN = 1;
 /** Each cycle spot is held this long before the forwards rotate. */
 const CYCLE_TICKS = Math.round(5 / DT);
 const CYCLE: readonly OzoneSpot[] = ['corner', 'netFront', 'highSlot'];
@@ -30,6 +32,8 @@ const PRESS_GAP = 1.2;
 const MAX_LEAD_SECONDS = 1.2;
 /** Speed (m/s) used to estimate how long a chaser needs to reach the puck. */
 const CHASE_SPEED = 8;
+/** A chaser whose straight line to the puck passes within this far (m) of a net frame goes round the frame's corner. */
+const NET_ROUTE_MARGIN = 0.7;
 /** Targets stay this far (m) inside the boards and clear of the net frames. */
 const TARGET_BOARDS_MARGIN = 1;
 const TARGET_NET_MARGIN = 0.6;
@@ -179,12 +183,26 @@ function press(state: GameState, s: SkaterState, d: PlayerDef, carrier: SkaterSt
   s.speedCap = phase === 'forecheck' ? Math.min(1, FORECHECK_PRESS_CAP[tactic.forecheck] * (0.85 + 0.3 * d.tendencies.forecheck)) : 1;
 }
 
-/** Skate to where a loose puck will be, leading it by the time it takes to get there. */
+const routeProbe: Vec2 = { x: 0, y: 0 };
+
+/**
+ * Skate to where a loose puck will be, leading it by the time it takes to get there. With a net in the way he heads
+ * for the corner of the frame on his side and the puck's end of it first.
+ */
 function chase(state: GameState, s: SkaterState): void {
   const p = state.puck;
   const t = Math.min(MAX_LEAD_SECONDS, dist(s.pos, p.pos) / CHASE_SPEED);
   s.target.x = p.pos.x + p.vel.x * t;
   s.target.y = p.pos.y + p.vel.y * t;
+  routeProbe.x = s.target.x;
+  routeProbe.y = s.target.y;
+  clipToNets(s.pos, routeProbe, NET_ROUTE_MARGIN);
+  if (routeProbe.x !== s.target.x || routeProbe.y !== s.target.y) {
+    const end = s.target.x >= 0 ? 1 : -1;
+    const behind = s.target.x * end > RINK.goalLineX + RINK.netDepth / 2;
+    s.target.x = end * (behind ? RINK.goalLineX + RINK.netDepth + NET_ROUTE_MARGIN : RINK.goalLineX - NET_ROUTE_MARGIN);
+    s.target.y = (s.pos.y >= 0 ? 1 : -1) * (RINK.netHalfWidth + NET_ROUTE_MARGIN);
+  }
   s.faceTarget = null;
   s.speedCap = 1;
 }
@@ -193,12 +211,15 @@ const scratchVel: Vec2 = { x: 0, y: 0 };
 
 /**
  * Keep the target onside (an attacker without the puck never goes into the offensive zone ahead of it, and eases up
- * so he does not coast over the line; a chaser may follow the puck itself up to the line), inside the boards and clear
- * of the net frames.
+ * so he does not coast over the line; a chaser may follow the puck itself up to the line; under a delayed offside
+ * against his team he heads out over the blue line to tag up), inside the boards and clear of the net frames.
  */
-function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boolean): void {
+function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boolean, tagUp: boolean): void {
   const pr = state.puck.pos.x * dir;
-  if (pr < BLUE) {
+  if (tagUp) {
+    if (s.target.x * dir > BLUE - TAG_UP_MARGIN) s.target.x = (BLUE - TAG_UP_MARGIN) * dir;
+    s.speedCap = 1;
+  } else if (pr < BLUE) {
     const limit = chasing ? Math.max(BLUE - ONSIDE_MARGIN, Math.min(pr, BLUE)) : BLUE - ONSIDE_MARGIN;
     if (s.target.x * dir > limit) {
       s.target.x = limit * dir;
@@ -217,7 +238,8 @@ function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boole
  * speedCap belong to the brain (brainTick); here he only stops facing anything but his own way. Skaters in a
  * contest are left alone. With the puck carried, the nearest defender pressures the carrier; with it loose, the
  * nearest skater of each side chases it (a pass's intended receiver chases for his side) and the rest keep the shape
- * of the side that last had the puck.
+ * of the side that last had the puck. Under a delayed offside the offending team neither presses nor chases: all of
+ * it skates out of the zone.
  */
 export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tactics: Record<Side, Tactics>): void {
   const puck = state.puck.pos;
@@ -226,8 +248,9 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   let presser: SkaterState | null = null, pressD = Infinity;
   let homeChaser: SkaterState | null = null, homeD = Infinity;
   let awayChaser: SkaterState | null = null, awayD = Infinity;
+  const tagUp = state.delayedOffside?.side ?? null;
   for (const s of state.skaters) {
-    if (!s.onIce || s.downT > 0 || s.contestId !== null || s === carrier) continue;
+    if (!s.onIce || s.downT > 0 || s.contestId !== null || s === carrier || s.side === tagUp) continue;
     if (carrier) {
       if (s.side === carrier.side) continue;
       const d = dist(s.pos, carrier.pos);
@@ -242,7 +265,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   if (pass) {
     for (const s of state.skaters) {
       if (s.id !== pass.toId) continue;
-      if (s.onIce && s.downT === 0 && s.contestId === null) { if (s.side === 'home') homeChaser = s; else awayChaser = s; }
+      if (s.onIce && s.downT === 0 && s.contestId === null && s.side !== tagUp) { if (s.side === 'home') homeChaser = s; else awayChaser = s; }
       break;
     }
   }
@@ -259,6 +282,6 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
     if (s === presser) press(state, s, d, carrier!, phase, tactics[s.side]);
     else if (chasing) chase(state, s);
     else shape(state, s, d, phase, tactics[s.side], dir);
-    keepLegal(state, s, dir, chasing);
+    keepLegal(state, s, dir, chasing, s.side === tagUp);
   }
 }

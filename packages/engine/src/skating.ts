@@ -20,6 +20,9 @@ const DOWN_FRICTION = 2;
 /** Angle between travel and facing target beyond which he skates backward. */
 const BACKWARD_ANGLE = (100 * Math.PI) / 180;
 
+/** Body radius (m) of a skater of this weight. */
+export const bodyRadius = (weightKg: number): number => 0.38 + (weightKg - 85) * 0.002;
+
 export function movementOf(def: PlayerDef, energy: number): Movement {
   const a = def.attrs;
   const tired = energy >= 0.5 ? 1 : 0.85 + 0.15 * (Math.max(0, energy) / 0.5);
@@ -29,7 +32,7 @@ export function movementOf(def: PlayerDef, energy: number): Movement {
     turnRate: 2.2 + a.agility * 0.03,
     backwardFactor: 0.72 + a.agility * 0.0012,
     mass: def.weightKg + 9,
-    radius: 0.38 + (def.weightKg - 85) * 0.002,
+    radius: bodyRadius(def.weightKg),
   };
 }
 

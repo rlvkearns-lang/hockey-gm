@@ -153,6 +153,16 @@ export type GameState = {
   touches: { side: Side | null; ids: string[] };
   /** The last skater of each side to touch the puck since the last stoppage (credited with a goal the defenders put in). */
   lastAttackTouch: Record<Side, string | null>;
+  /** The side that iced the puck: it may not change lines before the next faceoff drop (set by an icing, cleared by dropPuck). */
+  noChange: Side | null;
+  /**
+   * Delayed offside against `side`: the puck went into its attacking zone with one of its skaters already wholly in it.
+   * Play goes on until that team touches the puck (whistle) or the puck leaves the zone or all of them leave it
+   * (waved off). `y` is where the puck went in, for the faceoff dot.
+   */
+  delayedOffside: { side: Side; y: number } | null;
+  /** A puck released by `side` from its own half at (fromX, fromY) on `tick`, untouched since: icing if it crosses the far goal line. */
+  icingWatch: { side: Side; fromX: number; fromY: number; tick: number } | null;
 };
 
 export type GameEventType =

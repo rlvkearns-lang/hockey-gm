@@ -78,7 +78,7 @@ function initialState(setup: GameSetup): GameState {
     goalies: { home: goalieAt(setup.home.lines.goalie, dir), away: goalieAt(setup.away.lines.goalie, dir === 1 ? -1 : 1) },
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [] },
-    lastAttackTouch: { home: null, away: null },
+    lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
   };
 }
 
@@ -241,7 +241,7 @@ export function createGame(setup: GameSetup): Game {
         }
       }
     }
-    const call = refereeTick(state, prevPuckX);
+    const call = refereeTick(state, prevPuckX, defs);
     if (call) events.push(call);
 
     for (const sk of skaters) bodyById.get(sk.id)!.toi += DT;

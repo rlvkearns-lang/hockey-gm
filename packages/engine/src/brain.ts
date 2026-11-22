@@ -2,6 +2,7 @@ import { executeDump, executePass, executeShot, goalieShade, pressureOn } from '
 import { composite } from './attributes';
 import { BRAIN_INTERVAL_TICKS } from './constants';
 import { RINK, zoneOf } from './rink';
+import { bodyRadius } from './skating';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, SkaterState } from './types';
 import { dist, hypot2, segDistXY, type Vec2 } from './vec';
@@ -26,11 +27,13 @@ const OPEN_NET_SHADE = 0.6;
 const MAX_SHARE = 0.97;
 /** Passes shorter or longer than this (m) are not considered. */
 const PASS_RANGE: [number, number] = [2.5, 35];
-/** Attack-relative x (m) from which dumping in is a full option (about the red line). */
-const DUMP_FROM = -3;
+/** A dump from his own half (behind the centre line) would be icing: its weight is scaled by this. */
+const ICING_DUMP = 0.25;
 /** How far ahead (m) a carrier aims each carry decision outside the offensive zone, and how far he swerves. */
 const CARRY_AHEAD = 8;
 const CARRY_SWERVE = 3;
+/** Outside the offensive zone with a teammate wholly in it, he carries no closer than this (m) to the blue line. */
+const HOLD_UP_GAP = 1;
 /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
 const PROTECT_STEP = 2;
 const PROTECT_SPEED_CAP = 0.4;
@@ -62,6 +65,8 @@ const laneValues: number[] = [];
  * (shoot, pass, carry, dump), then one is drawn in proportion to score. He sees only his best
  * 1 + floor(vision / 25) passing lanes, judged with an error that shrinks with IQ. Pressure lowers the score of
  * shooting, passing and carrying, less so for a poised player, and raises dumping and protecting.
+ * With the puck outside the offensive zone he keeps it onside: no pass to a teammate wholly in the zone, and while one
+ * is in there he holds up at the blue line instead of carrying in.
  */
 export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, rng: Rng): Decision {
   const s = skaterById(state, me.id);
@@ -90,8 +95,11 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   const noise = (100 - a.iq) * 0.004;
   laneIds.length = 0;
   laneValues.length = 0;
+  const outside = rx <= RINK.blueLineX;
+  let mateOffside = false;
   for (const t of state.skaters) {
     if (!t.onIce || t.side !== s.side || t === s || t.downT > 0) continue;
+    if (outside && t.pos.x * dir > RINK.blueLineX + bodyRadius(defs.get(t.id)!.weightKg)) { mateOffside = true; continue; }
     const l = dist(p, t.pos);
     if (l < PASS_RANGE[0] || l > PASS_RANGE[1]) continue;
     let laneMin = Infinity, recvMin = Infinity;
@@ -122,9 +130,10 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   const passSkill = WEIGHT.pass * skill(a.passing) * tend.pass * calm;
   const carryW = WEIGHT.carry * (0.25 + 0.75 * spaceAhead) * skill(a.puckHandling) * tend.carry * calm;
   const zone = zoneOf(p.x, dir);
-  // Dump in from about the red line on when the way ahead is closed; clear the own zone only under pressure.
-  const dumpW = WEIGHT.dump * tend.dump
-    * (zone === 'N' ? (1 - spaceAhead) * (rx > DUMP_FROM ? 1 : 0.3) : zone === 'D' ? 0.5 * pressure : 0);
+  // Dump in when the way ahead is closed; clear the own zone only under pressure. From his own half a dump would be
+  // icing, so there he would much rather pass or carry.
+  const dumpW = WEIGHT.dump * tend.dump * (rx < 0 ? ICING_DUMP : 1)
+    * (zone === 'N' ? 1 - spaceAhead : zone === 'D' ? 0.5 * pressure : 0);
   const protectW = WEIGHT.protect * (0.1 + pressure) * skill(composite(a, { puckHandling: 0.5, strength: 0.5 }));
 
   let total = shootW + carryW + dumpW + protectW;
@@ -139,7 +148,9 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   for (let i = 0; i < laneValues.length; i++) if ((r -= w(laneValues[i]! * passSkill)) < 0) return { kind: 'pass', toId: laneIds[i]! };
   if ((r -= w(dumpW)) < 0) return { kind: 'dump' };
   if ((r -= w(protectW)) < 0) return { kind: 'protect' };
-  return { kind: 'carry', to: carryTarget(rx, ly, zone, aheadLat, aheadD, dir) };
+  const to = carryTarget(rx, ly, zone, aheadLat, aheadD, dir);
+  if (mateOffside && to.x * dir > RINK.blueLineX - HOLD_UP_GAP) to.x = (RINK.blueLineX - HOLD_UP_GAP) * dir;
+  return { kind: 'carry', to };
 }
 
 /** Where to carry next: at the slot or across the net front in the offensive zone, else up ice away from a checker. */

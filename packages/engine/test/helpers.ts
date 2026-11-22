@@ -3,16 +3,17 @@ import { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from '
 import { DT } from '../src/constants';
 import { stepPuck } from '../src/puck';
 import type { Puck, PuckEvent } from '../src/puck';
-import type { GameEventType, GameResult, GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
+import type { GameEvent, GameEventType, GameResult, GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
 import { PLAYER_TYPES } from '../src/player-types';
-import { resolveBoards } from '../src/rink';
+import { RINK, resolveBoards } from '../src/rink';
 import { createRng } from '../src/rng';
 import { OZONE_SPOTS, ozoneSpotPos } from '../src/team-play';
 import { decideCarrier, type Decision } from '../src/brain';
-import { executePass } from '../src/actions';
+import { executeDump, executePass, releasePuck } from '../src/actions';
 import { createGame, type Game } from '../src/game';
 import { tryBlock } from '../src/goalie';
 import { movementOf, stepSkater } from '../src/skating';
+import { refereeTick } from '../src/referee';
 import type { Movement } from '../src/skating';
 
 export const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -198,6 +199,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     onIce: { home: SKATER_SLOTS.map((s) => skaterId('home', s)), away: SKATER_SLOTS.map((s) => skaterId('away', s)) },
     pickupBlock: null, pendingPass: null, shotInFlight: null, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [] }, lastAttackTouch: { home: null, away: null },
+    noChange: null, delayedOffside: null, icingWatch: null,
   };
 }
 
@@ -327,4 +329,127 @@ export function blockAttempt(d: PlayerDef): boolean {
   const ds = new Map(defs);
   ds.set(blocker.id, { ...d, id: blocker.id, position: 'LD' });
   return tryBlock(st, ds, createRng(++blockSeed));
+}
+
+// ---- referee helpers ----
+//
+// A referee harness: a stateWith() state stepped tick by tick with the real skating and puck physics and the real
+// refereeTick. Skaters skate to their targets (nobody runs a brain or team play), a carrier carries the puck in front
+// of him, a loose puck slides; nobody picks a loose puck up. Each state's referee calls are kept in a log.
+
+type PlayerRef = `${Side}:${SkaterSlot}`;
+
+const calls = new WeakMap<GameState, GameEvent[]>();
+const callsOf = (st: GameState): GameEvent[] => { let c = calls.get(st); if (!c) { c = []; calls.set(st, c); } return c; };
+const byRef = (st: GameState, ref: PlayerRef): SkaterState => { const [side, slot] = ref.split(':') as [Side, SkaterSlot]; return skater(st, side, slot); };
+const harnessMoves = new Map<string, Movement>([...defs].map(([id, d]) => [id, movementOf(d, 1)]));
+
+/** One tick of the referee harness. */
+function refereeStep(st: GameState): void {
+  const prevX = st.puck.pos.x;
+  st.tick++;
+  let carrier: SkaterState | null = null;
+  for (const s of st.skaters) {
+    if (!s.onIce) continue;
+    stepSkater(s, harnessMoves.get(s.id)!, DT);
+    if (s.id === st.carrierId) carrier = s;
+  }
+  const p = st.puck;
+  if (carrier) {
+    p.pos.x = carrier.pos.x + Math.cos(carrier.facing) * 0.6;
+    p.pos.y = carrier.pos.y + Math.sin(carrier.facing) * 0.6;
+    p.vel.x = carrier.vel.x; p.vel.y = carrier.vel.y;
+  } else stepPuck(p, DT);
+  const call = refereeTick(st, prevX, defs);
+  if (call) callsOf(st).push(call);
+}
+
+/** A live period-1 state (home attacks +x): `carrier` (e.g. 'home:C') holds the puck with his body at x = carrierX. */
+export function live(o: { carrier: PlayerRef; carrierX: number }): GameState {
+  const [side, slot] = o.carrier.split(':') as [Side, SkaterSlot];
+  const dir = side === 'home' ? 1 : -1;
+  const st = stateWith({ carrier: side, puckX: o.carrierX + dir * 0.6, carrierSlot: slot });
+  callsOf(st);
+  return st;
+}
+
+/** Put a skater, still, at (x, y). */
+export function place(st: GameState, ref: PlayerRef, x: number, y: number): void {
+  const s = byRef(st, ref);
+  s.pos = { x, y }; s.target = { x, y }; s.vel = { x: 0, y: 0 };
+}
+
+/** The carrier skates straight up ice (refereed every tick) until the puck is at x; then he lets up. */
+export function carryTo(st: GameState, x: number): void {
+  const c = st.skaters.find((s) => s.id === st.carrierId)!;
+  const dir = st.attackDir[c.side];
+  c.target = { x: dir * 40, y: c.pos.y };
+  for (let i = 0; i < 300 && st.puck.pos.x * dir < x * dir && st.phase === 'live'; i++) refereeStep(st);
+  c.target = { x: c.pos.x, y: c.pos.y };
+}
+
+/**
+ * The first offside or icing call on this state: one already made (during carryTo or a set-up), else the first in
+ * up to `ticks` more refereed ticks (stopping once play is stopped). Null if there is none.
+ */
+export function refereeUntilCall(st: GameState, ticks = 150): GameEvent | null {
+  const log = callsOf(st);
+  for (let i = 0; i < ticks && log.length === 0 && st.phase === 'live'; i++) refereeStep(st);
+  return log[0] ?? null;
+}
+
+/** The home left winger, waiting wholly inside the offensive zone. */
+export const offsideWinger = (): { ref: PlayerRef; x: number; y: number } => ({ ref: 'home:LW', x: 12, y: 7 });
+
+/**
+ * Home C dumps the puck in from the neutral zone (x 3) with `w` standing in the zone; refereed until the puck is fully
+ * over the blue line (so the delayed offside is on).
+ */
+export function dumpedInWith(w: { ref: PlayerRef; x: number; y: number }): GameState {
+  const st = live({ carrier: 'home:C', carrierX: 3 });
+  place(st, w.ref, w.x, w.y);
+  executeDump(st, st.carrierId!, defs, createRng(3));
+  for (let i = 0; i < 60 && st.puck.pos.x < RINK.blueLineX + 0.05; i++) refereeStep(st);
+  return st;
+}
+
+/** The skater heads straight back out over the blue line (to 3 m outside it). */
+export function moveOut(st: GameState, ref: PlayerRef): void {
+  const s = byRef(st, ref);
+  const dir = st.attackDir[s.side];
+  s.target = { x: dir * (RINK.blueLineX - 3), y: s.pos.y };
+  s.faceTarget = null;
+  s.speedCap = 1;
+}
+
+/** The carrier dumps the puck down the ice (the real executeDump). */
+export function shootDownIce(st: GameState): void {
+  executeDump(st, st.carrierId!, defs, createRng(1));
+}
+
+/**
+ * Home LD fires the puck from x at 25 m/s toward the far goal line: at the middle of the net (`onNet`) or 6 m wide of it.
+ * Everyone else stands in stateWith's formation.
+ */
+export function shotFrom(x: number, o: { onNet?: boolean } = {}): GameState {
+  const st = live({ carrier: 'home:LD', carrierX: x });
+  const p = st.puck.pos;
+  const tx = RINK.goalLineX, ty = o.onNet ? 0 : 6;
+  const l = Math.hypot(tx - p.x, ty - p.y);
+  releasePuck(st, st.carrierId!, ((tx - p.x) / l) * 25, ((ty - p.y) / l) * 25, 0);
+  return st;
+}
+
+/**
+ * The icing call (or null) as the shot in `st` plays out. With `attackerAhead`, a home forward is already racing
+ * for the puck deep in the zone (at x 19, skating for the end boards) when it goes.
+ */
+export function icingAfter(st: GameState, o: { attackerAhead?: boolean } = {}): GameEvent | null {
+  if (o.attackerAhead) {
+    place(st, 'home:LW', 19, 6);
+    const lw = byRef(st, 'home:LW');
+    lw.vel = { x: 7, y: 0 }; lw.facing = 0; lw.target = { x: 28, y: 6 };
+  }
+  const call = refereeUntilCall(st);
+  return call !== null && call.type === 'icing' ? call : null;
 }
