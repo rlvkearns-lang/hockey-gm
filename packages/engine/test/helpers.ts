@@ -3,7 +3,8 @@ import { SKATER_ATTRS, type SkaterAttrs } from '../src/attributes';
 import { DT } from '../src/constants';
 import { stepPuck } from '../src/puck';
 import type { Puck, PuckEvent } from '../src/puck';
-import type { GameSetup, PlayerDef, SkaterState, TeamDef } from '../src/types';
+import type { GameSetup, PlayerDef, Side, SkaterState, TeamDef } from '../src/types';
+import type { Game } from '../src/game';
 import { movementOf, stepSkater } from '../src/skating';
 import type { Movement } from '../src/skating';
 
@@ -107,4 +108,24 @@ export function backwardSpeedAfter(seconds: number): number {
 /** A Movement for a player of the given weight. */
 export function mv(weightKg: number): Movement {
   return movementOf(def({ weightKg }), 1);
+}
+
+// ---- game helpers ----
+
+export const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
+
+/** The two generated teams game tests play with (HBR v NGT). */
+export function gameSetup(seed = 1): GameSetup {
+  return { home: generateTeam(1, 'Harbour City', 'HBR'), away: generateTeam(2, 'Northgate', 'NGT'), seed, chemistry: [] };
+}
+
+/** Filter for result player lines: skaters (not goalies) of the given side in `setup` (default gameSetup()). */
+export function isSkaterOf(side: Side, setup: GameSetup = gameSetup()): (p: { id: string }) => boolean {
+  const ids = new Set(setup[side].players.filter((p) => p.position !== 'G').map((p) => p.id));
+  return (p) => ids.has(p.id);
+}
+
+/** Step until the game is in period n (or over). */
+export function runToPeriod(game: Game, n: number): void {
+  while (!game.done && game.state.period < n) game.step();
 }

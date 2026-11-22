@@ -10,3 +10,6 @@ export * from './rink';
 export * from './puck';
 export * from './skating';
 export * from './bodies';
+export * from './faceoff';
+export * from './stats';
+export * from './game';
