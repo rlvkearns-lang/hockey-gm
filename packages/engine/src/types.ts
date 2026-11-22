@@ -128,6 +128,8 @@ export type GameState = {
   onIce: { home: string[]; away: string[] };
   /** Players who just released the puck and may not pick it up before tick `untilTick`. */
   pickupBlock: { ids: string[]; untilTick: number } | null;
+  /** A pass on its way: its intended receiver skates onto it and may take it at any speed until tick `untilTick`. */
+  pendingPass: { fromId: string; toId: string; untilTick: number } | null;
 };
 
 export type GameEventType =

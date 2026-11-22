@@ -11,5 +11,8 @@ export * from './puck';
 export * from './skating';
 export * from './bodies';
 export * from './faceoff';
+export * from './team-play';
+export * from './brain';
+export * from './actions';
 export * from './stats';
 export * from './game';

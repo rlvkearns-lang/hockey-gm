@@ -30,6 +30,14 @@ export const rotate = (a: Vec2, angle: number): Vec2 => {
 };
 export const angleOf = (a: Vec2): number => Math.atan2(a.y, a.x);
 
+/** Shortest distance from point (px, py) to segment (ax, ay)-(bx, by); allocation-free. */
+export function segDistXY(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const abx = bx - ax, aby = by - ay;
+  const l2 = abx * abx + aby * aby;
+  const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / l2));
+  return hypot2(px - (ax + abx * t), py - (ay + aby * t));
+}
+
 /** Shortest distance from point p to segment a-b. */
 export const segDist = (p: Vec2, a: Vec2, b: Vec2): number => {
   const ab = sub(b, a);

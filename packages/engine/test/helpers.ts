@@ -3,7 +3,13 @@ import { SKATER_ATTRS, type SkaterAttrs } from '../src/attributes';
 import { DT } from '../src/constants';
 import { stepPuck } from '../src/puck';
 import type { Puck, PuckEvent } from '../src/puck';
-import type { GameSetup, PlayerDef, Side, SkaterState, TeamDef } from '../src/types';
+import type { GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
+import { PLAYER_TYPES } from '../src/player-types';
+import { resolveBoards } from '../src/rink';
+import { createRng } from '../src/rng';
+import { OZONE_SPOTS, ozoneSpotPos } from '../src/team-play';
+import { decideCarrier, type Decision } from '../src/brain';
+import { executePass } from '../src/actions';
 import type { Game } from '../src/game';
 import { movementOf, stepSkater } from '../src/skating';
 import type { Movement } from '../src/skating';
@@ -128,4 +134,142 @@ export function isSkaterOf(side: Side, setup: GameSetup = gameSetup()): (p: { id
 /** Step until the game is in period n (or over). */
 export function runToPeriod(game: Game, n: number): void {
   while (!game.done && game.state.period < n) game.step();
+}
+
+// ---- team play and brain helpers ----
+
+const SKATER_SLOTS = ['LW', 'C', 'RW', 'LD', 'RD'] as const;
+type SkaterSlot = (typeof SKATER_SLOTS)[number];
+/** Where stateWith puts each non-carrier, relative to the puck: metres back toward his own net, and to his left. */
+const FORMATION: Record<SkaterSlot, { back: number; left: number }> = {
+  C: { back: 1.5, left: 0 }, LW: { back: 2, left: 6 }, RW: { back: 2, left: -6 }, LD: { back: 6, left: 3 }, RD: { back: 6, left: -3 },
+};
+
+const skaterId = (side: Side, slot: SkaterSlot): string => `${side}-${slot}`;
+
+/** Every attribute 70 for the ten skaters stateWith puts on the ice, keyed by id. */
+export const defs: Map<string, PlayerDef> = new Map(
+  (['home', 'away'] as const).flatMap((side) => SKATER_SLOTS.map((slot) => {
+    const id = skaterId(side, slot);
+    return [id, def({ id, position: slot })] as [string, PlayerDef];
+  })),
+);
+
+export const tactics: Record<Side, Tactics> = {
+  home: { forecheck: 'balanced', shiftSeconds: { forwards: 45, defence: 50 } },
+  away: { forecheck: 'balanced', shiftSeconds: { forwards: 45, defence: 50 } },
+};
+
+/**
+ * A live period-1 state (home attacks +x) with five skaters a side around a puck at (puckX, puckY).
+ * The carrier (default his team's RW) holds the puck facing his attack direction; everyone else stands in a
+ * loose formation between the puck and his own net, still, facing up ice.
+ */
+export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: number; carrierSlot?: SkaterSlot }): GameState {
+  const puckY = o.puckY ?? 0;
+  const carrierSlot = o.carrierSlot ?? 'RW';
+  const attackDir = { home: 1 as const, away: -1 as const };
+  const skaters: SkaterState[] = [];
+  for (const side of ['home', 'away'] as const) {
+    const dir = attackDir[side];
+    for (const slot of SKATER_SLOTS) {
+      const carrying = o.carrier === side && slot === carrierSlot;
+      const f = FORMATION[slot];
+      const pos = carrying ? { x: o.puckX - dir * 0.6, y: puckY } : { x: o.puckX - dir * f.back, y: puckY + dir * f.left };
+      resolveBoards(pos, { x: 0, y: 0 }, 0.5, 0);
+      skaters.push({
+        id: skaterId(side, slot), side, slot, pos, vel: { x: 0, y: 0 }, facing: dir === 1 ? 0 : Math.PI,
+        target: { x: pos.x, y: pos.y }, faceTarget: null, speedCap: 1, energy: 1, onIce: true, leaving: false,
+        downT: 0, contestId: null, shiftStart: 0,
+      });
+    }
+  }
+  const carrierId = o.carrier === null ? null : skaterId(o.carrier, carrierSlot);
+  return {
+    tick: 0, period: 1, clock: 1200, phase: 'live', phaseT: 0, attackDir,
+    puck: { pos: { x: o.puckX, y: puckY }, z: 0, vel: { x: 0, y: 0 }, vz: 0 },
+    carrierId, lastTouch: o.carrier === null ? null : { id: carrierId!, side: o.carrier }, possession: o.carrier, skaters,
+    goalies: {
+      home: { id: 'home-G', pos: { x: -26.5, y: 0 }, facing: 0, pose: 'stance', poseT: 0 },
+      away: { id: 'away-G', pos: { x: 26.5, y: 0 }, facing: Math.PI, pose: 'stance', poseT: 0 },
+    },
+    contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 },
+    onIce: { home: SKATER_SLOTS.map((s) => skaterId('home', s)), away: SKATER_SLOTS.map((s) => skaterId('away', s)) },
+    pickupBlock: null, pendingPass: null,
+  };
+}
+
+export function skater(state: GameState, side: Side, slot: SkaterSlot): SkaterState {
+  const s = state.skaters.find((k) => k.onIce && k.side === side && k.slot === slot);
+  if (!s) throw new Error(`no ${side} ${slot} on the ice`);
+  return s;
+}
+
+export const onIce = (state: GameState, side: Side): SkaterState[] => state.skaters.filter((s) => s.onIce && s.side === side);
+
+/** Which offensive-zone spot (corner, netFront, highSlot, point) the skater's target is nearest to. */
+export function spotName(state: GameState, side: Side, slot: SkaterSlot): string {
+  const t = skater(state, side, slot).target;
+  let best = '', bestD = Infinity;
+  for (const spot of OZONE_SPOTS) {
+    const p = ozoneSpotPos(state, side, spot, { x: 0, y: 0 });
+    const d = Math.hypot(p.x - t.x, p.y - t.y);
+    if (d < bestD) { bestD = d; best = spot === 'leftPoint' || spot === 'rightPoint' ? 'point' : spot; }
+  }
+  return best;
+}
+
+/** A shoot-first winger: Sniper tendencies and shooting attributes. */
+export const sniper: PlayerDef = def({
+  type: 'Sniper', tendencies: PLAYER_TYPES.Sniper!.tendencies, shootingAccuracy: 90, shootingPower: 85, passing: 62, vision: 60,
+});
+/** A pass-first centre: Playmaker tendencies and passing attributes. */
+export const playmaker: PlayerDef = def({
+  type: 'Playmaker', tendencies: PLAYER_TYPES.Playmaker!.tendencies, shootingAccuracy: 62, shootingPower: 60, passing: 90, vision: 90,
+});
+
+/**
+ * Home C with the puck in the slot (about 8 m out), teammates in the corner, at the net and on the points,
+ * defenders around the net and covering the points; the nearest defender about 5 m away.
+ */
+export const slotState: GameState = (() => {
+  const st = stateWith({ carrier: 'home', puckX: 19.6, puckY: 1, carrierSlot: 'C' });
+  const put = (side: Side, slot: SkaterSlot, x: number, y: number): void => { const s = skater(st, side, slot); s.pos = { x, y }; s.target = { x, y }; };
+  put('home', 'LW', 24, 7); put('home', 'RW', 24.5, -1); put('home', 'LD', 9, 8); put('home', 'RD', 9, -8);
+  put('away', 'LD', 23.5, -1.5); put('away', 'RD', 22, 6); put('away', 'C', 21, -4); put('away', 'LW', 11, 7); put('away', 'RW', 11, -7);
+  return st;
+})();
+
+/** Share of `kind` among 2,000 decideCarrier draws (seeds 1..2000) with `d` as the carrier in `state`. */
+export function rate(kind: Decision['kind'], d: PlayerDef, state: GameState): number {
+  const id = state.carrierId!;
+  const carrier = state.skaters.find((s) => s.id === id)!;
+  const me = { ...d, id, position: carrier.slot ?? d.position };
+  const ds = new Map(defs);
+  ds.set(id, me);
+  let n = 0;
+  for (let seed = 1; seed <= 2000; seed++) if (decideCarrier(state, me, ds, createRng(seed)).kind === kind) n++;
+  return n / 2000;
+}
+
+/**
+ * Mean lateral miss (m) at the receiver of 400 passes (seeds 1..400) by `d` to a still teammate 15 m away,
+ * with no opponent near either of them.
+ */
+export function meanMiss(d: PlayerDef): number {
+  let total = 0;
+  for (let seed = 1; seed <= 400; seed++) {
+    const st = stateWith({ carrier: 'home', puckX: -5, carrierSlot: 'C' });
+    for (const s of onIce(st, 'away')) { s.pos = { x: 25, y: s.pos.y }; s.target = { ...s.pos }; }
+    const receiver = skater(st, 'home', 'LW');
+    receiver.pos = { x: st.puck.pos.x + 15, y: 0 };
+    const ds = new Map(defs);
+    ds.set('home-C', { ...d, id: 'home-C', position: 'C' });
+    const from = { ...st.puck.pos };
+    executePass(st, 'home-C', receiver.id, ds, createRng(seed));
+    const v = st.puck.vel, sp = Math.hypot(v.x, v.y);
+    const rx = receiver.pos.x - from.x, ry = receiver.pos.y - from.y;
+    total += Math.abs(rx * v.y - ry * v.x) / sp; // distance from the receiver to the puck's line
+  }
+  return total / 400;
 }

@@ -1,3 +1,4 @@
+import { blockPickup } from './actions';
 import { benchTick } from './bench';
 import { resolveBodies } from './bodies';
 import { brainTick } from './brain';
@@ -10,14 +11,13 @@ import { refereeTick } from './referee';
 import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './rink';
 import { createRng } from './rng';
 import { movementOf, stepSkater, type Movement } from './skating';
-import { standInPlay } from './stand-in';
 import { buildResult } from './stats';
 import { assignJobs } from './team-play';
 import type {
   GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
 } from './types';
 import { validateSetup } from './validate';
-import { dist, hypot2 } from './vec';
+import { dist, hypot2, segDistXY } from './vec';
 
 export type Game = {
   readonly state: GameState;
@@ -33,14 +33,13 @@ const PERIOD_TICKS = Math.round(PERIOD_SECONDS / DT);
 const STOPPED_SECONDS = 1.5;
 const PICKUP_RADIUS = 0.9;
 const PICKUP_MAX_SPEED = 12;
-/** After a release (draw, shot), the releasing players cannot pick the puck up again for this long. */
-const RELEASE_NO_PICKUP_SECONDS = 0.3;
 /** How far ahead of the carrier's centre, along his facing, the puck sits. */
 const CARRY_REACH = 0.6;
 const PUCK_RADIUS = 0.05;
 const EPS = 1e-9;
 /** Scratch velocity for clamping the carried puck (its velocity is the carrier's, not bounced). */
 const noVel = { x: 0, y: 0 };
+const NO_IDS: string[] = [];
 /** Where off-ice skaters wait. */
 const BENCH: Record<Side, { x: number; y: number }> = { home: { x: -7, y: -12.2 }, away: { x: 7, y: -12.2 } };
 
@@ -77,7 +76,7 @@ function initialState(setup: GameSetup): GameState {
     puck: { pos: { x: 0, y: 0 }, z: 0, vel: { x: 0, y: 0 }, vz: 0 },
     carrierId: null, lastTouch: null, possession: null, skaters,
     goalies: { home: goalieAt(setup.home.lines.goalie, dir), away: goalieAt(setup.away.lines.goalie, dir === 1 ? -1 : 1) },
-    contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null,
+    contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
   };
 }
 
@@ -91,6 +90,7 @@ function startPeriod(state: GameState, period: number): void {
   state.goalies.away = goalieAt(state.goalies.away.id, state.attackDir.away);
   state.lastTouch = null;
   state.pickupBlock = null;
+  state.pendingPass = null;
   restPuck(state);
   setupFaceoff(state, FACEOFF_DOTS.centre);
 }
@@ -123,6 +123,8 @@ export function createGame(setup: GameSetup): Game {
   const move = (id: string): Movement => bodyById.get(id)!.move;
   /** On-ice skaters, refilled in place each tick. */
   const onIceList: SkaterState[] = [];
+  /** Loose puck position before this tick's step (scratch). */
+  const prevPuck = { x: 0, y: 0 };
   const onIceSkaters = (): SkaterState[] => {
     onIceList.length = 0;
     const all = state.skaters;
@@ -143,9 +145,6 @@ export function createGame(setup: GameSetup): Game {
 
   const emit = (e: Omit<GameEvent, 'tick' | 'period' | 'clock'>): void => {
     events.push({ tick: state.tick, period: state.period, clock: state.clock, ...e });
-  };
-  const blockPickup = (ids: string[]): void => {
-    state.pickupBlock = { ids, untilTick: state.tick + Math.round(RELEASE_NO_PICKUP_SECONDS / DT) };
   };
 
   /** Movement, body separation, boards and net frames for every on-ice skater. */
@@ -181,19 +180,33 @@ export function createGame(setup: GameSetup): Game {
     resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);
   }
 
-  function tryPickup(skaters: SkaterState[]): void {
+  /**
+   * A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater within PICKUP_RADIUS. A pass's
+   * intended receiver takes it at any speed if it came within PICKUP_RADIUS of him this tick (from `prev` to now).
+   */
+  function tryPickup(skaters: SkaterState[], prev: { x: number; y: number }): void {
     const p = state.puck;
-    if (hypot2(p.vel.x, p.vel.y) >= PICKUP_MAX_SPEED) return;
     const block = state.pickupBlock;
-    const blocked = block !== null && state.tick < block.untilTick ? block.ids : [];
+    const blocked = block !== null && state.tick < block.untilTick ? block.ids : NO_IDS;
     let best: SkaterState | null = null;
-    let bestD = PICKUP_RADIUS;
-    for (const s of skaters) {
-      if (s.downT > 0 || blocked.includes(s.id)) continue;
-      const d = dist(s.pos, p.pos);
-      if (d <= bestD) { bestD = d; best = s; }
+    const pass = state.pendingPass;
+    if (pass !== null) {
+      for (const s of skaters) {
+        if (s.id !== pass.toId) continue;
+        if (s.downT === 0 && !blocked.includes(s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
+        break;
+      }
+    }
+    if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
+      let bestD = PICKUP_RADIUS;
+      for (const s of skaters) {
+        if (s.downT > 0 || blocked.includes(s.id)) continue;
+        const d = dist(s.pos, p.pos);
+        if (d <= bestD) { bestD = d; best = s; }
+      }
     }
     if (!best) return;
+    state.pendingPass = null;
     state.carrierId = best.id;
     state.lastTouch = { id: best.id, side: best.side };
     state.possession = best.side;
@@ -206,6 +219,7 @@ export function createGame(setup: GameSetup): Game {
     state.carrierId = null;
     state.possession = null;
     state.pickupBlock = null;
+    state.pendingPass = null;
     restPuck(state);
     state.faceoffSpot = { ...FACEOFF_DOTS.centre };
     headForLineup(state);
@@ -214,11 +228,11 @@ export function createGame(setup: GameSetup): Game {
   function liveTick(): void {
     const prevPuckX = state.puck.pos.x;
     if (state.pickupBlock !== null && state.tick >= state.pickupBlock.untilTick) state.pickupBlock = null;
+    if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
     benchTick(state, setup, rng, DT);
     assignJobs(state, defs, tactics);
-    brainTick(state, defs, rng);
-    const shooter = standInPlay(state, rng);
-    if (shooter !== null) blockPickup([shooter]);
+    const action = brainTick(state, defs, rng);
+    if (action) events.push(action);
     contestTick(state, defs, rng, DT);
 
     const skaters = onIceSkaters();
@@ -232,9 +246,11 @@ export function createGame(setup: GameSetup): Game {
       carryPuck(carrier);
     } else {
       state.carrierId = null;
+      prevPuck.x = state.puck.pos.x;
+      prevPuck.y = state.puck.pos.y;
       for (const ev of stepPuck(state.puck, DT)) if (ev.kind === 'onNet') onNet = true;
       // Task 7 turns onNet into a save or a goal; until then it is a whistle with a centre-ice draw.
-      if (!onNet) tryPickup(skaters);
+      if (!onNet) tryPickup(skaters, prevPuck);
     }
     const call = refereeTick(state, prevPuckX);
     if (call) events.push(call);
@@ -248,6 +264,7 @@ export function createGame(setup: GameSetup): Game {
       state.carrierId = null;
       state.possession = null;
       state.pickupBlock = null;
+      state.pendingPass = null;
       restPuck(state);
       state.phase = state.period >= PERIODS ? 'final' : 'intermission';
       state.phaseT = 0;
@@ -274,7 +291,7 @@ export function createGame(setup: GameSetup): Game {
           const e = dropPuck(state, defs, rng);
           events.push(e);
           const ids = [e.playerId, e.otherId].filter((id): id is string => id !== null);
-          blockPickup(ids);
+          blockPickup(state, ids);
         }
         break;
       case 'intermission':
