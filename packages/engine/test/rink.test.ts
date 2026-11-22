@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { zoneOf, resolveBoards, FACEOFF_DOTS, RINK } from '../src/rink';
+import { zoneOf, resolveBoards, resolveNets, clipToNets, FACEOFF_DOTS, RINK } from '../src/rink';
 
 describe('rink', () => {
   it('zoneOf follows the attack direction', () => {
@@ -23,5 +23,20 @@ describe('rink', () => {
     expect(FACEOFF_DOTS.centre).toEqual({ x: 0, y: 0 });
     expect(FACEOFF_DOTS.neutral).toHaveLength(4);
     expect(FACEOFF_DOTS.end).toHaveLength(4);
+  });
+});
+
+describe('net frames', () => {
+  it('a puck reached from behind the net stops on the back face, not through the frame', () => {
+    const to = { x: 27.9, y: 0.1 }; clipToNets({ x: 28.7, y: 0.1 }, to, 0.05);
+    expect(to.x).toBeCloseTo(RINK.goalLineX + RINK.netDepth + 0.05, 9); expect(to.y).toBeCloseTo(0.1, 9);
+  });
+  it('a segment that misses both nets is unchanged', () => {
+    const to = { x: 27.5, y: 2 }; clipToNets({ x: 27, y: 2 }, to, 0.05); expect(to).toEqual({ x: 27.5, y: 2 });
+  });
+  it('a body pushing into a net leaves through the face it entered, with no velocity into it', () => {
+    const pos = { x: -(RINK.goalLineX + RINK.netDepth + 0.3), y: 0 }, vel = { x: 3, y: 0 };
+    resolveNets(pos, vel, 0.4);
+    expect(pos.x).toBeCloseTo(-(RINK.goalLineX + RINK.netDepth + 0.4), 9); expect(vel.x).toBe(0);
   });
 });

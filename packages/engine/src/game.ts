@@ -7,7 +7,7 @@ import { dropPuck, FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, headForLineup, line
 import { goalieTick } from './goalie';
 import { stepPuck } from './puck';
 import { refereeTick } from './referee';
-import { FACEOFF_DOTS, RINK, resolveBoards } from './rink';
+import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './rink';
 import { createRng } from './rng';
 import { movementOf, stepSkater, type Movement } from './skating';
 import { standInPlay } from './stand-in';
@@ -104,22 +104,6 @@ function restPuck(state: GameState): void {
   p.vz = 0;
 }
 
-/** Back/front/side faces of each net, with a puck radius spare, for keeping a carried puck out of the frame. */
-const NET_FRONT_X = RINK.goalLineX - PUCK_RADIUS;
-const NET_BACK_X = RINK.goalLineX + RINK.netDepth + PUCK_RADIUS;
-const NET_SIDE_Y = RINK.netHalfWidth + PUCK_RADIUS;
-
-/** If pos is inside a net (behind the goal line, between the posts, within the depth), move it to the nearest point outside. */
-function keepOutOfNet(pos: { x: number; y: number }): void {
-  const end = pos.x >= 0 ? 1 : -1;
-  const rx = pos.x * end;
-  if (rx <= RINK.goalLineX || rx >= RINK.goalLineX + RINK.netDepth || Math.abs(pos.y) >= RINK.netHalfWidth) return;
-  const toFront = rx - NET_FRONT_X, toBack = NET_BACK_X - rx, toSide = NET_SIDE_Y - Math.abs(pos.y);
-  if (toFront <= toBack && toFront <= toSide) pos.x = end * NET_FRONT_X;
-  else if (toBack <= toSide) pos.x = end * NET_BACK_X;
-  else pos.y = (pos.y >= 0 ? 1 : -1) * NET_SIDE_Y;
-}
-
 export function createGame(setup: GameSetup): Game {
   validateSetup(setup);
   const rng = createRng(setup.seed);
@@ -164,11 +148,15 @@ export function createGame(setup: GameSetup): Game {
     state.pickupBlock = { ids, untilTick: state.tick + Math.round(RELEASE_NO_PICKUP_SECONDS / DT) };
   };
 
-  /** Movement, body separation and boards for every on-ice skater. */
+  /** Movement, body separation, boards and net frames for every on-ice skater. */
   function moveSkaters(skaters: SkaterState[]): void {
     stepSkaters(skaters);
     resolveBodies(skaters, move);
-    for (const s of skaters) resolveBoards(s.pos, s.vel, move(s.id).radius, 0);
+    for (const s of skaters) {
+      const r = move(s.id).radius;
+      resolveBoards(s.pos, s.vel, r, 0);
+      resolveNets(s.pos, s.vel, r);
+    }
   }
 
   function stepSkaters(skaters: SkaterState[]): void {
@@ -186,7 +174,8 @@ export function createGame(setup: GameSetup): Game {
     p.vel.y = carrier.vel.y;
     p.z = 0;
     p.vz = 0;
-    keepOutOfNet(p.pos);
+    // The puck stays on the carrier's side of a net frame (his body is kept out of the frame by resolveNets).
+    clipToNets(carrier.pos, p.pos, PUCK_RADIUS);
     noVel.x = 0;
     noVel.y = 0;
     resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);

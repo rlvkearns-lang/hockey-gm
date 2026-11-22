@@ -70,3 +70,61 @@ export function resolveBoards(pos: Vec2, vel: Vec2, radius: number, restitution:
   else if (pos.y < -ly) { pos.y = -ly; if (vel.y < 0) { vel.y = -vel.y * restitution; hit = true; } }
   return hit;
 }
+
+const NET_BACK = RINK.goalLineX + RINK.netDepth;
+
+/**
+ * Keep a circular body out of both net frames (the box from the goal line to the back of the net, between the posts),
+ * grown by its radius. It is pushed out through the nearest face (it can only enter a few cm per tick, so that is the
+ * face it came through) and its velocity into that face is removed. Mutates pos and vel.
+ */
+export function resolveNets(pos: Vec2, vel: Vec2, radius: number): void {
+  const end = pos.x >= 0 ? 1 : -1;
+  const rx = pos.x * end;
+  const front = RINK.goalLineX - radius, back = NET_BACK + radius, side = RINK.netHalfWidth + radius;
+  if (rx <= front || rx >= back || Math.abs(pos.y) >= side) return;
+  const toFront = rx - front, toBack = back - rx, toSide = side - Math.abs(pos.y);
+  if (toFront <= toBack && toFront <= toSide) {
+    pos.x = end * front;
+    if (vel.x * end > 0) vel.x = 0;
+  } else if (toBack <= toSide) {
+    pos.x = end * back;
+    if (vel.x * end < 0) vel.x = 0;
+  } else {
+    const sy = pos.y >= 0 ? 1 : -1;
+    pos.y = sy * side;
+    if (vel.y * sy < 0) vel.y = 0;
+  }
+}
+
+/**
+ * Move `to` back along the segment from `from` to the first point where the segment meets a net frame grown by
+ * `margin`, so whatever sits at `to` stays on the `from` side of the frame. `from` must be outside the grown frame.
+ * No change when the segment misses both nets. Mutates `to`.
+ */
+export function clipToNets(from: Vec2, to: Vec2, margin: number): void {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  for (const end of [1, -1] as const) {
+    // Slab test against the grown box for this end.
+    const x0 = end === 1 ? RINK.goalLineX - margin : -NET_BACK - margin;
+    const x1 = end === 1 ? NET_BACK + margin : -RINK.goalLineX + margin;
+    const y0 = -RINK.netHalfWidth - margin, y1 = RINK.netHalfWidth + margin;
+    let tIn = 0, tOut = 1;
+    if (dx === 0) { if (from.x <= x0 || from.x >= x1) continue; }
+    else {
+      let a = (x0 - from.x) / dx, b = (x1 - from.x) / dx;
+      if (a > b) [a, b] = [b, a];
+      tIn = Math.max(tIn, a); tOut = Math.min(tOut, b);
+    }
+    if (dy === 0) { if (from.y <= y0 || from.y >= y1) continue; }
+    else {
+      let a = (y0 - from.y) / dy, b = (y1 - from.y) / dy;
+      if (a > b) [a, b] = [b, a];
+      tIn = Math.max(tIn, a); tOut = Math.min(tOut, b);
+    }
+    if (tIn >= tOut) continue;
+    to.x = from.x + dx * tIn;
+    to.y = from.y + dy * tIn;
+    return;
+  }
+}
