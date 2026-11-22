@@ -1,0 +1,652 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Shift Prototype</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: one broadcast frame on top, controls under it, the two benches' on-ice units side by side below. */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --fg:#141b24; --muted:#5b6777; --line:#d3dae2;
+  --home:#12305c; --away:#a3202c; --accent:#0b6fb8; --gold:#e0a526;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Barlow","Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --bg:#0d1218; --panel:#161d26; --fg:#e8edf3; --muted:#93a0b0; --line:#2a3542; --home:#3f73c4; --away:#d8505b; --accent:#58b0ee; --gold:#f0bd4a; color-scheme:dark }
+}
+:root[data-theme="dark"]{ --bg:#0d1218; --panel:#161d26; --fg:#e8edf3; --muted:#93a0b0; --line:#2a3542; --home:#3f73c4; --away:#d8505b; --accent:#58b0ee; --gold:#f0bd4a; color-scheme:dark }
+
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.45}
+.wrap{max-width:1180px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px}
+h1{font-family:var(--display);font-weight:700;font-size:30px;letter-spacing:.02em;text-transform:uppercase;margin:0}
+.sub{margin:0;color:var(--muted)}
+.tag{font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--bg);background:var(--gold);padding:1px 8px;border-radius:2px}
+
+.stage{position:relative;width:100%;max-width:100%;aspect-ratio:16/9;background:#0a0e14;border-radius:6px;overflow:hidden}
+@media (max-width:560px){.stage{aspect-ratio:4/3}}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+/* Overlays sit on the always-dark arena, so they use fixed broadcast colours on their own dark plates. */
+.bug{position:absolute;top:10px;left:10px;display:flex;align-items:stretch;font-family:var(--display);font-weight:700;font-size:20px;color:#fff;font-variant-numeric:tabular-nums;border-radius:3px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.45)}
+.bug span{display:flex;align-items:center;padding:3px 10px;background:#10161f}
+.bug .t-home{background:#12305c}.bug .t-away{background:#a3202c}
+.bug .sc{background:#f4f6f8;color:#10161f;min-width:16px;justify-content:center}
+.bug .clk{font-weight:600;font-size:17px;color:#f0bd4a}
+.bug .sog{font-weight:500;font-size:14px;color:#b8c3d0;letter-spacing:.04em}
+.ticker{position:absolute;left:10px;bottom:10px;max-width:calc(100% - 20px);font-family:var(--display);font-weight:600;font-size:19px;letter-spacing:.02em;color:#fff;background:rgba(16,22,31,.88);padding:4px 12px;border-left:4px solid #f0bd4a;border-radius:2px;transition:opacity .5s}
+.ticker.goal{background:#a3202c;border-left-color:#fff;font-size:24px}
+.ticker.goal.home{background:#12305c}
+.puckman{position:absolute;right:10px;bottom:10px;font-family:var(--display);font-weight:500;font-size:15px;color:#dfe6ee;background:rgba(16,22,31,.8);padding:3px 10px;border-radius:2px;font-variant-numeric:tabular-nums}
+@media (max-width:560px){.puckman{display:none}.bug{font-size:16px}.bug .sog{display:none}}
+
+.controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+.grp{display:flex;align-items:center;gap:8px}
+.grp > label{font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.seg{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--panel)}
+.seg button, .btn{font:500 14px var(--body);color:var(--fg);background:var(--panel);border:0;padding:7px 13px;cursor:pointer}
+.seg button + button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.btn{border:1px solid var(--line);border-radius:4px}
+.seg button:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.benches{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.team{background:var(--panel);border:1px solid var(--line);border-top:4px solid var(--home);border-radius:4px;padding:10px 14px 12px;min-width:0}
+.team.away{border-top-color:var(--away)}
+.team h2{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.04em;text-transform:uppercase;margin:0 0 6px}
+.team table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.team td{padding:3px 6px 3px 0;border-top:1px solid var(--line);white-space:nowrap}
+.team td.nm{white-space:normal;font-weight:500}
+.team td.ty,.team td.sz{color:var(--muted);font-size:13.5px}
+.team td.no{font-family:var(--display);font-weight:700;font-size:16px;width:28px}
+.team td.ps{font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.06em;color:var(--muted);width:26px}
+.team tr.has td.nm::after{content:" ●";color:var(--gold)}
+
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px 28px;color:var(--muted)}
+.notes h3{font-family:var(--display);font-weight:600;font-size:14px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg);margin:0 0 4px}
+.notes ul{margin:0;padding-left:18px}
+.notes > div{min-width:0}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Shift Prototype</h1>
+    <span class="tag">Throwaway</span>
+    <p class="sub">Harbour City vs Northgate, 5-on-5. Made-up rosters, built to judge the look and feel only.</p>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="rink" aria-label="3D hockey game in progress"></canvas>
+    <div class="bug" aria-live="off">
+      <span class="t-home">HBR</span><span class="sc" id="scH">0</span>
+      <span class="t-away">NGT</span><span class="sc" id="scA">0</span>
+      <span class="clk" id="clk">20:00</span>
+      <span class="sog" id="sog">SOG 0–0</span>
+    </div>
+    <div class="ticker" id="ticker">Opening faceoff</div>
+    <div class="puckman" id="puckman"></div>
+  </div>
+
+  <div class="controls">
+    <div class="grp"><label id="lc">Camera</label>
+      <div class="seg" role="group" aria-labelledby="lc" id="camSeg">
+        <button id="cam-broadcast" data-cam="broadcast" aria-pressed="true">Broadcast</button>
+        <button id="cam-overhead" data-cam="overhead" aria-pressed="false">Overhead</button>
+        <button id="cam-ice" data-cam="ice" aria-pressed="false">Ice level</button>
+      </div>
+    </div>
+    <div class="grp"><label id="ls">Speed</label>
+      <div class="seg" role="group" aria-labelledby="ls" id="spdSeg">
+        <button id="spd-1" data-spd="1" aria-pressed="true">1×</button>
+        <button id="spd-2" data-spd="2" aria-pressed="false">2×</button>
+        <button id="spd-4" data-spd="4" aria-pressed="false">4×</button>
+      </div>
+    </div>
+    <button class="btn" id="pause">Pause</button>
+  </div>
+
+  <div class="benches">
+    <div class="team home"><h2>Harbour City on the ice</h2><table id="tblH"></table></div>
+    <div class="team away"><h2>Northgate on the ice</h2><table id="tblA"></table></div>
+  </div>
+
+  <div class="notes">
+    <div><h3>What to look for</h3><ul>
+      <li>Players are different heights and builds. Compare #6 Kerrigan (6'6", 235) with #13 Saarela (5'9", 170).</li>
+      <li>Breakouts, zone entries, forwards rotating low in the offensive zone, defencemen holding the points.</li>
+      <li>Line changes on the fly and at whistles, at the far-side benches.</li>
+      <li>Hits, poke checks, blocked shots, rebounds, posts, goalie freezes.</li>
+    </ul></div>
+    <div><h3>Not in this test</h3><ul>
+      <li>Offside and icing calls, penalties, fights, injuries.</li>
+      <li>Chemistry, fatigue, coaching systems.</li>
+      <li>Real animation. Bodies are blocks, and nobody skates backwards yet.</li>
+    </ul></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+'use strict';
+const L=30.5, W=13, RC=8.5, GL=26.5, BL=7.6;
+const rnd=(a=1,b)=>b===undefined?Math.random()*a:a+Math.random()*(b-a);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const gauss=()=>(Math.random()+Math.random()+Math.random()-1.5)*2;
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
+const $=id=>document.getElementById(id);
+
+/* ---------- rosters ---------- */
+const TYPES={
+  'Sniper':        {spd:.72,shot:.95,acu:.90,pass:.60,hands:.78,chk:.35,phys:.30},
+  'Playmaker':     {spd:.80,shot:.60,acu:.70,pass:.96,hands:.90,chk:.40,phys:.25},
+  'Power forward': {spd:.66,shot:.78,acu:.66,pass:.55,hands:.62,chk:.60,phys:.92},
+  'Two-way forward':{spd:.76,shot:.66,acu:.70,pass:.70,hands:.70,chk:.86,phys:.55},
+  'Speedster':     {spd:.99,shot:.60,acu:.60,pass:.66,hands:.76,chk:.45,phys:.20},
+  'Grinder':       {spd:.60,shot:.48,acu:.50,pass:.48,hands:.48,chk:.72,phys:.97},
+  'Offensive D':   {spd:.80,shot:.82,acu:.64,pass:.86,hands:.76,chk:.55,phys:.40},
+  'Shutdown D':    {spd:.60,shot:.52,acu:.50,pass:.55,hands:.50,chk:.95,phys:.86},
+  'Two-way D':     {spd:.72,shot:.64,acu:.58,pass:.72,hands:.64,chk:.78,phys:.62},
+  'Goalie':        {spd:.5,shot:.2,acu:.2,pass:.5,hands:.5,chk:.2,phys:.3}
+};
+const R=(num,name,pos,type,ht,wt)=>({num,name,pos,type,ht,wt});
+const TEAMS=[
+ {id:'H',name:'Harbour City',abbr:'HBR',dir:1,jersey:0x12305c,trim:0xe0a526,pants:0x0b1c38,sock:0x12305c,helmet:0x0b1c38,trimCss:'#f0bd4a',benchX:-7,
+  roster:[R(91,'Teodor Valkama','LW','Sniper',72,190),R(19,'Callum Rourke','C','Playmaker',71,182),R(28,'Dmitri Osgood','RW','Power forward',76,228),
+          R(13,'Niko Saarela','LW','Speedster',69,170),R(47,'Brett Halvorsen','C','Two-way forward',73,200),R(55,'Marek Holub','RW','Grinder',75,225),
+          R(4,'Anders Lindqvist','LD','Offensive D',72,192),R(6,'Wyatt Kerrigan','RD','Shutdown D',78,235),
+          R(24,'Samuel Okafor','LD','Two-way D',74,210),R(77,'Pavel Zhukov','RD','Shutdown D',76,222),
+          R(31,'Elias Brandt','G','Goalie',75,205)]},
+ {id:'A',name:'Northgate',abbr:'NGT',dir:-1,jersey:0xa3202c,trim:0xf2f2f2,pants:0x1c1c20,sock:0xa3202c,helmet:0x1c1c20,trimCss:'#ffffff',benchX:7,
+  roster:[R(17,'Tyler Hruska','LW','Power forward',75,220),R(9,'Mathis Beaulac','C','Playmaker',70,178),R(88,'Ilya Morozov','RW','Sniper',73,195),
+          R(21,'Finn Aldous','LW','Two-way forward',72,196),R(36,'Kasper Nyholm','C','Speedster',68,168),R(44,'Dane Buckley','RW','Grinder',77,238),
+          R(2,'Owen Tremaine','LD','Shutdown D',77,230),R(8,'Luca Ferrand','RD','Offensive D',71,185),
+          R(5,'Rasmus Thorsen','LD','Two-way D',75,212),R(27,'Jack Mulroy','RD','Shutdown D',74,218),
+          R(35,'Viktor Salo','G','Goalie',77,215)]}
+];
+
+/* ---------- three.js scene ---------- */
+const canvas=$('rink'), stage=$('stage');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+renderer.outputEncoding=THREE.sRGBEncoding;
+renderer.setClearColor(0x0a0e14);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(30,16/9,0.5,300);
+scene.add(new THREE.HemisphereLight(0xffffff,0x8899aa,0.85));
+const sun=new THREE.DirectionalLight(0xffffff,0.55); sun.position.set(10,40,25); scene.add(sun);
+
+const mat=(c,o={})=>new THREE.MeshLambertMaterial(Object.assign({color:c},o));
+const box=(x,y,z,m)=>new THREE.Mesh(new THREE.BoxGeometry(x,y,z),m);
+
+function rr(path,hl,hw,r){
+  path.moveTo(-hl+r,-hw); path.lineTo(hl-r,-hw); path.absarc(hl-r,-hw+r,r,-Math.PI/2,0,false);
+  path.lineTo(hl,hw-r); path.absarc(hl-r,hw-r,r,0,Math.PI/2,false);
+  path.lineTo(-hl+r,hw); path.absarc(-hl+r,hw-r,r,Math.PI/2,Math.PI,false);
+  path.lineTo(-hl,-hw+r); path.absarc(-hl+r,-hw+r,r,Math.PI,Math.PI*1.5,false);
+  return path;
+}
+
+// arena floor
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(140,90),mat(0x151b24)); floor.rotation.x=-Math.PI/2; floor.position.y=-0.02; scene.add(floor);
+
+// ice sheet, drawn to scale on a canvas
+(function(){
+  const cw=2048, ch=Math.round(cw*W/L), c=document.createElement('canvas'); c.width=cw; c.height=ch;
+  const g=c.getContext('2d'), sx=cw/(2*L), X=x=>(x+L)*sx, Z=z=>(z+W)*sx;
+  g.beginPath(); const r=RC*sx; g.moveTo(r,0); g.arcTo(cw,0,cw,ch,r); g.arcTo(cw,ch,0,ch,r); g.arcTo(0,ch,0,0,r); g.arcTo(0,0,cw,0,r); g.closePath();
+  g.fillStyle='#f3f7fa'; g.fill(); g.save(); g.clip();
+  // skate-mark texture
+  g.strokeStyle='rgba(120,150,180,.07)'; g.lineWidth=1;
+  for(let i=0;i<500;i++){const x=Math.random()*cw,y=Math.random()*ch,a=Math.random()*6.28,l=20+Math.random()*90;g.beginPath();g.moveTo(x,y);g.quadraticCurveTo(x+Math.cos(a)*l*.5+10,y+Math.sin(a)*l*.5,x+Math.cos(a)*l,y+Math.sin(a)*l);g.stroke();}
+  const vline=(x,w,col)=>{g.fillStyle=col;g.fillRect(X(x)-w*sx/2,0,w*sx,ch);};
+  vline(-BL,.3,'#1f55b5'); vline(BL,.3,'#1f55b5'); vline(0,.3,'#c8202e'); vline(-GL,.06,'#c8202e'); vline(GL,.06,'#c8202e');
+  const circ=(x,z,rad,col,lw,fill)=>{g.beginPath();g.arc(X(x),Z(z),rad*sx,0,6.2832);if(fill){g.fillStyle=col;g.fill();}else{g.strokeStyle=col;g.lineWidth=lw*sx;g.stroke();}};
+  circ(0,0,4.57,'#1f55b5',.06); circ(0,0,.18,'#1f55b5',0,true);
+  for(const ex of [-1,1]) for(const ez of [-1,1]){
+    circ(ex*20.4,ez*6.7,4.57,'#c8202e',.06); circ(ex*20.4,ez*6.7,.3,'#c8202e',0,true); circ(ex*6.1,ez*6.7,.3,'#c8202e',0,true);
+  }
+  for(const e of [-1,1]){ // creases
+    g.beginPath(); g.arc(X(e*GL),Z(0),1.83*sx,e>0?Math.PI/2:-Math.PI/2,e>0?Math.PI*1.5:Math.PI/2); g.closePath();
+    g.fillStyle='rgba(70,150,225,.45)'; g.fill(); g.strokeStyle='#c8202e'; g.lineWidth=.06*sx; g.stroke();
+  }
+  g.restore();
+  const tex=new THREE.CanvasTexture(c); tex.encoding=THREE.sRGBEncoding; tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  const ice=new THREE.Mesh(new THREE.PlaneGeometry(2*L,2*W),new THREE.MeshLambertMaterial({map:tex,transparent:true,alphaTest:.5}));
+  ice.rotation.x=-Math.PI/2; scene.add(ice);
+})();
+
+// boards
+(function(){
+  const ring=(pad,inset,h,m)=>{const s=rr(new THREE.Shape(),L+pad,W+pad,RC+pad); s.holes.push(rr(new THREE.Path(),L-inset,W-inset,RC-inset));
+    const geo=new THREE.ExtrudeGeometry(s,{depth:h,bevelEnabled:false,curveSegments:20}); geo.rotateX(-Math.PI/2); const me=new THREE.Mesh(geo,m); scene.add(me); return me;};
+  ring(.28,0,1.07,mat(0xf7f8fa));
+  ring(.3,.03,.2,mat(0xe9c23a));
+  const top=ring(.3,.02,.06,mat(0x1a4fa3)); top.position.y=1.07;
+})();
+
+// benches and stands
+(function(){
+  for(const t of TEAMS){ const b=box(10,.5,2.2,mat(0x2a3340)); b.position.set(t.benchX,.25,-(W+1.5)); scene.add(b);
+    const back=box(10,1.6,.15,mat(t.jersey)); back.position.set(t.benchX,1.3,-(W+2.6)); scene.add(back); }
+  const c=document.createElement('canvas'); c.width=512; c.height=128; const g=c.getContext('2d'); g.fillStyle='#161c26'; g.fillRect(0,0,512,128);
+  const cols=['#12305c','#a3202c','#e0a526','#d9dde3','#3a4350','#6b7482','#2d3a4c'];
+  for(let row=0;row<8;row++) for(let i=0;i<64;i++){ if(Math.random()<.12) continue; g.fillStyle=cols[(Math.random()*cols.length)|0]; g.fillRect(i*8+1,row*16+3,6,10); }
+  const mk=(w,rx,ry,x,y,z)=>{const tex=new THREE.CanvasTexture(c); tex.encoding=THREE.sRGBEncoding; tex.wrapS=THREE.RepeatWrapping; tex.repeat.x=w/22;
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,16),new THREE.MeshBasicMaterial({map:tex,color:0x9aa3ad})); m.rotation.order='YXZ'; m.rotation.y=ry; m.rotation.x=rx; m.position.set(x,y,z); scene.add(m);};
+  mk(84,-.95,0,0,6.2,-(W+9.5)); mk(50,-.95,Math.PI/2,-(L+8),6.2,0); mk(50,-.95,-Math.PI/2,L+8,6.2,0);
+})();
+
+// nets
+(function(){
+  const red=mat(0xd02030), mesh=mat(0xffffff,{transparent:true,opacity:.35});
+  for(const e of [-1,1]){ const g=new THREE.Group();
+    for(const z of [-.915,.915]){ const p=new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,1.22,8),red); p.position.set(0,.61,z); g.add(p); }
+    const bar=new THREE.Mesh(new THREE.CylinderGeometry(.04,.04,1.83,8),red); bar.rotation.x=Math.PI/2; bar.position.set(0,1.22,0); g.add(bar);
+    const m=box(1.0,1.2,1.83,mesh); m.position.set(.52,.6,0); g.add(m);
+    g.position.x=e*GL; if(e<0) g.rotation.y=Math.PI; scene.add(g);
+  }
+})();
+const goalLights=[1,-1].map(e=>{const m=new THREE.Mesh(new THREE.SphereGeometry(.35,12,8),new THREE.MeshBasicMaterial({color:0x441014})); m.position.set(e*(L+.6),2.6,0); scene.add(m); return m;});
+
+// puck (drawn larger than life so it can be followed)
+const puckMesh=new THREE.Mesh(new THREE.CylinderGeometry(.13,.13,.07,16),new THREE.MeshBasicMaterial({color:0x0c0c0e})); scene.add(puckMesh);
+const ringMesh=new THREE.Mesh(new THREE.RingGeometry(.55,.68,28),new THREE.MeshBasicMaterial({color:0xf0bd4a,transparent:true,opacity:.85,side:THREE.DoubleSide})); ringMesh.rotation.x=-Math.PI/2; ringMesh.position.y=.015; scene.add(ringMesh);
+
+/* ---------- player models ---------- */
+const mSkin=mat(0xd9a57e), mSkate=mat(0x18181a), mStick=mat(0x2b2b2b), mPad=mat(0xf4f4f4), mShadow=new THREE.MeshBasicMaterial({color:0x1b2a3a,transparent:true,opacity:.28});
+function numTex(n,css){const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');g.fillStyle=css;g.font='bold 46px Arial';g.textAlign='center';g.textBaseline='middle';g.fillText(n,32,35);const t=new THREE.CanvasTexture(c);t.encoding=THREE.sRGBEncoding;return t;}
+function buildModel(pl,tm){
+  const g=new THREE.Group(), body=new THREE.Group(); g.add(body);
+  const s=1+(pl.ht-73)/73*1.6, b=clamp(1+((pl.wt/(pl.ht*pl.ht))/0.0375-1)*2.2,.8,1.32);
+  pl.scale=s; body.scale.set(s,s,s);
+  const isG=pl.pos==='G';
+  const leg=z=>{const lg=new THREE.Group(); lg.position.set(0,.88,z);
+    if(isG){const pad=box(.2,.84,.3,mPad); pad.position.set(.06,-.44,0); lg.add(pad);}
+    else{const pants=box(.27*b,.44,.25*b,tm.mPants); pants.position.y=-.2; const sock=box(.17,.42,.17,tm.mSock); sock.position.y=-.6; lg.add(pants,sock);}
+    const sk=box(.3,.09,.11,mSkate); sk.position.set(.04,-.835,0); lg.add(sk); return lg;};
+  const legL=leg(-(isG?.2:.14*b)), legR=leg(isG?.2:.14*b); body.add(legL,legR);
+  const up=new THREE.Group(); up.position.y=.88; body.add(up);
+  const wz=isG?.72:.5*b, wx=isG?.4:.3*b;
+  const torso=box(wx,.6,wz,tm.mJersey); torso.position.y=.34; up.add(torso);
+  const hem=box(wx+.012,.07,wz+.012,tm.mTrim); hem.position.y=.1; up.add(hem);
+  const sh=box(wx+.04,.16,wz+.16*b,tm.mJersey); sh.position.y=.62; up.add(sh);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.125,12,10),mSkin); head.position.y=.86; up.add(head);
+  const helm=new THREE.Mesh(new THREE.SphereGeometry(.148,12,10,0,6.2832,0,isG?3.1416:1.85),isG?tm.mTrim:tm.mHelmet); helm.position.y=.875; up.add(helm);
+  const num=new THREE.Mesh(new THREE.PlaneGeometry(.34,.34),new THREE.MeshBasicMaterial({map:numTex(pl.num,tm.trimCss),transparent:true})); num.rotation.y=-Math.PI/2; num.position.set(-(wx/2+.008),.36,0); up.add(num);
+  for(const z of [-1,1]){ const arm=box(.12,.48,.13,tm.mJersey); arm.rotation.z=-.95; arm.position.set(.2,.4,z*(wz/2+.07)); up.add(arm); }
+  if(isG){
+    const blk=box(.09,.36,.26,mPad); blk.position.set(.3,.3,.52); const glv=new THREE.Mesh(new THREE.SphereGeometry(.17,10,8),tm.mPants); glv.position.set(.3,.36,-.54);
+    const pdl=box(.06,.75,.1,mStick); pdl.position.set(.36,-.42,.5); const bl=box(.42,.09,.04,mStick); bl.position.set(.55,-.82,.5); up.add(blk,glv,pdl,bl);
+  } else {
+    const A=new THREE.Vector3(.36,.2,.2), B=new THREE.Vector3(.98,-.85,.26), d=B.clone().sub(A);
+    const shaft=new THREE.Mesh(new THREE.CylinderGeometry(.018,.018,d.length(),6),mStick); shaft.position.copy(A).add(B).multiplyScalar(.5);
+    shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),d.clone().normalize()); const blade=box(.3,.08,.03,mStick); blade.position.set(1.1,-.83,.26); up.add(shaft,blade);
+  }
+  const shd=new THREE.Mesh(new THREE.CircleGeometry(.5*b*s,16),mShadow); shd.rotation.x=-Math.PI/2; shd.position.y=.012; g.add(shd);
+  pl.m={g,body,legL,legR,up}; scene.add(g);
+}
+
+/* ---------- game state ---------- */
+const teams=TEAMS.map(def=>{
+  const tm=Object.assign({},def,{score:0,shots:0,slots:{},idx:{F:0,D:0},shift:{F:0,D:0}});
+  tm.mJersey=mat(def.jersey); tm.mTrim=mat(def.trim); tm.mPants=mat(def.pants); tm.mSock=mat(def.sock); tm.mHelmet=mat(def.helmet);
+  tm.door={x:def.benchX,z:-(W-.7)};
+  tm.players=def.roster.map((r,i)=>{
+    const base=TYPES[r.type], attr={}; for(const k in base) attr[k]=clamp(base[k]+rnd(-.04,.04),.1,1);
+    const pl=Object.assign({},r,{team:tm,attr,p:{x:0,z:0},v:{x:0,z:0},face:tm.dir>0?0:Math.PI,onIce:false,leaving:false,stun:0,cool:0,think:0,tx:0,tz:0,stride:rnd(6),save:0,seat:i,
+      maxSpd:6.5+attr.spd*2.7, acc:6.5+attr.spd*5});
+    buildModel(pl,tm); return pl;});
+  const sk=tm.players.filter(p=>p.pos!=='G');
+  tm.F=[sk.slice(0,3),sk.slice(3,6)]; tm.D=[sk.slice(6,8),sk.slice(8,10)]; tm.goalie=tm.players[10];
+  tm.players.forEach(seatPlayer);
+  [...tm.F[0],...tm.D[0]].forEach(p=>{p.onIce=true;p.slot=p.pos;tm.slots[p.pos]=p;p.p.x=tm.door.x+rnd(-2,2);p.p.z=tm.door.z+rnd(0,3);});
+  const g=tm.goalie; g.onIce=true; g.p.x=-tm.dir*(GL-1.1); g.p.z=0;
+  return tm;
+});
+teams[0].opp=teams[1]; teams[1].opp=teams[0];
+function seatPlayer(p){ p.onIce=false; p.leaving=false; p.slot=null; p.v.x=p.v.z=0; p.p.x=p.team.benchX+(p.seat-4.5)*.9; p.p.z=-(W+1.4); p.face=Math.PI/2; }
+
+const puck={p:{x:0,z:0},v:{x:0,z:0},y:0,vy:0,carrier:null,target:null,shot:null,ignore:new Set(),chain:[],hidden:true};
+const G={state:'setup',t:0,clock:1200,timer:3.5,fo:{x:0,z:0},poss:teams[0],light:0,lineupDirty:true};
+
+let tickerT=0;
+function say(text,cls){ const el=$('ticker'); el.textContent=text; el.className='ticker'+(cls?' '+cls:''); el.style.opacity=1; tickerT=cls?5:3.2; }
+const last=n=>n.split(' ').slice(-1)[0];
+
+/* ---------- rink geometry helpers ---------- */
+function clampRink(p,v,m,rest){
+  const lx=L-m, wz=W-m, r=RC-m; let hit=false; const ax=Math.abs(p.x), az=Math.abs(p.z);
+  if(ax>lx-r && az>wz-r){
+    const cx=Math.sign(p.x)*(lx-r), cz=Math.sign(p.z)*(wz-r), dx=p.x-cx, dz=p.z-cz, d=Math.hypot(dx,dz);
+    if(d>r){ const nx=dx/d,nz=dz/d; p.x=cx+nx*r; p.z=cz+nz*r; const vn=v.x*nx+v.z*nz; if(vn>0){v.x-=(1+rest)*vn*nx; v.z-=(1+rest)*vn*nz;} hit=true; }
+  } else {
+    if(ax>lx){ p.x=Math.sign(p.x)*lx; if(v.x*p.x>0) v.x*=-rest; hit=true; }
+    if(az>wz){ p.z=Math.sign(p.z)*wz; if(v.z*p.z>0) v.z*=-rest; hit=true; }
+  }
+  return hit;
+}
+function segDist(p,a,b){ const dx=b.x-a.x,dz=b.z-a.z,l2=dx*dx+dz*dz||1; const t=clamp(((p.x-a.x)*dx+(p.z-a.z)*dz)/l2,0,1); return Math.hypot(p.x-(a.x+dx*t),p.z-(a.z+dz*t)); }
+const skaters=tm=>tm.players.filter(p=>p.onIce&&!p.leaving&&p.pos!=='G');
+
+/* ---------- line changes ---------- */
+function changeUnit(tm,unit){
+  const lines=tm[unit], cur=tm.idx[unit], nxt=(cur+1)%lines.length;
+  if(lines[nxt].some(p=>p.onIce)) return false;
+  lines[cur].forEach(p=>{p.leaving=true; p.slot=null;});
+  lines[nxt].forEach((p,i)=>{ p.onIce=true; p.leaving=false; p.slot=p.pos; tm.slots[p.pos]=p; p.p.x=tm.door.x+(i-1)*1.0; p.p.z=tm.door.z; p.v.x=0; p.v.z=1.5; p.cool=0; p.stun=0; });
+  tm.idx[unit]=nxt; tm.shift[unit]=G.t; G.lineupDirty=true; return true;
+}
+function maybeChangeOnFly(tm){
+  if(G.poss!==tm || !puck.carrier || puck.carrier.team!==tm) return;
+  const pa=tm.dir*puck.p.x; if(pa<-1) return;
+  for(const [unit,len] of [['F',38],['D',52]]){
+    if(G.t-tm.shift[unit]<len) continue;
+    const cur=tm[unit][tm.idx[unit]];
+    if(cur.some(p=>p===puck.carrier||p===puck.target)) continue;
+    if(unit==='D' && pa<BL) continue;
+    if(changeUnit(tm,unit)) { say(tm.name+' change: '+(unit==='F'?'forwards':'defence')); return; }
+  }
+}
+
+/* ---------- positioning ---------- */
+function slotTarget(tm,pl){
+  const d=tm.dir, side=(pl.slot==='LW'||pl.slot==='LD')?-d:(pl.slot==='RW'||pl.slot==='RD')?d:0;
+  const pa=d*puck.p.x, pz=puck.p.z, isD=pl.slot==='LD'||pl.slot==='RD'; let a,z;
+  if(G.poss===tm){
+    if(pa<BL){
+      if(isD){ a=pa-9; z=side*5.5+pz*.2; }
+      else if(pl.slot==='C'){ a=pa+4; z=pz*.3+(pz>0?-3.5:3.5); }
+      else { a=pa+8; z=side*10; }
+      if(!isD) a=Math.min(a,BL-.6);
+      a=Math.max(a,-GL+2);
+    } else {
+      const ss=pz>=0?1:-1;
+      if(isD){ a=BL+1.4; z=side*7+ss*2.5; }
+      else { const i=(['LW','C','RW'].indexOf(pl.slot)+Math.floor(G.t/7))%3;   // forwards rotate through three spots: the cycle
+        if(i===0){ a=GL-1.6; z=ss*8.5; } else if(i===1){ a=GL-2.8; z=-ss*1.7; } else { a=GL-9.5; z=-ss*3.2; } }
+    }
+  } else {
+    if(pa<-BL){
+      if(isD){ if(side*pz>0){ a=-GL+(pa+GL)*.5; z=pz*.5; } else { a=-GL+2.3; z=side*1.2; } }
+      else if(pl.slot==='C'){ a=-GL+6.5; z=pz*.45; }
+      else { a=-BL-4; z=side*6; }
+    } else {
+      if(isD){ a=Math.max(pa-13,-GL+5); z=side*4+pz*.25; }
+      else if(pl.slot==='C'){ a=pa-3; z=pz*.5; }
+      else { a=pa-5; z=side*8; }
+    }
+  }
+  return {x:d*a,z};
+}
+function faceoffTarget(tm,pl){
+  const d=tm.dir, side=(pl.slot==='LW'||pl.slot==='LD')?-d:(pl.slot==='RW'||pl.slot==='RD')?d:0, f=G.fo;
+  if(pl.slot==='C') return {x:f.x-d*.85,z:f.z};
+  if(pl.slot==='LW'||pl.slot==='RW') return {x:f.x-d*1.0,z:f.z+side*4.6};
+  return {x:f.x-d*5.5,z:f.z+side*2.8};
+}
+function carrierTarget(pl){
+  const d=pl.team.dir, pa=d*pl.p.x, dG=Math.hypot(d*GL-pl.p.x,pl.p.z); let tx,tz;
+  if(pa<BL){ tx=d*(BL+6); tz=pl.p.z*.8; }
+  else if(pa>GL-.8){ tx=d*(GL-3.5); tz=Math.sign(pl.p.z||1)*6; }
+  else if(dG>8){ tx=d*(GL-5); tz=pl.p.z*.45; }
+  else { tx=d*(GL-1.6); tz=pl.p.z*.3; }
+  let near=null,nd=5; for(const o of skaters(pl.team.opp)){ const dd=dist(o.p,pl.p); if(dd<nd && d*(o.p.x-pl.p.x)>-.5){nd=dd;near=o;} }
+  if(near) tz+=(pl.p.z-near.p.z>=0?1:-1)*3.8;
+  return {x:tx,z:clamp(tz,-W+1.2,W-1.2)};
+}
+
+/* ---------- puck actions ---------- */
+function take(pl){
+  puck.carrier=pl; puck.target=null; puck.shot=null; puck.y=0; puck.vy=0; puck.ignore.clear();
+  if(puck.chain.length && puck.chain[0].team!==pl.team) puck.chain=[];
+  if(puck.chain[puck.chain.length-1]!==pl) puck.chain.push(pl); if(puck.chain.length>3) puck.chain.shift();
+  G.poss=pl.team; pl.think=.2+rnd(.25);
+}
+function release(pl,vx,vz,vy){
+  puck.carrier=null; puck.v.x=vx; puck.v.z=vz; puck.vy=vy||0; puck.ignore=new Set([pl]); pl.cool=.45;
+}
+function passTo(pl,m){
+  const sp=14+pl.attr.pass*8, dd=dist(pl.p,m.p), lead=dd/sp;
+  const ax=m.p.x+m.v.x*lead*.8-puck.p.x, az=m.p.z+m.v.z*lead*.8-puck.p.z;
+  const ang=Math.atan2(az,ax)+gauss()*(1-pl.attr.pass)*.14;
+  release(pl,Math.cos(ang)*sp,Math.sin(ang)*sp,0); puck.target=m; puck.shot=null;
+}
+function shoot(pl){
+  const d=pl.team.dir, gx=d*GL, dG=Math.hypot(gx-puck.p.x,puck.p.z);
+  const zAim=rnd(-.8,.8)+gauss()*(1-pl.attr.acu)*dG*.11;
+  const ang=Math.atan2(zAim-puck.p.z,gx-puck.p.x), sp=25+pl.attr.shot*15;
+  release(pl,Math.cos(ang)*sp,Math.sin(ang)*sp,rnd(.5,4.2)); puck.target=null;
+  puck.shot={shooter:pl,team:pl.team,dist:dG};
+}
+function decide(pl){
+  const tm=pl.team, d=tm.dir, pa=d*pl.p.x, opps=skaters(tm.opp);
+  let near=null,nd=99; for(const o of opps){ if(o.stun>0) continue; const dd=dist(o.p,pl.p); if(dd<nd){nd=dd;near=o;} }
+  // defender on him: poke check or hit
+  if(near && nd<1.45){
+    if(near.attr.phys>.5 && nd<1.15 && Math.random()<.2*near.attr.phys){
+      pl.stun=.9; release(pl,pl.v.x*.4+rnd(-3,3),pl.v.z*.4+rnd(-3,3)); pl.cool=1.1; pl.v.x*=.2; pl.v.z*=.2;
+      say('Hit: '+last(near.name)+' on '+last(pl.name)); return;
+    }
+    if(Math.random()<.11+.3*near.attr.chk-.2*pl.attr.hands){
+      release(pl,rnd(-4,4),rnd(-4,4)); pl.cool=.7; if(Math.random()<.5) take(near); return;
+    }
+  }
+  const gx=d*GL, dG=Math.hypot(gx-pl.p.x,pl.p.z);
+  // shoot
+  if(pa>BL && pa<GL-.6 && dG<22){
+    const ang=Math.atan2(Math.abs(pl.p.z),GL-pa), q=Math.max(0,1-dG/17)*Math.cos(ang);
+    let pS=.05+q*.55; if(nd<2) pS+=.08;
+    if(opps.some(o=>segDist(o.p,pl.p,{x:gx,z:0})<.55 && dist(o.p,pl.p)<6)) pS*=.55;
+    if(Math.random()<pS){ shoot(pl); return; }
+  }
+  // pass
+  let best=null,bs=-9;
+  for(const m of skaters(tm)){
+    if(m===pl||m.stun>0) continue; const dd=dist(m.p,pl.p); if(dd<4||dd>27) continue;
+    if(pa<BL && d*m.p.x>BL) continue;
+    if(opps.some(o=>segDist(o.p,pl.p,m.p)<1.35)) continue;
+    let open=9; for(const o of opps) open=Math.min(open,dist(o.p,m.p));
+    let sc=(d*m.p.x-pa)*.07+Math.min(open,5)*.15+rnd(.4);
+    if(pa>BL) sc+=Math.max(0,1-Math.hypot(gx-m.p.x,m.p.z)/15)*1.3;
+    if(d*m.p.x<-BL && pa>-BL) sc-=.8;
+    if(sc>bs){bs=sc;best=m;}
+  }
+  if(best){ let pP=nd<2.6?.55:(bs>1.05?.3:.07); if(pa>BL) pP+=.1; if(pl.slot==='LD'||pl.slot==='RD') pP+=.08;
+    if(Math.random()<pP){ passTo(pl,best); return; } }
+}
+
+function resolveShot(e,zc){
+  const def=teams.find(t=>t.dir===-e), att=def.opp, g=def.goalie, sp=Math.hypot(puck.v.x,puck.v.z), sh=puck.shot;
+  if(sh && sh.team===att) att.shots++;
+  const dz=Math.abs(zc-g.p.z);
+  let pSave=.97-Math.max(0,dz-.4)*.4-Math.max(0,sp-28)*.005; if(sh&&sh.dist<7) pSave-=.07; pSave=clamp(pSave,.5,.98);
+  if(Math.random()<pSave){
+    g.save=.8; g.p.z+=(zc-g.p.z)*.85;
+    if(sp<10 || Math.random()<.4){
+      say((dz>.55?'Big save, ':'Save, ')+last(g.name)+' holds on');
+      puck.v.x=puck.v.z=0; puck.p.x=g.p.x; puck.p.z=g.p.z; puck.hidden=true; puck.shot=null;
+      G.state='whistle'; G.timer=1.6; G.fo={x:e*20.4,z:(zc>=0?1:-1)*6.7};
+    } else {
+      const th=rnd(-1.25,1.25), rs=rnd(5,12);
+      puck.p.x=e*(GL-.45); puck.v.x=-e*Math.cos(th)*rs; puck.v.z=Math.sin(th)*rs; puck.vy=rnd(0,2); puck.shot=null; puck.target=null; puck.ignore.clear();
+      say((dz>.55?'Big save by ':'Save by ')+last(g.name)+', rebound');
+    }
+  } else {
+    att.score++; let scorer=sh&&sh.team===att?sh.shooter:puck.chain.filter(p=>p.team===att).slice(-1)[0];
+    const helpers=puck.chain.filter(p=>p.team===att&&p!==scorer).slice(-2).reverse().map(p=>last(p.name));
+    say('GOAL '+att.name+(scorer?': #'+scorer.num+' '+last(scorer.name):'')+(helpers.length?' ('+helpers.join(', ')+')':''),'goal'+(att.id==='H'?' home':''));
+    puck.p.x=e*(GL+.5); puck.v.x=puck.v.z=0; puck.y=0; puck.vy=0; puck.shot=null; puck.target=null;
+    G.state='goal'; G.timer=4.2; G.light=e; G.fo={x:0,z:0};
+    $('scH').textContent=teams[0].score; $('scA').textContent=teams[1].score;
+  }
+  $('sog').textContent='SOG '+teams[0].shots+'–'+teams[1].shots;
+}
+
+function setupFaceoff(){
+  G.state='setup'; G.timer=3.4; G.light=0; puck.carrier=null; puck.target=null; puck.shot=null; puck.hidden=true; puck.chain=[];
+  puck.p.x=G.fo.x; puck.p.z=G.fo.z; puck.v.x=puck.v.z=0; puck.y=0;
+  for(const tm of teams){ for(const u of ['F','D']) if(G.t-tm.shift[u]>24 && changeUnit(tm,u)) G.timer=5.6; tm.players.forEach(p=>{p.stun=0;}); }
+}
+function dropPuck(){
+  const cH=teams[0].slots.C, cA=teams[1].slots.C;
+  const win=Math.random()<.5+(cH.attr.chk+cH.attr.hands-cA.attr.chk-cA.attr.hands)*.2?teams[0]:teams[1];
+  const dman=win.slots[Math.random()<.5?'LD':'RD'], a=Math.atan2(dman.p.z-puck.p.z,dman.p.x-puck.p.x);
+  puck.hidden=false; puck.v.x=Math.cos(a)*9; puck.v.z=Math.sin(a)*9; puck.target=dman; puck.ignore.clear(); cH.cool=cA.cool=.6; G.poss=win; G.state='play';
+  say('Faceoff won by '+last(win.slots.C.name));
+}
+
+/* ---------- simulation step ---------- */
+function movePlayer(pl,dt,frac){
+  let dx=pl.tx-pl.p.x, dz=pl.tz-pl.p.z, d=Math.hypot(dx,dz)||1e-6;
+  let want=Math.min(pl.maxSpd*frac,d*3.2); if(pl.stun>0) want=0;
+  const wx=dx/d*want-pl.v.x, wz=dz/d*want-pl.v.z, wl=Math.hypot(wx,wz), ma=pl.acc*dt;
+  if(wl>ma){ pl.v.x+=wx/wl*ma; pl.v.z+=wz/wl*ma; } else { pl.v.x+=wx; pl.v.z+=wz; }
+  pl.p.x+=pl.v.x*dt; pl.p.z+=pl.v.z*dt;
+}
+function step(dt){
+  G.t+=dt;
+  const all=[]; for(const tm of teams) for(const p of tm.players) if(p.onIce) all.push(p);
+  for(const p of all){ if(p.stun>0)p.stun-=dt; if(p.cool>0)p.cool-=dt; if(p.save>0)p.save-=dt; }
+
+  if(G.state==='play'){
+    G.clock-=dt; if(G.clock<=0) G.clock=1200;
+    const c=puck.carrier;
+    for(const tm of teams){
+      maybeChangeOnFly(tm);
+      const sk=skaters(tm); let chaser=null;
+      if(!(c&&c.team===tm)){
+        if(!c&&puck.target&&puck.target.team===tm&&puck.target.onIce&&!puck.target.leaving) chaser=puck.target;
+        else { let bd=1e9; for(const p of sk){ if(p.stun>0) continue; const dd=dist(p.p,puck.p); if(dd<bd){bd=dd;chaser=p;} } }
+      }
+      for(const p of sk){
+        let t;
+        if(p===c) t=carrierTarget(p);
+        else if(p===chaser){ const dd=dist(p.p,puck.p), lead=Math.min(.5,dd/14); t={x:puck.p.x+puck.v.x*lead,z:puck.p.z+puck.v.z*lead}; }
+        else t=slotTarget(tm,p);
+        p.tx=t.x; p.tz=t.z;
+      }
+    }
+    if(puck.carrier){ const pl=puck.carrier; pl.think-=dt; if(pl.think<=0){ pl.think=.22+rnd(.16); decide(pl); } }
+  } else {
+    G.timer-=dt;
+    for(const tm of teams) for(const p of skaters(tm)){
+      if(G.state==='setup'){ const t=faceoffTarget(tm,p); p.tx=t.x; p.tz=t.z; } else { p.tx=p.p.x+p.v.x*.3; p.tz=p.p.z+p.v.z*.3; }
+    }
+    if(G.timer<=0){ if(G.state==='setup') dropPuck(); else setupFaceoff(); }
+  }
+
+  // skaters
+  for(const p of all){
+    if(p.pos==='G') continue;
+    if(p.leaving){ p.tx=p.team.door.x; p.tz=p.team.door.z-.4; movePlayer(p,dt,.85); if(dist(p.p,p.team.door)<1.3){ seatPlayer(p); continue; } }
+    else movePlayer(p,dt,G.state==='play'?(p===puck.carrier?.92:1):.7);
+    clampRink(p.p,p.v,.45,0);
+    for(const e of [1,-1]){ const a=p.p.x*e; if(a>GL-.15&&a<GL+1.25&&Math.abs(p.p.z)<1.15){ if(GL+1.25-a<1.15-Math.abs(p.p.z)&&a>GL+.5) p.p.x=e*(GL+1.25); else if(a<GL+.1) p.p.x=e*(GL-.15); else p.p.z=Math.sign(p.p.z||1)*1.15; } }
+  }
+  // keep bodies apart
+  for(let i=0;i<all.length;i++) for(let j=i+1;j<all.length;j++){ const a=all[i],b=all[j]; if(!a.onIce||!b.onIce) continue; const dx=b.p.x-a.p.x,dz=b.p.z-a.p.z,d=Math.hypot(dx,dz); if(d<.8&&d>1e-4){ const k=(.8-d)/2/d; if(a.pos!=='G'){a.p.x-=dx*k;a.p.z-=dz*k;} if(b.pos!=='G'){b.p.x+=dx*k;b.p.z+=dz*k;} } }
+
+  // goalies
+  for(const tm of teams){ const g=tm.goalie, e=-tm.dir, gx=e*GL; let tx,tz;
+    if(puck.p.x*e>GL-.2){ tx=gx-e*.45; tz=clamp(puck.p.z,-.85,.85); }
+    else { const dx=puck.p.x-gx, dz=puck.p.z, d=Math.hypot(dx,dz)||1, r=d<12?1.25:.8; tx=gx+dx/d*r; tz=dz/d*r; }
+    const mx=tx-g.p.x, mz=tz-g.p.z, ml=Math.hypot(mx,mz), ms=4.6*dt; if(ml>ms){ g.p.x+=mx/ml*ms; g.p.z+=mz/ml*ms; } else { g.p.x=tx; g.p.z=tz; }
+    g.face=Math.atan2(puck.p.z-g.p.z,puck.p.x-g.p.x);
+    if(G.state==='play'&&!puck.carrier&&puck.y<.5&&dist(g.p,puck.p)<1.0&&Math.hypot(puck.v.x,puck.v.z)<9&&g.cool<=0){
+      if(skaters(tm.opp).some(o=>dist(o.p,g.p)<7)){ say(last(g.name)+' covers it'); puck.v.x=puck.v.z=0; puck.hidden=true; G.state='whistle'; G.timer=1.5; G.fo={x:e*20.4,z:(puck.p.z>=0?1:-1)*6.7}; }
+      else { let m=null,bd=99; for(const p of skaters(tm)){ const dd=dist(p.p,g.p); if(dd<bd){bd=dd;m=p;} } if(m){ const a=Math.atan2(m.p.z-puck.p.z,m.p.x-puck.p.x); puck.v.x=Math.cos(a)*13; puck.v.z=Math.sin(a)*13; puck.target=m; puck.ignore.clear(); g.cool=1; G.poss=tm; } }
+    }
+  }
+
+  // puck
+  if(puck.carrier){ const pl=puck.carrier, cs=Math.cos(pl.face), sn=Math.sin(pl.face), s=pl.scale;
+    puck.p.x=pl.p.x+cs*1.05*s-sn*.26*s; puck.p.z=pl.p.z+sn*1.05*s+cs*.26*s; puck.v.x=pl.v.x; puck.v.z=pl.v.z; puck.y=0; clampRink(puck.p,{x:0,z:0},.15,0);
+  } else if(G.state==='play'){
+    const px=puck.p.x, pz=puck.p.z;
+    puck.p.x+=puck.v.x*dt; puck.p.z+=puck.v.z*dt; puck.y+=puck.vy*dt; puck.vy-=9.8*dt; if(puck.y<=0){ puck.y=0; puck.vy=0; const f=Math.exp(-.38*dt); puck.v.x*=f; puck.v.z*=f; }
+    let done=false;
+    for(const e of [1,-1]){ const a0=px*e, a1=puck.p.x*e;
+      if(a0<GL&&a1>=GL){ const t=(GL-a0)/(a1-a0||1), zc=pz+(puck.p.z-pz)*t;
+        if(Math.abs(zc)<.9&&puck.y<1.22){ resolveShot(e,zc); done=true; break; }
+        if(Math.abs(zc)<1.0&&puck.y<1.3){ puck.p.x=e*(GL-.05); puck.v.x*=-.55; puck.v.z+=Math.sign(zc)*3; puck.shot=null; say('Off the post'); }
+      } else if(a1>GL&&a1<GL+1.1&&Math.abs(puck.p.z)<1.0&&puck.y<1.3){
+        if(a0>=GL+1.1){ puck.p.x=e*(GL+1.12); puck.v.x*=-.4; } else { puck.p.z=Math.sign(pz||1)*1.02; puck.v.z*=-.4; }
+      }
+    }
+    if(!done){
+      if(clampRink(puck.p,puck.v,.12,.55)){ puck.shot=null; if(puck.y>1.1) puck.vy=Math.min(puck.vy,0); }
+      const sp=Math.hypot(puck.v.x,puck.v.z);
+      if(sp<12&&puck.ignore.size) puck.ignore.clear();
+      if(puck.y<.7){
+        let cand=null,cd=.9;
+        for(const p of all){ if(p.pos==='G'||p.leaving||p.stun>0||p.cool>0||puck.ignore.has(p)) continue; const dd=dist(p.p,puck.p); if(dd<cd){cd=dd;cand=p;} }
+        if(cand){
+          if(cand===puck.target){ if(Math.random()<.78+.22*cand.attr.hands) take(cand); else { puck.v.x*=.35; puck.v.z*=.35; puck.target=null; cand.cool=.45; } }
+          else if(puck.shot&&sp>15){ puck.ignore.add(cand); if(cand.team!==puck.shot.team&&Math.random()<.3){ const a=rnd(6.28); puck.v.x=Math.cos(a)*rnd(3,7); puck.v.z=Math.sin(a)*rnd(3,7); puck.vy=0; puck.shot=null; say('Blocked by '+last(cand.name)); } }
+          else if(sp>13){ puck.ignore.add(cand); if(Math.random()<.24){ if(Math.random()<.6) take(cand); else { puck.v.x*=.3; puck.v.z=puck.v.z*.3+rnd(-3,3); puck.target=null; } } }
+          else take(cand);
+        }
+      }
+    }
+  }
+}
+
+/* ---------- drawing ---------- */
+function angLerp(a,b,t){ let d=((b-a+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI; return a+d*t; }
+function pose(dt){
+  for(const tm of teams) for(const p of tm.players){
+    const m=p.m, sp=Math.hypot(p.v.x,p.v.z);
+    if(p.onIce&&p.pos!=='G'){ const want=sp>.9?Math.atan2(p.v.z,p.v.x):Math.atan2(puck.p.z-p.p.z,puck.p.x-p.p.x); p.face=angLerp(p.face,want,Math.min(1,dt*9)); }
+    m.g.position.set(p.p.x,p.onIce?0:.5,p.p.z); m.g.rotation.y=-p.face;
+    if(p.pos==='G'){ const k=p.save>0?1:0; m.legL.rotation.x=-.95*k; m.legR.rotation.x=.95*k; m.body.position.y=-.3*k*p.scale; m.up.rotation.z=-.12; }
+    else { p.stride+=sp*dt*1.5; const k=Math.min(1,sp/6), sw=Math.sin(p.stride)*.5*k;
+      m.legL.rotation.z=sw; m.legR.rotation.z=-sw; m.legL.rotation.x=-.12-Math.max(0,sw)*.35; m.legR.rotation.x=.12+Math.max(0,-sw)*.35;
+      m.up.rotation.z=-.14-.3*Math.min(1,sp/9); m.body.rotation.x=p.stun>0?Math.min(1.3,p.stun*2.2):0; }
+  }
+  puckMesh.visible=!puck.hidden; puckMesh.position.set(puck.p.x,.04+puck.y,puck.p.z);
+  const c=puck.carrier; ringMesh.visible=!!c; if(c) ringMesh.position.set(c.p.x,.015,c.p.z);
+  goalLights.forEach((l,i)=>l.material.color.setHex(G.light===(i?-1:1)&&Math.floor(G.t*6)%2?0xff2030:0x441014));
+}
+let camMode='broadcast'; const cp=new THREE.Vector3(0,17,33), cl=new THREE.Vector3(0,0,0), tp=new THREE.Vector3(), tl=new THREE.Vector3();
+function cam(dt,snap){
+  const narrow=camera.aspect<1.5, px=clamp(puck.p.x,-L+4,L-4);
+  if(camMode==='broadcast'){ tp.set(px*.72,narrow?19:16,narrow?40:33); tl.set(px*.8,0,puck.p.z*.25-1); }
+  else if(camMode==='overhead'){ tp.set(px*.35,narrow?74:52,14); tl.set(px*.35,0,0); }
+  else { const d=G.poss.dir; tp.set(clamp(puck.p.x-d*13,-L-5,L+5),4.6,puck.p.z*.55); tl.set(puck.p.x+d*7,.8,puck.p.z*.8); }
+  const k=snap?1:Math.min(1,dt*(camMode==='ice'?2.2:3)); cp.lerp(tp,k); cl.lerp(tl,k); camera.position.copy(cp); camera.lookAt(cl);
+}
+
+/* ---------- page UI ---------- */
+const fmtHt=i=>Math.floor(i/12)+"'"+(i%12)+'"';
+function lineup(){
+  teams.forEach((tm,i)=>{ const rows=['LW','C','RW','LD','RD'].map(s=>tm.slots[s]).concat(tm.goalie);
+    $(i?'tblA':'tblH').innerHTML=rows.map(p=>'<tr data-n="'+p.num+'"><td class="ps">'+p.pos+'</td><td class="no">'+p.num+'</td><td class="nm">'+p.name+'</td><td class="ty">'+p.type+'</td><td class="sz">'+fmtHt(p.ht)+' · '+p.wt+'</td></tr>').join(''); });
+  G.lineupDirty=false;
+}
+let uiT=0;
+function ui(dt){
+  if(tickerT>0){ tickerT-=dt; if(tickerT<=0) $('ticker').style.opacity=0; }
+  uiT-=dt; if(uiT>0) return; uiT=.15;
+  if(G.lineupDirty) lineup();
+  const s=Math.ceil(G.clock); $('clk').textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  const c=puck.carrier; $('puckman').textContent=c?'#'+c.num+' '+c.name+' · '+c.type:'Loose puck'; $('puckman').style.visibility=G.state==='play'?'visible':'hidden';
+  document.querySelectorAll('.team tr').forEach(tr=>tr.classList.remove('has'));
+  if(c){ const tr=$(c.team.id==='H'?'tblH':'tblA').querySelector('tr[data-n="'+c.num+'"]'); if(tr) tr.classList.add('has'); }
+}
+function seg(id,attr,fn){ $(id).addEventListener('click',ev=>{ const b=ev.target.closest('button'); if(!b) return; $(id).querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b)); fn(b.dataset[attr]); }); }
+let speed=1, paused=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+seg('camSeg','cam',v=>{camMode=v; cam(0,true);}); seg('spdSeg','spd',v=>{speed=+v;});
+const pb=$('pause'); const setP=v=>{paused=v; pb.textContent=v?'Play':'Pause';}; pb.addEventListener('click',()=>setP(!paused)); setP(paused);
+
+function resize(){ const w=stage.clientWidth,h=stage.clientHeight; if(!w||!h) return; renderer.setSize(w,h,false); camera.aspect=w/h; camera.fov=w/h<1.5?36:30; camera.updateProjectionMatrix(); }
+if(window.ResizeObserver) new ResizeObserver(resize).observe(stage); window.addEventListener('resize',resize); resize();
+
+lineup(); cam(0,true); pose(0);
+let prev=performance.now(), acc=0; const H=1/60;
+function frame(now){
+  const real=Math.min(.1,(now-prev)/1000); prev=now;
+  if(!paused){ acc+=real*speed; let n=0; while(acc>=H&&n<12){ step(H); acc-=H; n++; } if(n===12) acc=0; pose(real*speed); }
+  cam(real,false); ui(real); renderer.render(scene,camera); requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__sim={G,teams,puck,step};
+})();
+</script>
