@@ -6,3 +6,5 @@ export * from './types';
 export * from './player-types';
 export * from './roster-gen';
 export * from './validate';
+export * from './rink';
+export * from './puck';
