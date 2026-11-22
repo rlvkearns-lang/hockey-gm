@@ -40,6 +40,10 @@ export function buildResult(setup: GameSetup, events: GameEvent[], toi: Map<stri
         if (me) me.goals++;
         for (const a of e.assistIds) { const al = line(a); if (al) al.assists++; }
         if (other) other.shotsAgainst++;
+        if (e.onIce) {
+          for (const id of e.onIce[e.side]) { const l = line(id); if (l) l.plusMinus++; }
+          for (const id of e.onIce[e.side === 'home' ? 'away' : 'home']) { const l = line(id); if (l) l.plusMinus--; }
+        }
         break;
       case 'save':
         if (me) { me.saves++; me.shotsAgainst++; }

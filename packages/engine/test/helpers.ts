@@ -1,16 +1,17 @@
 import { generateTeam } from '../src/roster-gen';
-import { SKATER_ATTRS, type SkaterAttrs } from '../src/attributes';
+import { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from '../src/attributes';
 import { DT } from '../src/constants';
 import { stepPuck } from '../src/puck';
 import type { Puck, PuckEvent } from '../src/puck';
-import type { GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
+import type { GameEventType, GameResult, GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
 import { PLAYER_TYPES } from '../src/player-types';
 import { resolveBoards } from '../src/rink';
 import { createRng } from '../src/rng';
 import { OZONE_SPOTS, ozoneSpotPos } from '../src/team-play';
 import { decideCarrier, type Decision } from '../src/brain';
 import { executePass } from '../src/actions';
-import type { Game } from '../src/game';
+import { createGame, type Game } from '../src/game';
+import { tryBlock } from '../src/goalie';
 import { movementOf, stepSkater } from '../src/skating';
 import type { Movement } from '../src/skating';
 
@@ -190,12 +191,13 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     puck: { pos: { x: o.puckX, y: puckY }, z: 0, vel: { x: 0, y: 0 }, vz: 0 },
     carrierId, lastTouch: o.carrier === null ? null : { id: carrierId!, side: o.carrier }, possession: o.carrier, skaters,
     goalies: {
-      home: { id: 'home-G', pos: { x: -26.5, y: 0 }, facing: 0, pose: 'stance', poseT: 0 },
-      away: { id: 'away-G', pos: { x: 26.5, y: 0 }, facing: Math.PI, pose: 'stance', poseT: 0 },
+      home: { id: 'home-G', pos: { x: -26.5, y: 0 }, vel: { x: 0, y: 0 }, facing: 0, pose: 'stance', poseT: 0 },
+      away: { id: 'away-G', pos: { x: 26.5, y: 0 }, vel: { x: 0, y: 0 }, facing: Math.PI, pose: 'stance', poseT: 0 },
     },
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 },
     onIce: { home: SKATER_SLOTS.map((s) => skaterId('home', s)), away: SKATER_SLOTS.map((s) => skaterId('away', s)) },
-    pickupBlock: null, pendingPass: null,
+    pickupBlock: null, pendingPass: null, shotInFlight: null, screenedUntilTick: { home: 0, away: 0 },
+    touches: { side: null, ids: [] },
   };
 }
 
@@ -272,4 +274,57 @@ export function meanMiss(d: PlayerDef): number {
     total += Math.abs(rx * v.y - ry * v.x) / sp; // distance from the receiver to the puck's line
   }
   return total / 400;
+}
+
+// ---- goalie helpers ----
+
+/** GoalieAttrs with every attribute at `rating`. */
+export function g(rating: number): GoalieAttrs {
+  const a = {} as GoalieAttrs;
+  for (const k of GOALIE_ATTRS) a[k] = rating;
+  return a;
+}
+
+/** The game tests' setup (HBR v NGT) with the given seed. */
+export const setup = (seed = 1): GameSetup => gameSetup(seed);
+
+/** Fraction of `n` calls of `fn` that return true. */
+export function share(n: number, fn: () => boolean): number {
+  let k = 0;
+  for (let i = 0; i < n; i++) if (fn()) k++;
+  return k / n;
+}
+
+/** Events of `type` in the result, optionally only those with the given side. */
+export function count(r: GameResult, type: GameEventType, side?: Side): number {
+  return r.events.filter((e) => e.type === type && (side === undefined || e.side === side)).length;
+}
+
+/** Steps a game until its first goal event and returns the result so far; throws if the game ends without one. */
+export function simulateUntilFirstGoal(s: GameSetup): GameResult {
+  const game = createGame(s);
+  while (!game.done) {
+    game.step();
+    if (game.drainEvents().some((e) => e.type === 'goal')) return game.result();
+  }
+  throw new Error('no goal in the whole game');
+}
+
+let blockSeed = 0;
+/**
+ * One tryBlock roll: a home shot at 30 m/s along +x from (15, 0), with `d` as the only away skater on the ice,
+ * standing on the puck's path 1 m ahead (1.6 m from the shooter). Each call uses a fresh seed.
+ */
+export function blockAttempt(d: PlayerDef): boolean {
+  const st = stateWith({ carrier: 'home', puckX: 15 });
+  const shooter = skater(st, 'home', 'RW');
+  st.carrierId = null;
+  st.puck.vel = { x: 30, y: 0 };
+  st.shotInFlight = { shooterId: shooter.id, side: 'home', from: { x: 15, y: 0 }, fromDist: 12.13, tick: 0, blockTried: [] };
+  const blocker = skater(st, 'away', 'LD');
+  for (const s of onIce(st, 'away')) if (s !== blocker) s.onIce = false;
+  blocker.pos = { x: 16, y: 0 };
+  const ds = new Map(defs);
+  ds.set(blocker.id, { ...d, id: blocker.id, position: 'LD' });
+  return tryBlock(st, ds, createRng(++blockSeed));
 }

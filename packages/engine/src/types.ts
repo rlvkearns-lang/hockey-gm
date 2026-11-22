@@ -94,7 +94,20 @@ export type Phase = 'faceoffSetup' | 'live' | 'stopped' | 'intermission' | 'fina
 
 export type GoaliePose = 'stance' | 'butterfly' | 'glove' | 'blocker' | 'pad' | 'cover';
 
-export type GoalieState = { id: string; pos: Vec2; facing: number; pose: GoaliePose; poseT: number };
+/** `vel` is his movement this tick (m/s); `pose` shows a save (or a cover) for `poseT` more seconds, then `stance`. */
+export type GoalieState = { id: string; pos: Vec2; vel: Vec2; facing: number; pose: GoaliePose; poseT: number };
+
+/** A shot on its way, from its release until the puck reaches the net, misses, hits a post or is blocked. */
+export type ShotInFlight = {
+  shooterId: string;
+  side: Side;
+  /** Where it was released, and how far that was from the net centre (m). */
+  from: Vec2;
+  fromDist: number;
+  tick: number;
+  /** Defenders who have already had their one chance to block it. */
+  blockTried: string[];
+};
 
 export type ContestState = {
   id: number;
@@ -130,6 +143,14 @@ export type GameState = {
   pickupBlock: { ids: string[]; untilTick: number } | null;
   /** A pass on its way: its intended receiver skates onto it and may take it at any speed until tick `untilTick`. */
   pendingPass: { fromId: string; toId: string; untilTick: number } | null;
+  shotInFlight: ShotInFlight | null;
+  /** The goalie of each side is screened while tick < this value (set by net-front battles). */
+  screenedUntilTick: Record<Side, number>;
+  /**
+   * Skaters who had the puck since the last change of team or stoppage, oldest first, by `side`: the scorer's
+   * assists come from here. Pickups, releases, faceoff wins and blocks count; a goalie's save does not.
+   */
+  touches: { side: Side | null; ids: string[] };
 };
 
 export type GameEventType =
@@ -146,6 +167,8 @@ export type GameEvent = {
   otherId: string | null;
   assistIds: string[];
   detail: string;
+  /** On a goal: the skaters of each side on the ice when it went in (for plus/minus). */
+  onIce?: { home: string[]; away: string[] };
 };
 
 export type PlayerLine = {

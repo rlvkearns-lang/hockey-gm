@@ -1,4 +1,4 @@
-import { executeDump, executePass, executeShot, pressureOn } from './actions';
+import { executeDump, executePass, executeShot, goalieShade, pressureOn } from './actions';
 import { composite } from './attributes';
 import { BRAIN_INTERVAL_TICKS } from './constants';
 import { RINK, zoneOf } from './rink';
@@ -19,6 +19,9 @@ const SHOT_DISTANCE_SCALE = 9;
 const MAX_SHOT_DISTANCE = 25;
 /** Base weight of each kind of option, before situation, skill and tendency. */
 const WEIGHT = { shoot: 2.2, pass: 1, carry: 3, dump: 0.15, protect: 0.25 };
+/** Shoot weight is scaled by OPEN_NET_WEIGHT[0] with the goalie square, up to the sum of both with him shaded OPEN_NET_SHADE m off. */
+const OPEN_NET_WEIGHT: [number, number] = [0.85, 0.5];
+const OPEN_NET_SHADE = 0.6;
 /** Largest share any one option may have of the draw. */
 const MAX_SHARE = 0.97;
 /** Passes shorter or longer than this (m) are not considered. */
@@ -113,7 +116,9 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
     if (laneValues.length > seen) { laneValues.length = seen; laneIds.length = seen; }
   }
 
-  const shootW = WEIGHT.shoot * shotQuality(rx, ly) * skill(composite(a, { shootingAccuracy: 0.6, shootingPower: 0.4 })) * tend.shoot * calm;
+  // An open side of the net (the goalie shaded off the line to it) makes a better shot.
+  const open = clamp(Math.abs(goalieShade(state, s.side)) / OPEN_NET_SHADE, 0, 1);
+  const shootW = WEIGHT.shoot * shotQuality(rx, ly) * (OPEN_NET_WEIGHT[0] + OPEN_NET_WEIGHT[1] * open) * skill(composite(a, { shootingAccuracy: 0.6, shootingPower: 0.4 })) * tend.shoot * calm;
   const passSkill = WEIGHT.pass * skill(a.passing) * tend.pass * calm;
   const carryW = WEIGHT.carry * (0.25 + 0.75 * spaceAhead) * skill(a.puckHandling) * tend.carry * calm;
   const zone = zoneOf(p.x, dir);
@@ -151,7 +156,7 @@ function carryTarget(rx: number, ly: number, zone: 'D' | 'N' | 'O', aheadLat: nu
   return { x: tx * dir, y: ty * dir };
 }
 
-/** Runs the carrier's decision every BRAIN_INTERVAL_TICKS and carries it out. Returns the event of a pass, shot or dump. */
+/** Runs the carrier's decision every BRAIN_INTERVAL_TICKS and carries it out. Returns the event of a pass or dump (a shot's event comes when it ends). */
 export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng): GameEvent | null {
   if (state.carrierId === null || state.tick % BRAIN_INTERVAL_TICKS !== 0) return null;
   const s = skaterById(state, state.carrierId);
@@ -159,7 +164,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   const me = defs.get(s.id)!;
   const d = decideCarrier(state, me, defs, rng);
   switch (d.kind) {
-    case 'shoot': return executeShot(state, s.id, defs, rng);
+    case 'shoot': executeShot(state, s.id, defs, rng); return null;
     case 'pass': return executePass(state, s.id, d.toId, defs, rng);
     case 'dump': return executeDump(state, s.id, defs, rng);
     case 'carry':

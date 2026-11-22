@@ -1,3 +1,4 @@
+import { recordTouch } from './actions';
 import { resolveBoards } from './rink';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, Position, Side, SkaterState } from './types';
@@ -30,6 +31,33 @@ export function faceoffPosition(spot: Vec2, slot: Position | null, dir: 1 | -1):
   return pos;
 }
 
+/** Puck still and flat on the ice (every stoppage). */
+export function restPuck(state: GameState): void {
+  const p = state.puck;
+  p.vel.x = 0;
+  p.vel.y = 0;
+  p.z = 0;
+  p.vz = 0;
+}
+
+/**
+ * Whistle: phase `stopped`, puck at rest where it is, nobody in possession, no pass or shot pending, the touch chain
+ * cleared, and every on-ice skater heads for his line-up spot for the faceoff at `spot`.
+ */
+export function stopPlay(state: GameState, spot: Vec2): void {
+  state.phase = 'stopped';
+  state.phaseT = 0;
+  state.carrierId = null;
+  state.possession = null;
+  state.pickupBlock = null;
+  state.pendingPass = null;
+  state.shotInFlight = null;
+  state.touches = { side: null, ids: [] };
+  restPuck(state);
+  state.faceoffSpot = { x: spot.x, y: spot.y };
+  headForLineup(state);
+}
+
 /** Enter faceoffSetup at `spot`: puck on the dot, nobody in possession, every on-ice skater heads for his line-up spot. */
 export function setupFaceoff(state: GameState, spot: Vec2): void {
   state.phase = 'faceoffSetup';
@@ -39,6 +67,8 @@ export function setupFaceoff(state: GameState, spot: Vec2): void {
   state.carrierId = null;
   state.possession = null;
   state.pendingPass = null;
+  state.shotInFlight = null;
+  state.touches = { side: null, ids: [] };
   headForLineup(state);
 }
 
@@ -97,6 +127,7 @@ export function dropPuck(state: GameState, _defs: Map<string, PlayerDef>, rng: R
   state.carrierId = null;
   state.possession = winner;
   state.lastTouch = winC ? { id: winC.id, side: winner } : null;
+  if (winC) recordTouch(state, winC.id, winner);
   state.phase = 'live';
   state.phaseT = 0;
   return {

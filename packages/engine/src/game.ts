@@ -1,12 +1,12 @@
-import { blockPickup } from './actions';
+import { blockPickup, recordTouch } from './actions';
 import { benchTick } from './bench';
 import { resolveBodies } from './bodies';
 import { brainTick } from './brain';
 import { DT, PERIOD_SECONDS, PERIODS } from './constants';
 import { contestTick } from './contests/core';
-import { dropPuck, FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, headForLineup, linedUp, setupFaceoff, snapToLineup } from './faceoff';
-import { goalieTick } from './goalie';
-import { stepPuck } from './puck';
+import { dropPuck, FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, linedUp, restPuck, setupFaceoff, snapToLineup } from './faceoff';
+import { goalieTick, resolveOnNet, trackShot, tryBlock } from './goalie';
+import { stepPuck, type PuckEvent } from './puck';
 import { refereeTick } from './referee';
 import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './rink';
 import { createRng } from './rng';
@@ -46,7 +46,7 @@ const BENCH: Record<Side, { x: number; y: number }> = { home: { x: -7, y: -12.2 
 const homeDirFor = (period: number): 1 | -1 => (period % 2 === 1 ? 1 : -1);
 
 function goalieAt(id: string, dir: 1 | -1): GoalieState {
-  return { id, pos: { x: -dir * (RINK.goalLineX - 0.6), y: 0 }, facing: dir === 1 ? 0 : Math.PI, pose: 'stance', poseT: 0 };
+  return { id, pos: { x: -dir * (RINK.goalLineX - 0.6), y: 0 }, vel: { x: 0, y: 0 }, facing: dir === 1 ? 0 : Math.PI, pose: 'stance', poseT: 0 };
 }
 
 function initialState(setup: GameSetup): GameState {
@@ -77,6 +77,7 @@ function initialState(setup: GameSetup): GameState {
     carrierId: null, lastTouch: null, possession: null, skaters,
     goalies: { home: goalieAt(setup.home.lines.goalie, dir), away: goalieAt(setup.away.lines.goalie, dir === 1 ? -1 : 1) },
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
+    shotInFlight: null, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [] },
   };
 }
 
@@ -93,15 +94,6 @@ function startPeriod(state: GameState, period: number): void {
   state.pendingPass = null;
   restPuck(state);
   setupFaceoff(state, FACEOFF_DOTS.centre);
-}
-
-/** Puck still and flat on the ice (every stoppage). */
-function restPuck(state: GameState): void {
-  const p = state.puck;
-  p.vel.x = 0;
-  p.vel.y = 0;
-  p.z = 0;
-  p.vz = 0;
 }
 
 export function createGame(setup: GameSetup): Game {
@@ -209,20 +201,9 @@ export function createGame(setup: GameSetup): Game {
     state.pendingPass = null;
     state.carrierId = best.id;
     state.lastTouch = { id: best.id, side: best.side };
+    recordTouch(state, best.id, best.side);
     state.possession = best.side;
     carryPuck(best);
-  }
-
-  function stopPlay(): void {
-    state.phase = 'stopped';
-    state.phaseT = 0;
-    state.carrierId = null;
-    state.possession = null;
-    state.pickupBlock = null;
-    state.pendingPass = null;
-    restPuck(state);
-    state.faceoffSpot = { ...FACEOFF_DOTS.centre };
-    headForLineup(state);
   }
 
   function liveTick(): void {
@@ -237,20 +218,27 @@ export function createGame(setup: GameSetup): Game {
 
     const skaters = onIceSkaters();
     moveSkaters(skaters);
-    goalieTick(state, defs, rng, DT);
+    goalieTick(state, defs, rng, DT, events);
 
-    let carrier: SkaterState | null = null;
-    if (state.carrierId !== null) for (const sk of skaters) if (sk.id === state.carrierId) { carrier = sk; break; }
-    let onNet = false;
-    if (carrier) {
-      carryPuck(carrier);
-    } else {
-      state.carrierId = null;
-      prevPuck.x = state.puck.pos.x;
-      prevPuck.y = state.puck.pos.y;
-      for (const ev of stepPuck(state.puck, DT)) if (ev.kind === 'onNet') onNet = true;
-      // Task 7 turns onNet into a save or a goal; until then it is a whistle with a centre-ice draw.
-      if (!onNet) tryPickup(skaters, prevPuck);
+    if (state.phase === 'live') {
+      let carrier: SkaterState | null = null;
+      if (state.carrierId !== null) for (const sk of skaters) if (sk.id === state.carrierId) { carrier = sk; break; }
+      if (carrier) {
+        carryPuck(carrier);
+      } else {
+        state.carrierId = null;
+        tryBlock(state, defs, rng, events);
+        prevPuck.x = state.puck.pos.x;
+        prevPuck.y = state.puck.pos.y;
+        const puckEvents = stepPuck(state.puck, DT);
+        let onNet: Extract<PuckEvent, { kind: 'onNet' }> | null = null;
+        for (const ev of puckEvents) if (ev.kind === 'onNet') onNet = ev;
+        if (onNet) resolveOnNet(state, onNet, defs, rng, events);
+        else {
+          tryPickup(skaters, prevPuck);
+          trackShot(state, puckEvents, events);
+        }
+      }
     }
     const call = refereeTick(state, prevPuckX);
     if (call) events.push(call);
@@ -265,11 +253,10 @@ export function createGame(setup: GameSetup): Game {
       state.possession = null;
       state.pickupBlock = null;
       state.pendingPass = null;
+      state.shotInFlight = null;
       restPuck(state);
       state.phase = state.period >= PERIODS ? 'final' : 'intermission';
       state.phaseT = 0;
-    } else if (onNet && state.phase === 'live') {
-      stopPlay();
     }
   }
 
@@ -283,10 +270,12 @@ export function createGame(setup: GameSetup): Game {
         break;
       case 'stopped':
         moveSkaters(onIceSkaters());
+        goalieTick(state, defs, rng, DT, events);
         if (state.phaseT >= STOPPED_SECONDS - EPS) setupFaceoff(state, state.faceoffSpot);
         break;
       case 'faceoffSetup':
         moveSkaters(onIceSkaters());
+        goalieTick(state, defs, rng, DT, events);
         if (state.phaseT >= FACEOFF_MIN_SECONDS - EPS && (state.phaseT >= FACEOFF_MAX_SECONDS - EPS || linedUp(state))) {
           const e = dropPuck(state, defs, rng);
           events.push(e);

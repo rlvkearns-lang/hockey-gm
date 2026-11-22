@@ -14,5 +14,6 @@ export * from './faceoff';
 export * from './team-play';
 export * from './brain';
 export * from './actions';
+export * from './goalie';
 export * from './stats';
 export * from './game';
