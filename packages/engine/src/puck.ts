@@ -47,14 +47,15 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
   const speed = Math.hypot(puck.vel.x, puck.vel.y);
   const n = Math.max(1, Math.ceil((speed * dt) / MAX_SUBSTEP));
   const h = dt / n;
+  const friction = Math.exp(-ICE_DECAY * h);
+  let boardsHit = false;
 
   for (let i = 0; i < n; i++) {
     const px = puck.pos.x, py = puck.pos.y, pz = puck.z;
 
     if (puck.z === 0 && puck.vz === 0) {
-      const f = Math.exp(-ICE_DECAY * h);
-      puck.vel.x *= f;
-      puck.vel.y *= f;
+      puck.vel.x *= friction;
+      puck.vel.y *= friction;
     } else {
       puck.vz -= GRAVITY * h;
       puck.z += puck.vz * h;
@@ -77,7 +78,7 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
       }
     }
 
-    if (resolveBoards(puck.pos, puck.vel, PUCK_RADIUS, BOARDS_RESTITUTION)) events.push({ kind: 'boards' });
+    if (resolveBoards(puck.pos, puck.vel, PUCK_RADIUS, BOARDS_RESTITUTION)) boardsHit = true;
 
     // Goal-line crossing from the front, between the posts.
     for (const end of ENDS) {
@@ -95,11 +96,13 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
         puck.vel.x = 0;
         puck.vel.y = 0;
         puck.vz = 0;
+        if (boardsHit) events.unshift({ kind: 'boards' });
         events.push({ kind: 'onNet', end, y, z, speed: sp });
         return events;
       }
       events.push({ kind: 'overNet', end });
     }
   }
+  if (boardsHit) events.unshift({ kind: 'boards' });
   return events;
 }

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { len } from '../src/vec';
+import { DT } from '../src/constants';
+import { stepPuck } from '../src/puck';
 import { puckAt, run, runUntilEvent } from './helpers';
 
 describe('puck', () => {
@@ -36,5 +38,15 @@ describe('puck', () => {
   it('a puck from the side bounces off the net', () => {
     const k = puckAt(27.6, 3, 0, -15); run(k, 0.5);
     expect(k.pos.y).toBeGreaterThan(0.9);
+  });
+  it('a rim emits at most one boards event per tick', () => {
+    const k = puckAt(20, 12.5, 25, 0);
+    let total = 0;
+    for (let i = 0; i < Math.round(1.5 / DT); i++) {
+      const n = stepPuck(k, DT).filter((e) => e.kind === 'boards').length;
+      expect(n).toBeLessThanOrEqual(1);
+      total += n;
+    }
+    expect(total).toBeGreaterThan(0);
   });
 });

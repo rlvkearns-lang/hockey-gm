@@ -1,5 +1,8 @@
 import { generateTeam } from '../src/roster-gen';
 import { SKATER_ATTRS } from '../src/attributes';
+import { DT } from '../src/constants';
+import { stepPuck } from '../src/puck';
+import type { Puck, PuckEvent } from '../src/puck';
 import type { GameSetup, TeamDef } from '../src/types';
 
 export const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -19,10 +22,6 @@ export function validSetup(): GameSetup {
     chemistry: [],
   };
 }
-
-import { DT } from '../src/constants';
-import { stepPuck } from '../src/puck';
-import type { Puck, PuckEvent } from '../src/puck';
 
 export function puckAt(x: number, y: number, vx: number, vy: number, z = 0, vz = 0): Puck {
   return { pos: { x, y }, z, vel: { x: vx, y: vy }, vz };
