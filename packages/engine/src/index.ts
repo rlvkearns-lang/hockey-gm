@@ -8,3 +8,5 @@ export * from './roster-gen';
 export * from './validate';
 export * from './rink';
 export * from './puck';
+export * from './skating';
+export * from './bodies';

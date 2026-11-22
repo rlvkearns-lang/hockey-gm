@@ -1,3 +1,4 @@
+import type { Vec2 } from './vec';
 import type { GoalieAttrs, SkaterAttrs } from './attributes';
 
 export type Position = 'C' | 'LW' | 'RW' | 'LD' | 'RD' | 'G';
@@ -63,4 +64,27 @@ export type GameSetup = {
   away: TeamDef;
   seed: number;
   chemistry: { a: string; b: string; value: number }[];
+};
+
+export type SkaterState = {
+  id: string;
+  side: Side;
+  slot: Position | null;
+  pos: Vec2;
+  vel: Vec2;
+  /** Radians; direction the body points. */
+  facing: number;
+  /** Where he is trying to go. */
+  target: Vec2;
+  /** When set, he keeps his body pointed at this spot (skating backward if need be). */
+  faceTarget: Vec2 | null;
+  /** 0..1 fraction of top speed he may use this tick. */
+  speedCap: number;
+  energy: number;
+  onIce: boolean;
+  leaving: boolean;
+  /** Seconds left knocked down; above 0 means no control. Decremented by the caller. */
+  downT: number;
+  contestId: number | null;
+  shiftStart: number;
 };

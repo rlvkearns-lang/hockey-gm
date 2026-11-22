@@ -1,0 +1,86 @@
+import { resolveBoards } from './rink';
+import type { PlayerDef, SkaterState } from './types';
+
+export type Movement = {
+  topSpeed: number;
+  accel: number;
+  turnRate: number;
+  backwardFactor: number;
+  mass: number;
+  radius: number;
+};
+
+/** Distance from the target (m) inside which a skater eases off. */
+const ARRIVE_RADIUS = 2;
+/** Sideways velocity shed per second (skate edges). */
+const EDGE_GRIP = 6;
+/** Speed lost per second while down. */
+const DOWN_FRICTION = 2;
+/** Angle between travel and facing target beyond which he skates backward. */
+const BACKWARD_ANGLE = (100 * Math.PI) / 180;
+
+export function movementOf(def: PlayerDef, energy: number): Movement {
+  const a = def.attrs;
+  const tired = energy >= 0.5 ? 1 : 0.85 + 0.15 * (Math.max(0, energy) / 0.5);
+  return {
+    topSpeed: (7.2 + a.speed * 0.022) * tired,
+    accel: (5 + a.acceleration * 0.06) * tired,
+    turnRate: 2.2 + a.agility * 0.03,
+    backwardFactor: 0.72 + a.agility * 0.0012,
+    mass: def.weightKg + 9,
+    radius: 0.38 + (def.weightKg - 85) * 0.002,
+  };
+}
+
+const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+
+export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
+  if (s.downT > 0) {
+    const f = Math.max(0, 1 - DOWN_FRICTION * dt);
+    s.vel.x *= f;
+    s.vel.y *= f;
+  } else {
+    const dx = s.target.x - s.pos.x, dy = s.target.y - s.pos.y;
+    const dist = Math.hypot(dx, dy);
+    const speed = Math.hypot(s.vel.x, s.vel.y);
+    const hasGoal = dist > 0.05;
+    const travel = hasGoal ? Math.atan2(dy, dx) : s.facing;
+
+    let backward = false;
+    let wantFacing = travel;
+    if (s.faceTarget) {
+      const fx = s.faceTarget.x - s.pos.x, fy = s.faceTarget.y - s.pos.y;
+      if (fx !== 0 || fy !== 0) {
+        const toFace = Math.atan2(fy, fx);
+        if (!hasGoal) wantFacing = toFace;
+        else if (Math.abs(wrapAngle(toFace - travel)) > BACKWARD_ANGLE) { backward = true; wantFacing = toFace; }
+      }
+    }
+    if (!hasGoal && !s.faceTarget) wantFacing = s.facing;
+
+    // Turn, slower at speed.
+    const maxTurn = (m.turnRate / (1 + speed / 6)) * dt;
+    s.facing = wrapAngle(s.facing + Math.max(-maxTurn, Math.min(maxTurn, wrapAngle(wantFacing - s.facing))));
+
+    const fx = Math.cos(s.facing), fy = Math.sin(s.facing);
+    const moveDir = backward ? -1 : 1;
+    // Only effort along the facing counts; scale by how well it points at the goal.
+    const align = hasGoal ? Math.max(0, (moveDir * fx * dx + moveDir * fy * dy) / dist) : 0;
+    const arrive = Math.min(1, dist / ARRIVE_RADIUS);
+    const cap = Math.max(0, Math.min(1, s.speedCap));
+    const wantSpeed = m.topSpeed * cap * arrive * align * (backward ? m.backwardFactor : 1);
+    const wantAlong = moveDir * wantSpeed;
+
+    const along = s.vel.x * fx + s.vel.y * fy;
+    const latX = s.vel.x - fx * along, latY = s.vel.y - fy * along;
+    const step = m.accel * dt;
+    const newAlong = along + Math.max(-step, Math.min(step, wantAlong - along));
+    const grip = Math.exp(-EDGE_GRIP * dt);
+    s.vel.x = fx * newAlong + latX * grip;
+    s.vel.y = fy * newAlong + latY * grip;
+  }
+
+  s.pos.x += s.vel.x * dt;
+  s.pos.y += s.vel.y * dt;
+  resolveBoards(s.pos, s.vel, m.radius, 0);
+}
