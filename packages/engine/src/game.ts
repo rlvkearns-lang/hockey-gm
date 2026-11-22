@@ -1,5 +1,5 @@
 import { blockPickup, recordTouch } from './actions';
-import { benchTick } from './bench';
+import { BENCH_DOORS, benchTick, finishChanges, initialBench } from './bench';
 import { resolveBodies } from './bodies';
 import { brainTick } from './brain';
 import { DT, PERIOD_SECONDS, PERIODS } from './constants';
@@ -40,8 +40,12 @@ const EPS = 1e-9;
 /** Scratch velocity for clamping the carried puck (its velocity is the carrier's, not bounced). */
 const noVel = { x: 0, y: 0 };
 const NO_IDS: string[] = [];
-/** Where off-ice skaters wait. */
-const BENCH: Record<Side, { x: number; y: number }> = { home: { x: -7, y: -12.2 }, away: { x: 7, y: -12.2 } };
+
+/**
+ * The energy his Movement is built from: 1 at 0.5 and above (where energy does not affect skating), else energy to the
+ * nearest 0.005, so tired legs slow him without rebuilding his Movement every tick.
+ */
+const legs = (energy: number): number => (energy >= 0.5 ? 1 : Math.round(energy * 200) / 200);
 
 const homeDirFor = (period: number): 1 | -1 => (period % 2 === 1 ? 1 : -1);
 
@@ -61,7 +65,7 @@ function initialState(setup: GameSetup): GameState {
     for (const p of setup[side].players) {
       if (p.position === 'G') continue;
       const slot = slotOf.get(p.id) ?? null;
-      const b = BENCH[side];
+      const b = BENCH_DOORS[side];
       skaters.push({
         id: p.id, side, slot, pos: { x: b.x, y: b.y }, vel: { x: 0, y: 0 }, facing: 0, target: { x: b.x, y: b.y },
         faceTarget: null, speedCap: 1, energy: 1, onIce: slot !== null, leaving: false, downT: 0, contestId: null, shiftStart: 0,
@@ -79,6 +83,7 @@ function initialState(setup: GameSetup): GameState {
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
+    bench: initialBench(setup),
   };
 }
 
@@ -110,8 +115,8 @@ export function createGame(setup: GameSetup): Game {
   snapToLineup(state); // the opening line-up; later draws wait for players to skate there
 
   // Per-skater bookkeeping, parallel to state.skaters (whose order never changes).
-  // Movement is rebuilt only when the skater's energy changes.
-  const bodies = state.skaters.map((sk) => ({ def: defs.get(sk.id)!, energy: sk.energy, move: movementOf(defs.get(sk.id)!, sk.energy), toi: 0 }));
+  // Movement is rebuilt only when the skater's legs change (see legs()).
+  const bodies = state.skaters.map((sk) => ({ def: defs.get(sk.id)!, legs: legs(sk.energy), move: movementOf(defs.get(sk.id)!, legs(sk.energy)), toi: 0 }));
   const bodyById = new Map(state.skaters.map((sk, i) => [sk.id, bodies[i]!]));
   const move = (id: string): Movement => bodyById.get(id)!.move;
   /** On-ice skaters, refilled in place each tick. */
@@ -126,7 +131,8 @@ export function createGame(setup: GameSetup): Game {
       if (!sk.onIce) continue;
       onIceList.push(sk);
       const b = bodies[i]!;
-      if (b.energy !== sk.energy) { b.energy = sk.energy; b.move = movementOf(b.def, sk.energy); }
+      const l = legs(sk.energy);
+      if (b.legs !== l) { b.legs = l; b.move = movementOf(b.def, l); }
     }
     return onIceList;
   };
@@ -186,14 +192,14 @@ export function createGame(setup: GameSetup): Game {
     if (pass !== null) {
       for (const s of skaters) {
         if (s.id !== pass.toId) continue;
-        if (s.downT === 0 && !blocked.includes(s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
+        if (s.downT === 0 && !s.leaving && !blocked.includes(s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
         break;
       }
     }
     if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
       let bestD = PICKUP_RADIUS;
       for (const s of skaters) {
-        if (s.downT > 0 || blocked.includes(s.id)) continue;
+        if (s.downT > 0 || s.leaving || blocked.includes(s.id)) continue;
         const d = dist(s.pos, p.pos);
         if (d <= bestD) { bestD = d; best = s; }
       }
@@ -211,7 +217,7 @@ export function createGame(setup: GameSetup): Game {
     const prevPuckX = state.puck.pos.x;
     if (state.pickupBlock !== null && state.tick >= state.pickupBlock.untilTick) state.pickupBlock = null;
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
-    benchTick(state, setup, rng, DT);
+    benchTick(state, setup, rng, DT, events);
     assignJobs(state, defs, tactics);
     const action = brainTick(state, defs, rng);
     if (action) events.push(action);
@@ -270,14 +276,17 @@ export function createGame(setup: GameSetup): Game {
         liveTick();
         break;
       case 'stopped':
+        benchTick(state, setup, rng, DT, events);
         moveSkaters(onIceSkaters());
         goalieTick(state, defs, rng, DT, events);
         if (state.phaseT >= STOPPED_SECONDS - EPS) setupFaceoff(state, state.faceoffSpot);
         break;
       case 'faceoffSetup':
+        benchTick(state, setup, rng, DT, events);
         moveSkaters(onIceSkaters());
         goalieTick(state, defs, rng, DT, events);
         if (state.phaseT >= FACEOFF_MIN_SECONDS - EPS && (state.phaseT >= FACEOFF_MAX_SECONDS - EPS || linedUp(state))) {
+          finishChanges(state, setup); // at the 8 s cap a change may still be under way
           const e = dropPuck(state, defs, rng);
           events.push(e);
           const ids = [e.playerId, e.otherId].filter((id): id is string => id !== null);

@@ -100,6 +100,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   for (const t of state.skaters) {
     if (!t.onIce || t.side !== s.side || t === s || t.downT > 0) continue;
     if (outside && t.pos.x * dir > RINK.blueLineX + bodyRadius(defs.get(t.id)!.weightKg)) { mateOffside = true; continue; }
+    if (t.leaving) continue; // still counts for offside, but is no pass target
     const l = dist(p, t.pos);
     if (l < PASS_RANGE[0] || l > PASS_RANGE[1]) continue;
     let laneMin = Infinity, recvMin = Infinity;

@@ -237,7 +237,7 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   const shooter = skaterById(state, shot.shooterId);
   const ax = pk.pos.x, ay = pk.pos.y, bx = ax + pk.vel.x * DT, by = ay + pk.vel.y * DT;
   for (const s of state.skaters) {
-    if (!s.onIce || s.side === shot.side || s.downT > 0 || shot.blockTried.includes(s.id)) continue;
+    if (!s.onIce || s.leaving || s.side === shot.side || s.downT > 0 || shot.blockTried.includes(s.id)) continue;
     if (segDistXY(s.pos.x, s.pos.y, ax, ay, bx, by) > BLOCK.path) continue;
     if (shooter && dist(s.pos, shooter.pos) <= BLOCK.clearOfShooter) continue;
     shot.blockTried.push(s.id);
@@ -309,10 +309,10 @@ function creditFor(state: GameState, side: Side): string {
   return best;
 }
 
-/** The skaters of each side on the ice now (not those leaving). */
+/** The skaters of each side on the ice now (a player skating off for a change is on the ice until he reaches the door). */
 function onIceIds(state: GameState): { home: string[]; away: string[] } {
   const ids = { home: [] as string[], away: [] as string[] };
-  for (const s of state.skaters) if (s.onIce && !s.leaving) ids[s.side].push(s.id);
+  for (const s of state.skaters) if (s.onIce) ids[s.side].push(s.id);
   return ids;
 }
 

@@ -1,6 +1,7 @@
 import { generateTeam } from '../src/roster-gen';
 import { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from '../src/attributes';
-import { DT } from '../src/constants';
+import { DT, PERIOD_SECONDS } from '../src/constants';
+import { drainEnergy, recoverEnergy } from '../src/bench';
 import { stepPuck } from '../src/puck';
 import type { Puck, PuckEvent } from '../src/puck';
 import type { GameEvent, GameEventType, GameResult, GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
@@ -200,6 +201,10 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     pickupBlock: null, pendingPass: null, shotInFlight: null, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [] }, lastAttackTouch: { home: null, away: null },
     noChange: null, delayedOffside: null, icingWatch: null,
+    bench: {
+      home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
+      away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
+    },
   };
 }
 
@@ -452,4 +457,84 @@ export function icingAfter(st: GameState, o: { attackerAhead?: boolean } = {}): 
   }
   const call = refereeUntilCall(st);
   return call !== null && call.type === 'icing' ? call : null;
+}
+
+// ---- bench helpers ----
+
+/** Energy of `d` after `seconds` of skating flat out from fresh (effort 1 every tick). */
+export function energyAfterShift(d: PlayerDef, seconds: number): number {
+  let e = 1;
+  for (let i = Math.round(seconds / DT); i > 0; i--) e = drainEnergy(e, d.attrs.stamina, 1, DT);
+  return e;
+}
+
+/** Energy after `seconds` on the bench from `energy`. */
+export function energyAfterRest(energy: number, seconds: number): number {
+  let e = energy;
+  for (let i = Math.round(seconds / DT); i > 0; i--) e = recoverEnergy(e, DT);
+  return e;
+}
+
+export function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 === 1 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}
+
+/** `lineChange` events of the result, optionally only those of one kind (`onTheFly` or `stoppage`). */
+export function lineChangeEvents(r: GameResult, kind?: 'onTheFly' | 'stoppage'): GameEvent[] {
+  return r.events.filter((e) => e.type === 'lineChange' && (kind === undefined || e.detail.split(' ').includes(kind)));
+}
+
+/** Game seconds elapsed (clock time) at an event. */
+const gameSecondsAt = (e: GameEvent): number => (e.period - 1) * PERIOD_SECONDS + (PERIOD_SECONDS - e.clock);
+
+/**
+ * Shift lengths (clock seconds) of both teams' forward lines and defence pairs: the time between one change of a unit
+ * and the next (the first from the opening faceoff). The last shift of each unit (ended by the final buzzer) is left out.
+ */
+export function shiftLengths(r: GameResult): { forwards: number[]; defence: number[] } {
+  const out = { forwards: [] as number[], defence: [] as number[] };
+  for (const side of ['home', 'away'] as const) {
+    for (const unit of ['forwards', 'defence'] as const) {
+      let last = 0;
+      for (const e of lineChangeEvents(r)) {
+        if (e.side !== side || !e.detail.startsWith(unit)) continue;
+        const t = gameSecondsAt(e);
+        out[unit].push(t - last);
+        last = t;
+      }
+    }
+  }
+  return out;
+}
+
+const gamesByState = new WeakMap<GameState, Game>();
+
+/**
+ * A real game (setup(1), then other seeds) stopped by an icing by `side`, the whistle just blown, neither team in the
+ * middle of a change. Both teams' units are made due for a change (their shifts started long ago), so only the
+ * icing rule can keep them on. Step it on with runThroughFaceoff.
+ */
+export function afterIcingBy(side: Side): GameState {
+  for (let seed = 1; seed <= 20; seed++) {
+    const g = createGame(setup(seed));
+    while (!g.done) {
+      g.step();
+      const icing = g.drainEvents().find((e) => e.type === 'icing' && e.side === side);
+      if (!icing || g.state.skaters.some((s) => s.leaving)) continue;
+      for (const t of ['home', 'away'] as const) for (const u of ['forwards', 'defence'] as const) g.state.bench[t][u].shiftStart -= 1000;
+      gamesByState.set(g.state, g);
+      return g.state;
+    }
+  }
+  throw new Error(`no clean icing by ${side} in seeds 1-20`);
+}
+
+/** Steps the game behind `st` (from afterIcingBy) until the puck has been dropped. */
+export function runThroughFaceoff(st: GameState): void {
+  const g = gamesByState.get(st);
+  if (!g) throw new Error('not a state from afterIcingBy');
+  for (let i = 0; i < 30 * 20 && st.phase !== 'live'; i++) g.step();
+  if (st.phase !== 'live') throw new Error('the puck was not dropped within 20 s');
 }

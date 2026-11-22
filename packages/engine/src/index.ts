@@ -16,5 +16,6 @@ export * from './brain';
 export * from './actions';
 export * from './goalie';
 export * from './referee';
+export * from './bench';
 export * from './stats';
 export * from './game';

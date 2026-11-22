@@ -83,21 +83,22 @@ export function setupFaceoff(state: GameState, spot: Vec2): void {
   headForLineup(state);
 }
 
-/** Every on-ice skater skates toward his line-up spot for the draw at state.faceoffSpot. */
+/** Every on-ice skater (but those leaving for the bench) skates toward his line-up spot for the draw at state.faceoffSpot. */
 export function headForLineup(state: GameState): void {
   const spot = state.faceoffSpot;
   for (const s of state.skaters) {
-    if (!s.onIce) continue;
+    if (!s.onIce || s.leaving) continue;
     s.target = faceoffPosition(spot, s.slot, state.attackDir[s.side]);
     s.faceTarget = null;
     s.speedCap = 0.8;
   }
 }
 
-/** True when every on-ice skater is within LINEUP_TOLERANCE of his line-up spot. */
+/** True when no line change is under way and every on-ice skater is within LINEUP_TOLERANCE of his line-up spot. */
 export function linedUp(state: GameState): boolean {
   for (const s of state.skaters) {
     if (!s.onIce) continue;
+    if (s.leaving) return false;
     const p = faceoffPosition(state.faceoffSpot, s.slot, state.attackDir[s.side]);
     if (hypot2(s.pos.x - p.x, s.pos.y - p.y) > LINEUP_TOLERANCE) return false;
   }

@@ -250,7 +250,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   let awayChaser: SkaterState | null = null, awayD = Infinity;
   const tagUp = state.delayedOffside?.side ?? null;
   for (const s of state.skaters) {
-    if (!s.onIce || s.downT > 0 || s.contestId !== null || s === carrier || s.side === tagUp) continue;
+    if (!s.onIce || s.leaving || s.downT > 0 || s.contestId !== null || s === carrier || s.side === tagUp) continue;
     if (carrier) {
       if (s.side === carrier.side) continue;
       const d = dist(s.pos, carrier.pos);
@@ -265,7 +265,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   if (pass) {
     for (const s of state.skaters) {
       if (s.id !== pass.toId) continue;
-      if (s.onIce && s.downT === 0 && s.contestId === null && s.side !== tagUp) { if (s.side === 'home') homeChaser = s; else awayChaser = s; }
+      if (s.onIce && !s.leaving && s.downT === 0 && s.contestId === null && s.side !== tagUp) { if (s.side === 'home') homeChaser = s; else awayChaser = s; }
       break;
     }
   }
@@ -273,7 +273,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   const awayPhase = phaseOf(shapeSide, puck.x, 'away', state.attackDir.away);
 
   for (const s of state.skaters) {
-    if (!s.onIce || s.contestId !== null) continue;
+    if (!s.onIce || s.leaving || s.contestId !== null) continue;
     if (s === carrier) { s.faceTarget = null; continue; }
     const d = defs.get(s.id)!;
     const dir = state.attackDir[s.side];

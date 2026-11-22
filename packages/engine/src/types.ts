@@ -87,6 +87,7 @@ export type SkaterState = {
   /** Seconds left knocked down; above 0 means no control. Decremented by the caller. */
   downT: number;
   contestId: number | null;
+  /** Game clock seconds (counted from the opening faceoff) when he last stepped on the ice. */
   shiftStart: number;
 };
 
@@ -163,7 +164,23 @@ export type GameState = {
   delayedOffside: { side: Side; y: number } | null;
   /** A puck released by `side` from its own half at (fromX, fromY) on `tick`, untouched since: icing if it crosses the far goal line. */
   icingWatch: { side: Side; fromX: number; fromY: number; tick: number } | null;
+  /** Each team's line rotation (see bench.ts). */
+  bench: Record<Side, BenchState>;
 };
+
+/** One kind of unit of a team: its forward lines or its defence pairs. */
+export type BenchUnit = {
+  /** Index (into Lines.forwards or Lines.defence) of the unit on the ice, or coming on while `changing`. */
+  cur: number;
+  /** True from the start of a change until the outgoing unit is all off and the incoming one all on. */
+  changing: boolean;
+  /** Game clock seconds (counted from the opening faceoff) when the unit's current shift began. */
+  shiftStart: number;
+  /** Live seconds each unit has been credited with, by index. */
+  toi: number[];
+};
+
+export type BenchState = { forwards: BenchUnit; defence: BenchUnit };
 
 export type GameEventType =
   | 'faceoff' | 'pass' | 'shot' | 'save' | 'goal' | 'miss' | 'post' | 'block' | 'hit' | 'takeaway'
