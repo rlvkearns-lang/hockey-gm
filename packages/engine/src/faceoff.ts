@@ -1,7 +1,7 @@
 import { resolveBoards } from './rink';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, Position, Side, SkaterState } from './types';
-import type { Vec2 } from './vec';
+import { hypot2, type Vec2 } from './vec';
 
 /** Seconds the teams take to line up before the drop. */
 export const FACEOFF_SETUP_SECONDS = 3;
@@ -77,7 +77,7 @@ export function dropPuck(state: GameState, _defs: Map<string, PlayerDef>, rng: R
   const spot = state.faceoffSpot;
   const to = ds.length > 0 ? rng.pick(ds).pos : { x: spot.x - state.attackDir[winner] * 8, y: spot.y };
   const dx = to.x - spot.x, dy = to.y - spot.y;
-  const d = Math.hypot(dx, dy) || 1;
+  const d = hypot2(dx, dy) || 1;
   const speed = rng.range(DRAW_BACK_SPEED[0], DRAW_BACK_SPEED[1]);
   state.puck = { pos: { x: spot.x, y: spot.y }, z: 0, vel: { x: (dx / d) * speed, y: (dy / d) * speed }, vz: 0 };
   state.carrierId = null;

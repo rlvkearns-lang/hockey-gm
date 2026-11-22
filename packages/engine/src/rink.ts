@@ -1,4 +1,4 @@
-import type { Vec2 } from './vec';
+import { hypot2, type Vec2 } from './vec';
 
 export const RINK = {
   halfLength: 30.48,
@@ -46,7 +46,7 @@ export function resolveBoards(pos: Vec2, vel: Vec2, radius: number, restitution:
   if (Math.abs(pos.x) > cx && Math.abs(pos.y) > cy) {
     const sx = Math.sign(pos.x), sy = Math.sign(pos.y);
     const dx = pos.x - sx * cx, dy = pos.y - sy * cy;
-    const d = Math.hypot(dx, dy);
+    const d = hypot2(dx, dy);
     const limit = R - radius;
     if (d > limit) {
       const nx = dx / d, ny = dy / d;

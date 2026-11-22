@@ -1,5 +1,6 @@
 import type { Vec2 } from './vec';
 import { RINK, resolveBoards } from './rink';
+import { hypot2 } from './vec';
 
 export type Puck = { pos: Vec2; z: number; vel: Vec2; vz: number };
 
@@ -19,8 +20,14 @@ const POST_RADIUS = 0.03;
 /** Maximum travel per sub-step; below the puck+post contact distance so nothing tunnels. */
 const MAX_SUBSTEP = 0.04;
 const ENDS: readonly (1 | -1)[] = [1, -1];
+const SIGNS: readonly (1 | -1)[] = [1, -1];
 
 const backX = RINK.goalLineX + RINK.netDepth;
+/** Bounding box (per end, in x * end and |y|) of every post and netting contact; 0.01 m spare. */
+const NET_REACH = PUCK_RADIUS + POST_RADIUS + 0.01;
+const NET_NEAR_X = RINK.goalLineX - NET_REACH;
+const NET_FAR_X = backX + NET_REACH;
+const NET_HALF_REACH = RINK.netHalfWidth + NET_REACH;
 
 /** Push the puck out of a segment (a === b for a point) and reflect. Returns the pre-contact approach speed, or -1 for no contact. */
 function collideSegment(p: Puck, ax: number, ay: number, bx: number, by: number, r: number, e: number): number {
@@ -29,7 +36,9 @@ function collideSegment(p: Puck, ax: number, ay: number, bx: number, by: number,
   const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.pos.x - ax) * abx + (p.pos.y - ay) * aby) / l2));
   const qx = ax + abx * t, qy = ay + aby * t;
   const dx = p.pos.x - qx, dy = p.pos.y - qy;
-  const d = Math.hypot(dx, dy);
+  // Clearly out of reach (margin far above rounding): same outcome as the exact test, without the square root.
+  if (dx * dx + dy * dy > r * r * (1 + 1e-9)) return -1;
+  const d = hypot2(dx, dy);
   if (d >= r) return -1;
   // Degenerate (centre exactly on the segment): push toward the rink centre line.
   const nx = d > 0 ? dx / d : 0, ny = d > 0 ? dy / d : (p.pos.y >= 0 ? 1 : -1);
@@ -44,7 +53,7 @@ function collideSegment(p: Puck, ax: number, ay: number, bx: number, by: number,
 
 export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
   const events: PuckEvent[] = [];
-  const speed = Math.hypot(puck.vel.x, puck.vel.y);
+  const speed = hypot2(puck.vel.x, puck.vel.y);
   const n = Math.max(1, Math.ceil((speed * dt) / MAX_SUBSTEP));
   const h = dt / n;
   const friction = Math.exp(-ICE_DECAY * h);
@@ -67,8 +76,10 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
     // Nets: posts and netting only stop a puck below the crossbar.
     if (puck.z < RINK.netHeight) {
       for (const end of ENDS) {
+        // Nothing of this net within reach: every collideSegment below would return -1 untouched.
+        if (puck.pos.x * end < NET_NEAR_X || puck.pos.x * end > NET_FAR_X || Math.abs(puck.pos.y) > NET_HALF_REACH) continue;
         const gx = end * RINK.goalLineX, bx = end * backX;
-        for (const sy of [1, -1]) {
+        for (const sy of SIGNS) {
           if (collideSegment(puck, gx, sy * RINK.netHalfWidth, gx, sy * RINK.netHalfWidth, PUCK_RADIUS + POST_RADIUS, POST_RESTITUTION) > 0) {
             events.push({ kind: 'post', end });
           }

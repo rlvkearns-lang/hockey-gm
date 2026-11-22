@@ -1,4 +1,5 @@
 import { resolveBoards } from './rink';
+import { hypot2 } from './vec';
 import type { PlayerDef, SkaterState } from './types';
 
 export type Movement = {
@@ -33,6 +34,21 @@ export function movementOf(def: PlayerDef, energy: number): Movement {
 }
 
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+const TWO_PI = 2 * Math.PI;
+/** Cheap wrap to about [-PI, PI]; within ~1e-15 of wrapAngle, so only used where that cannot change an outcome. */
+const roughWrap = (a: number): number => a - TWO_PI * Math.round(a / TWO_PI);
+/** Margin far above roughWrap's error, so a comparison outside it decides the same way as with wrapAngle. */
+const SAFE = 1e-9;
+
+/** Clamp wrapAngle(a) to [-max, max]. Skips the exact wrap when it is clearly beyond the clamp (same result). */
+function clampedTurn(a: number, max: number): number {
+  const w = roughWrap(a);
+  const aw = Math.abs(w);
+  if (aw > max + SAFE && aw < Math.PI - SAFE) return w > 0 ? max : -max;
+  return Math.max(-max, Math.min(max, wrapAngle(a)));
+}
+
+let gripDt = NaN, gripFactor = 1;
 
 export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
   if (s.downT > 0) {
@@ -41,8 +57,8 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
     s.vel.y *= f;
   } else {
     const dx = s.target.x - s.pos.x, dy = s.target.y - s.pos.y;
-    const dist = Math.hypot(dx, dy);
-    const speed = Math.hypot(s.vel.x, s.vel.y);
+    const dist = hypot2(dx, dy);
+    const speed = hypot2(s.vel.x, s.vel.y);
     const hasGoal = dist > 0.05;
     const travel = hasGoal ? Math.atan2(dy, dx) : s.facing;
 
@@ -53,13 +69,17 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
       if (fx !== 0 || fy !== 0) {
         const toFace = Math.atan2(fy, fx);
         if (!hasGoal) wantFacing = toFace;
-        else if (Math.abs(wrapAngle(toFace - travel)) > BACKWARD_ANGLE) { backward = true; wantFacing = toFace; }
+        else {
+          const off = Math.abs(roughWrap(toFace - travel));
+          const isBack = Math.abs(off - BACKWARD_ANGLE) > SAFE ? off > BACKWARD_ANGLE : Math.abs(wrapAngle(toFace - travel)) > BACKWARD_ANGLE;
+          if (isBack) { backward = true; wantFacing = toFace; }
+        }
       }
     }
 
     // Turn, slower at speed.
     const maxTurn = (m.turnRate / (1 + speed / 6)) * dt;
-    s.facing = wrapAngle(s.facing + Math.max(-maxTurn, Math.min(maxTurn, wrapAngle(wantFacing - s.facing))));
+    s.facing = wrapAngle(s.facing + clampedTurn(wantFacing - s.facing, maxTurn));
 
     const fx = Math.cos(s.facing), fy = Math.sin(s.facing);
     const moveDir = backward ? -1 : 1;
@@ -74,7 +94,8 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
     const latX = s.vel.x - fx * along, latY = s.vel.y - fy * along;
     const step = m.accel * dt;
     const newAlong = along + Math.max(-step, Math.min(step, wantAlong - along));
-    const grip = Math.exp(-EDGE_GRIP * dt);
+    if (dt !== gripDt) { gripDt = dt; gripFactor = Math.exp(-EDGE_GRIP * dt); }
+    const grip = gripFactor;
     s.vel.x = fx * newAlong + latX * grip;
     s.vel.y = fy * newAlong + latY * grip;
   }

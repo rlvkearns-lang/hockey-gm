@@ -6,7 +6,7 @@
 import { RINK } from './rink';
 import type { Rng } from './rng';
 import type { GameState, Position, SkaterState } from './types';
-import { dist } from './vec';
+import { dist, hypot2 } from './vec';
 
 const SHOOT_RANGE = 10;
 const SHOT_SPEED = 25;
@@ -20,35 +20,40 @@ const SHAPE: Record<Exclude<Position, 'G'>, { back: number; left: number }> = {
 };
 const X_LIMIT = RINK.goalLineX - 1;
 
+/** Every skater's target is his own object (never shared), so it is updated in place. */
+function setTarget(s: SkaterState, x: number, y: number): void {
+  s.target.x = x;
+  s.target.y = y;
+}
+
 /** Sets targets for on-ice skaters; may release the carrier's puck at the net. Returns the shooter's id if he shot. */
 export function standInPlay(state: GameState, rng: Rng): string | null {
   const puck = state.puck.pos;
-  for (const side of ['home', 'away'] as const) {
-    const dir = state.attackDir[side];
-    let chaser: SkaterState | null = null;
-    let best = Infinity;
-    for (const s of state.skaters) {
-      if (!s.onIce || s.side !== side || s.downT > 0) continue;
-      const d = s.id === state.carrierId ? -1 : dist(s.pos, puck);
-      if (d < best) { best = d; chaser = s; }
-    }
-    for (const s of state.skaters) {
-      if (!s.onIce || s.side !== side) continue;
-      s.speedCap = 1;
-      if (s.id === state.carrierId) {
-        const behindGoalLine = s.pos.x * dir > RINK.goalLineX - 0.5;
-        s.target = { x: dir * (behindGoalLine ? RINK.goalLineX - 6 : RINK.goalLineX - 1), y: 0 };
-        s.faceTarget = null;
-      } else if (s === chaser) {
-        s.target = { x: puck.x, y: puck.y };
-        s.faceTarget = null;
-      } else {
-        const shape = SHAPE[s.slot === null || s.slot === 'G' ? 'C' : s.slot];
-        const x = Math.max(-X_LIMIT, Math.min(X_LIMIT, puck.x - dir * shape.back));
-        s.target = { x, y: dir * shape.left };
-        s.faceTarget = { x: puck.x, y: puck.y };
-        s.speedCap = 0.75;
-      }
+  // Nearest per team (first wins ties); the carrier always counts as his team's nearest.
+  const chaser: Record<'home' | 'away', SkaterState | null> = { home: null, away: null };
+  const best = { home: Infinity, away: Infinity };
+  for (const s of state.skaters) {
+    if (!s.onIce || s.downT > 0) continue;
+    const d = s.id === state.carrierId ? -1 : dist(s.pos, puck);
+    if (d < best[s.side]) { best[s.side] = d; chaser[s.side] = s; }
+  }
+  for (const s of state.skaters) {
+    if (!s.onIce) continue;
+    const dir = state.attackDir[s.side];
+    s.speedCap = 1;
+    if (s.id === state.carrierId) {
+      const behindGoalLine = s.pos.x * dir > RINK.goalLineX - 0.5;
+      setTarget(s, dir * (behindGoalLine ? RINK.goalLineX - 6 : RINK.goalLineX - 1), 0);
+      s.faceTarget = null;
+    } else if (s === chaser[s.side]) {
+      setTarget(s, puck.x, puck.y);
+      s.faceTarget = null;
+    } else {
+      const shape = SHAPE[s.slot === null || s.slot === 'G' ? 'C' : s.slot];
+      const x = Math.max(-X_LIMIT, Math.min(X_LIMIT, puck.x - dir * shape.back));
+      setTarget(s, x, dir * shape.left);
+      if (s.faceTarget) { s.faceTarget.x = puck.x; s.faceTarget.y = puck.y; } else s.faceTarget = { x: puck.x, y: puck.y };
+      s.speedCap = 0.75;
     }
   }
 
@@ -59,7 +64,7 @@ export function standInPlay(state: GameState, rng: Rng): string | null {
   if (puck.x * dir >= RINK.goalLineX - 0.3 || dist(puck, net) > SHOOT_RANGE) return null;
   const aim = { x: net.x, y: rng.range(-1.5, 1.5) };
   const dx = aim.x - puck.x, dy = aim.y - puck.y;
-  const d = Math.hypot(dx, dy) || 1;
+  const d = hypot2(dx, dy) || 1;
   state.puck.vel = { x: (dx / d) * SHOT_SPEED, y: (dy / d) * SHOT_SPEED };
   state.carrierId = null;
   return carrier.id;

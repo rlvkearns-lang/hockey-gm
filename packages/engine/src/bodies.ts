@@ -1,5 +1,9 @@
 import type { Movement } from './skating';
 import type { SkaterState } from './types';
+import { hypot2 } from './vec';
+
+/** Reused per call so the pair loop looks movement up once per skater, not once per pair. */
+const scratch: (Movement | null)[] = [];
 
 /**
  * Single pass; the caller clamps to the boards afterwards.
@@ -11,17 +15,22 @@ export function resolveBodies(
   move: (id: string) => Movement,
 ): { a: string; b: string; closing: number }[] {
   const contacts: { a: string; b: string; closing: number }[] = [];
-  for (let i = 0; i < skaters.length; i++) {
+  const n = skaters.length;
+  scratch.length = n;
+  for (let i = 0; i < n; i++) { const s = skaters[i]!; scratch[i] = s.onIce ? move(s.id) : null; }
+  for (let i = 0; i < n; i++) {
     const a = skaters[i]!;
-    if (!a.onIce) continue;
-    const ma = move(a.id);
-    for (let j = i + 1; j < skaters.length; j++) {
+    const ma = scratch[i];
+    if (!ma) continue;
+    for (let j = i + 1; j < n; j++) {
+      const mb = scratch[j];
+      if (!mb) continue;
       const b = skaters[j]!;
-      if (!b.onIce) continue;
-      const mb = move(b.id);
       const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
-      const d = Math.hypot(dx, dy);
       const min = ma.radius + mb.radius;
+      // Clearly apart (margin far above rounding): same outcome as the exact test below, without the square root.
+      if (dx * dx + dy * dy > min * min * (1 + 1e-9)) continue;
+      const d = hypot2(dx, dy);
       if (d >= min) continue;
       // Coincident centres: separate along +x, but keep d = 0 for the overlap.
       const nx = d < 1e-9 ? 1 : dx / d, ny = d < 1e-9 ? 0 : dy / d;

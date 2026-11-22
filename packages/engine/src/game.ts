@@ -17,7 +17,7 @@ import type {
   GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
 } from './types';
 import { validateSetup } from './validate';
-import { dist } from './vec';
+import { dist, hypot2 } from './vec';
 
 export type Game = {
   readonly state: GameState;
@@ -39,6 +39,8 @@ const RELEASE_NO_PICKUP_SECONDS = 0.3;
 const CARRY_REACH = 0.6;
 const PUCK_RADIUS = 0.05;
 const EPS = 1e-9;
+/** Scratch velocity for clamping the carried puck (its velocity is the carrier's, not bounced). */
+const noVel = { x: 0, y: 0 };
 /** Where off-ice skaters wait. */
 const BENCH: Record<Side, { x: number; y: number }> = { home: { x: -7, y: -12.2 }, away: { x: 7, y: -12.2 } };
 
@@ -98,7 +100,6 @@ export function createGame(setup: GameSetup): Game {
   const defs = new Map<string, PlayerDef>();
   for (const side of SIDES) for (const p of setup[side].players) defs.set(p.id, p);
   const tactics: Record<Side, Tactics> = { home: setup.home.tactics, away: setup.away.tactics };
-  const toi = new Map<string, number>();
   const events: GameEvent[] = [];
   let drained = 0;
   /** Players who just released the puck and may not pick it up before tick `until`. */
@@ -107,9 +108,30 @@ export function createGame(setup: GameSetup): Game {
   const state = initialState(setup);
   startPeriod(state, 1);
 
-  const moves = new Map<string, Movement>();
-  const move = (id: string): Movement => moves.get(id)!;
-  const onIceSkaters = (): SkaterState[] => state.skaters.filter((s) => s.onIce);
+  // Per-skater bookkeeping, parallel to state.skaters (whose order never changes).
+  // Movement is rebuilt only when the skater's energy changes.
+  const bodies = state.skaters.map((sk) => ({ def: defs.get(sk.id)!, energy: sk.energy, move: movementOf(defs.get(sk.id)!, sk.energy), toi: 0 }));
+  const bodyById = new Map(state.skaters.map((sk, i) => [sk.id, bodies[i]!]));
+  const move = (id: string): Movement => bodyById.get(id)!.move;
+  /** On-ice skaters, refilled in place each tick. */
+  const onIceList: SkaterState[] = [];
+  const onIceSkaters = (): SkaterState[] => {
+    onIceList.length = 0;
+    const all = state.skaters;
+    for (let i = 0; i < all.length; i++) {
+      const sk = all[i]!;
+      if (!sk.onIce) continue;
+      onIceList.push(sk);
+      const b = bodies[i]!;
+      if (b.energy !== sk.energy) { b.energy = sk.energy; b.move = movementOf(b.def, sk.energy); }
+    }
+    return onIceList;
+  };
+  const toiMap = (): Map<string, number> => {
+    const m = new Map<string, number>();
+    state.skaters.forEach((sk, i) => { if (bodies[i]!.toi > 0) m.set(sk.id, bodies[i]!.toi); });
+    return m;
+  };
 
   const emit = (e: Omit<GameEvent, 'tick' | 'period' | 'clock'>): void => {
     events.push({ tick: state.tick, period: state.period, clock: state.clock, ...e });
@@ -120,8 +142,6 @@ export function createGame(setup: GameSetup): Game {
 
   /** Movement, body separation and boards for every on-ice skater. */
   function moveSkaters(skaters: SkaterState[]): void {
-    moves.clear();
-    for (const s of skaters) moves.set(s.id, movementOf(defs.get(s.id)!, s.energy));
     stepSkaters(skaters);
     resolveBodies(skaters, move);
     for (const s of skaters) resolveBoards(s.pos, s.vel, move(s.id).radius, 0);
@@ -136,16 +156,20 @@ export function createGame(setup: GameSetup): Game {
 
   function carryPuck(carrier: SkaterState): void {
     const p = state.puck;
-    p.pos = { x: carrier.pos.x + Math.cos(carrier.facing) * CARRY_REACH, y: carrier.pos.y + Math.sin(carrier.facing) * CARRY_REACH };
-    p.vel = { x: carrier.vel.x, y: carrier.vel.y };
+    p.pos.x = carrier.pos.x + Math.cos(carrier.facing) * CARRY_REACH;
+    p.pos.y = carrier.pos.y + Math.sin(carrier.facing) * CARRY_REACH;
+    p.vel.x = carrier.vel.x;
+    p.vel.y = carrier.vel.y;
     p.z = 0;
     p.vz = 0;
-    resolveBoards(p.pos, { x: 0, y: 0 }, PUCK_RADIUS, 0);
+    noVel.x = 0;
+    noVel.y = 0;
+    resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);
   }
 
   function tryPickup(skaters: SkaterState[]): void {
     const p = state.puck;
-    if (Math.hypot(p.vel.x, p.vel.y) >= PICKUP_MAX_SPEED) return;
+    if (hypot2(p.vel.x, p.vel.y) >= PICKUP_MAX_SPEED) return;
     const blocked = state.tick < noPickup.until ? noPickup.ids : [];
     let best: SkaterState | null = null;
     let bestD = PICKUP_RADIUS;
@@ -183,7 +207,8 @@ export function createGame(setup: GameSetup): Game {
     moveSkaters(skaters);
     goalieTick(state, defs, rng, DT);
 
-    const carrier = state.carrierId === null ? null : skaters.find((s) => s.id === state.carrierId) ?? null;
+    let carrier: SkaterState | null = null;
+    if (state.carrierId !== null) for (const sk of skaters) if (sk.id === state.carrierId) { carrier = sk; break; }
     let onNet = false;
     if (carrier) {
       carryPuck(carrier);
@@ -196,7 +221,7 @@ export function createGame(setup: GameSetup): Game {
     const call = refereeTick(state, prevPuckX);
     if (call) events.push(call);
 
-    for (const s of skaters) toi.set(s.id, (toi.get(s.id) ?? 0) + DT);
+    for (const sk of skaters) bodyById.get(sk.id)!.toi += DT;
     const liveTicks = Math.round((PERIOD_SECONDS - state.clock) / DT) + 1;
     state.clock = Math.max(0, (PERIOD_TICKS - liveTicks) * DT);
 
@@ -247,7 +272,7 @@ export function createGame(setup: GameSetup): Game {
       drained = events.length;
       return out;
     },
-    result: () => buildResult(setup, events, toi),
+    result: () => buildResult(setup, events, toiMap()),
   };
 }
 
