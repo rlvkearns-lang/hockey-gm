@@ -197,7 +197,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 },
     onIce: { home: SKATER_SLOTS.map((s) => skaterId('home', s)), away: SKATER_SLOTS.map((s) => skaterId('away', s)) },
     pickupBlock: null, pendingPass: null, shotInFlight: null, screenedUntilTick: { home: 0, away: 0 },
-    touches: { side: null, ids: [] },
+    touches: { side: null, ids: [] }, lastAttackTouch: { home: null, away: null },
   };
 }
 

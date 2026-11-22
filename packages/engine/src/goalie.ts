@@ -207,8 +207,7 @@ function tryCover(state: GameState, side: Side, g: GoalieState, end: 1 | -1, out
 /**
  * Both goalies: each moves along an arc between the puck and his net centre (deeper the farther the puck), at a top
  * speed from lateral, and turns square to the puck at a rate from positioning. Against a shot in flight he plays its
- * release point instead. Showing a save slows him; the pose
- * returns to `stance` when poseT runs out. While play is live and nobody has the puck, a goalie covers a slow loose
+ * release point instead. Showing a save slows him; the pose returns to `stance` when poseT runs out. While play is live and nobody has the puck, a goalie covers a slow loose
  * puck in his crease when an opponent is near it (emits `freeze` into `out`, play stops for an end-zone faceoff).
  */
 export function goalieTick(state: GameState, defs: Map<string, PlayerDef>, _rng: Rng, dt: number, out: GameEvent[] = []): void {
@@ -293,6 +292,23 @@ function savePose(g: GoalieState, y: number, z: number, end: 1 | -1): Exclude<Go
   return Math.abs(y - g.pos.y) > PAD_OFFSET ? 'pad' : 'butterfly';
 }
 
+/**
+ * Who is credited with a puck that went in with no shot of `side` in flight and no `side` touch chain (put in by the
+ * defenders): the last `side` skater to touch it since the stoppage, else `side`'s on-ice skater nearest the puck.
+ */
+function creditFor(state: GameState, side: Side): string {
+  const last = state.lastAttackTouch[side];
+  if (last !== null) return last;
+  let best: string | null = null, bestD = Infinity;
+  for (const s of state.skaters) {
+    if (!s.onIce || s.side !== side) continue;
+    const d = dist(s.pos, state.puck.pos);
+    if (d < bestD) { bestD = d; best = s.id; }
+  }
+  if (best === null) throw new Error(`no ${side} skater on the ice to credit`);
+  return best;
+}
+
 /** The skaters of each side on the ice now (not those leaving). */
 function onIceIds(state: GameState): { home: string[]; away: string[] } {
   const ids = { home: [] as string[], away: [] as string[] };
@@ -322,7 +338,7 @@ export function resolveOnNet(
   const shot = state.shotInFlight !== null && state.shotInFlight.side === attSide ? state.shotInFlight : null;
   state.shotInFlight = null;
   const t = state.touches;
-  const shooterId = shot ? shot.shooterId : t.side === attSide ? t.ids[t.ids.length - 1] ?? null : null;
+  const shooterId = shot ? shot.shooterId : t.side === attSide ? t.ids[t.ids.length - 1] ?? creditFor(state, attSide) : creditFor(state, attSide);
   const netX = end * GOAL;
   const fx = shot ? shot.from.x : netX - end * 3, fy = shot ? shot.from.y : ev.y;
   const distance = hypot2(netX - fx, ev.y - fy);
@@ -376,7 +392,7 @@ export function resolveOnNet(
 
   // Goal.
   const assists: string[] = [];
-  if (shooterId !== null && t.side === attSide) {
+  if (t.side === attSide) {
     for (let i = t.ids.length - 1; i >= 0 && assists.length < 2; i--) {
       const id = t.ids[i]!;
       if (id !== shooterId && !assists.includes(id)) assists.push(id);

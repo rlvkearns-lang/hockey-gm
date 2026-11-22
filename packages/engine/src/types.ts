@@ -151,6 +151,8 @@ export type GameState = {
    * assists come from here. Pickups, releases, faceoff wins and blocks count; a goalie's save does not.
    */
   touches: { side: Side | null; ids: string[] };
+  /** The last skater of each side to touch the puck since the last stoppage (credited with a goal the defenders put in). */
+  lastAttackTouch: Record<Side, string | null>;
 };
 
 export type GameEventType =

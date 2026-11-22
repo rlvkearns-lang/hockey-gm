@@ -37,6 +37,7 @@ const MAX_TOUCHES = 6;
 /** `id` of `side` has the puck: a new team starts a new chain; a new player of the same team joins it. */
 export function recordTouch(state: GameState, id: string, side: Side): void {
   const t = state.touches;
+  state.lastAttackTouch[side] = id;
   if (t.side !== side) { t.side = side; t.ids.length = 0; t.ids.push(id); return; }
   if (t.ids[t.ids.length - 1] === id) return;
   t.ids.push(id);
