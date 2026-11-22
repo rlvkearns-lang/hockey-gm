@@ -3,8 +3,12 @@ import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, Position, Side, SkaterState } from './types';
 import { hypot2, type Vec2 } from './vec';
 
-/** Seconds the teams take to line up before the drop. */
-export const FACEOFF_SETUP_SECONDS = 3;
+/** The puck drops once every on-ice skater is this close to his line-up spot (m)... */
+export const LINEUP_TOLERANCE = 0.6;
+/** ...but never before this many seconds of setup... */
+export const FACEOFF_MIN_SECONDS = 3;
+/** ...and at the latest after this many, with players wherever they are. */
+export const FACEOFF_MAX_SECONDS = 8;
 /** Stand-in chance that home wins the draw (Task 8 uses the centres' faceoffs, Task 10 winProb). */
 const HOME_WIN_CHANCE = 0.5;
 /** Speed range (m/s) of the puck pulled back to a defenceman. */
@@ -48,7 +52,17 @@ export function headForLineup(state: GameState): void {
   }
 }
 
-/** Put every on-ice skater exactly on his line-up spot, still, facing the attack direction. */
+/** True when every on-ice skater is within LINEUP_TOLERANCE of his line-up spot. */
+export function linedUp(state: GameState): boolean {
+  for (const s of state.skaters) {
+    if (!s.onIce) continue;
+    const p = faceoffPosition(state.faceoffSpot, s.slot, state.attackDir[s.side]);
+    if (hypot2(s.pos.x - p.x, s.pos.y - p.y) > LINEUP_TOLERANCE) return false;
+  }
+  return true;
+}
+
+/** Put every on-ice skater exactly on his line-up spot, still, facing the attack direction. Only for the opening line-up. */
 export function snapToLineup(state: GameState): void {
   for (const s of state.skaters) {
     if (!s.onIce) continue;
@@ -68,7 +82,6 @@ const onIceIn = (state: GameState, side: Side, slots: Position[]): SkaterState[]
  * Sets phase live. Returns the faceoff event (side = winner, playerId = winning centre, otherId = losing centre).
  */
 export function dropPuck(state: GameState, _defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
-  snapToLineup(state);
   const winner: Side = rng.chance(HOME_WIN_CHANCE) ? 'home' : 'away';
   const loser: Side = winner === 'home' ? 'away' : 'home';
   const winC = onIceIn(state, winner, ['C'])[0] ?? null;

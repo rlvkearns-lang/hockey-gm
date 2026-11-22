@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { createGame, simulateGame } from '../src/game';
 import { generateTeam } from '../src/roster-gen';
 import { createRng } from '../src/rng';
+import { DT } from '../src/constants';
+import { RINK } from '../src/rink';
 import { isSkaterOf, runToPeriod, sum } from './helpers';
 
 const setup = (seed = 1) => ({ home: generateTeam(1, 'Harbour City', 'HBR'), away: generateTeam(2, 'Northgate', 'NGT'), seed, chemistry: [] });
@@ -14,18 +16,59 @@ describe('game loop', () => {
   it('same seed, same game; different seed, different game', () => {
     expect(simulateGame(setup(5))).toEqual(simulateGame(setup(5)));
     expect(simulateGame(setup(5)).events).not.toEqual(simulateGame(setup(6)).events);
-  }, 30_000);
+  });
   it('stepping in irregular bursts with reads between matches simulateGame', () => {
     const g = createGame(setup(5)), r = createRng(99); let seen = 0;
     while (!g.done) { for (let i = r.int(1, 400); i > 0 && !g.done; i--) g.step(); seen += g.drainEvents().length; JSON.stringify(g.state); }
     expect(g.result()).toEqual(simulateGame(setup(5))); expect(seen).toBe(g.result().events.length);
-  }, 30_000);
+  });
   it('teams switch ends in the second period', () => { const g = createGame(setup()); const d1 = g.state.attackDir.home; runToPeriod(g, 2); expect(g.state.attackDir.home).toBe(-d1); });
   it('five skaters and a goalie per side, all inside the boards, every tick', () => {
-    const g = createGame(setup(3));
-    while (!g.done) { g.step(); for (const side of ['home', 'away'] as const) expect(g.state.onIce[side].length).toBeLessThanOrEqual(5 + 3);   // up to 3 extra mid-change
-      for (const s of g.state.skaters) if (s.onIce) { expect(Math.abs(s.pos.x)).toBeLessThanOrEqual(30.48); expect(Math.abs(s.pos.y)).toBeLessThanOrEqual(12.955); expect(Number.isFinite(s.pos.x)).toBe(true); } }
-  }, 60_000);
+    const g = createGame(setup(3)); const violations: string[] = [];
+    while (!g.done) { g.step(); for (const side of ['home', 'away'] as const) if (g.state.onIce[side].length > 5 + 3) violations.push(`tick ${g.state.tick}: ${side} has ${g.state.onIce[side].length} on ice`);   // up to 3 extra mid-change
+      for (const s of g.state.skaters) if (s.onIce && !(Math.abs(s.pos.x) <= 30.48 && Math.abs(s.pos.y) <= 12.955 && Number.isFinite(s.pos.x))) violations.push(`tick ${g.state.tick}: ${s.id} at ${s.pos.x},${s.pos.y}`); }
+    expect(violations).toEqual([]);
+  });
+  it('nobody teleports: no on-ice skater moves more than 0.5 m in one tick', () => {
+    const g = createGame(setup(3)); const violations: string[] = [];
+    let prev = new Map(g.state.skaters.map((s) => [s.id, { ...s.pos }]));
+    while (!g.done) {
+      g.step();
+      for (const s of g.state.skaters) { const p = prev.get(s.id)!; if (s.onIce && Math.hypot(s.pos.x - p.x, s.pos.y - p.y) > 0.5) violations.push(`tick ${g.state.tick}: ${s.id}`); }
+      prev = new Map(g.state.skaters.map((s) => [s.id, { ...s.pos }]));
+    }
+    expect(violations).toEqual([]);
+  });
+  it('the puck is at rest whenever play is stopped', () => {
+    const g = createGame(setup(4)); const violations: number[] = []; let stopped = 0;
+    while (!g.done) { g.step(); if (g.state.phase === 'stopped') { stopped++; const p = g.state.puck; if (p.vel.x !== 0 || p.vel.y !== 0 || p.vz !== 0 || p.z !== 0) violations.push(g.state.tick); } }
+    expect(stopped).toBeGreaterThan(0); expect(violations).toEqual([]);
+  });
+  it('faceoffs wait for the line-up, at least 3 s and at most 8 s', () => {
+    const g = createGame(setup(2)); const waits: number[] = []; let setupTicks = 0;
+    while (!g.done) {
+      const before = g.state.phase; g.step();
+      setupTicks = before === 'faceoffSetup' ? setupTicks + 1 : 0;
+      if (before === 'faceoffSetup' && g.state.phase === 'live') waits.push(setupTicks * DT);
+    }
+    expect(waits.length).toBeGreaterThan(10);
+    expect(Math.min(...waits)).toBeGreaterThanOrEqual(3 - 1e-6); expect(Math.max(...waits)).toBeLessThanOrEqual(8 + 1e-6);
+  });
+  it('the players who release the puck are blocked from re-taking it, and the block is in state', () => {
+    const g = createGame(setup(1));
+    while (g.state.phase !== 'live') g.step();
+    const fo = g.drainEvents().find((e) => e.type === 'faceoff')!;
+    expect(g.state.pickupBlock?.ids).toEqual([fo.playerId, fo.otherId]);
+    expect(g.state.pickupBlock!.untilTick).toBe(g.state.tick + Math.round(0.3 / DT));
+  });
+  it('a carried puck never sits inside a net', () => {
+    const violations: number[] = [];
+    for (const seed of [1, 2, 3]) {
+      const g = createGame(setup(seed));
+      while (!g.done) { g.step(); const p = g.state.puck.pos; if (g.state.carrierId !== null && Math.abs(p.x) > RINK.goalLineX && Math.abs(p.x) < RINK.goalLineX + RINK.netDepth && Math.abs(p.y) < RINK.netHalfWidth) violations.push(g.state.tick); }
+    }
+    expect(violations).toEqual([]);
+  });
   it('time on ice adds up', () => { const r = simulateGame(setup()); const total = sum(r.players.filter(isSkaterOf('home')).map(p => p.toiSeconds)); expect(total).toBeGreaterThan(3600 * 5 * 0.97); expect(total).toBeLessThan(3600 * 5 * 1.06); });
   it('rejects a bad setup before play', () => { const s = setup(); s.home.lines.goalie = 'nobody'; expect(() => createGame(s)).toThrow(/nobody/); });
 });

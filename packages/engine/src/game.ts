@@ -3,7 +3,7 @@ import { resolveBodies } from './bodies';
 import { brainTick } from './brain';
 import { DT, PERIOD_SECONDS, PERIODS } from './constants';
 import { contestTick } from './contests/core';
-import { dropPuck, FACEOFF_SETUP_SECONDS, headForLineup, setupFaceoff, snapToLineup } from './faceoff';
+import { dropPuck, FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, headForLineup, linedUp, setupFaceoff, snapToLineup } from './faceoff';
 import { goalieTick } from './goalie';
 import { stepPuck } from './puck';
 import { refereeTick } from './referee';
@@ -77,11 +77,11 @@ function initialState(setup: GameSetup): GameState {
     puck: { pos: { x: 0, y: 0 }, z: 0, vel: { x: 0, y: 0 }, vz: 0 },
     carrierId: null, lastTouch: null, possession: null, skaters,
     goalies: { home: goalieAt(setup.home.lines.goalie, dir), away: goalieAt(setup.away.lines.goalie, dir === 1 ? -1 : 1) },
-    contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce,
+    contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null,
   };
 }
 
-/** Teams take their ends for `period` and line up for the centre-ice draw. */
+/** Teams take their ends for `period` and skate to their line-up for the centre-ice draw. */
 function startPeriod(state: GameState, period: number): void {
   const dir = homeDirFor(period);
   state.period = period;
@@ -90,8 +90,34 @@ function startPeriod(state: GameState, period: number): void {
   state.goalies.home = goalieAt(state.goalies.home.id, dir);
   state.goalies.away = goalieAt(state.goalies.away.id, state.attackDir.away);
   state.lastTouch = null;
+  state.pickupBlock = null;
+  restPuck(state);
   setupFaceoff(state, FACEOFF_DOTS.centre);
-  snapToLineup(state);
+}
+
+/** Puck still and flat on the ice (every stoppage). */
+function restPuck(state: GameState): void {
+  const p = state.puck;
+  p.vel.x = 0;
+  p.vel.y = 0;
+  p.z = 0;
+  p.vz = 0;
+}
+
+/** Back/front/side faces of each net, with a puck radius spare, for keeping a carried puck out of the frame. */
+const NET_FRONT_X = RINK.goalLineX - PUCK_RADIUS;
+const NET_BACK_X = RINK.goalLineX + RINK.netDepth + PUCK_RADIUS;
+const NET_SIDE_Y = RINK.netHalfWidth + PUCK_RADIUS;
+
+/** If pos is inside a net (behind the goal line, between the posts, within the depth), move it to the nearest point outside. */
+function keepOutOfNet(pos: { x: number; y: number }): void {
+  const end = pos.x >= 0 ? 1 : -1;
+  const rx = pos.x * end;
+  if (rx <= RINK.goalLineX || rx >= RINK.goalLineX + RINK.netDepth || Math.abs(pos.y) >= RINK.netHalfWidth) return;
+  const toFront = rx - NET_FRONT_X, toBack = NET_BACK_X - rx, toSide = NET_SIDE_Y - Math.abs(pos.y);
+  if (toFront <= toBack && toFront <= toSide) pos.x = end * NET_FRONT_X;
+  else if (toBack <= toSide) pos.x = end * NET_BACK_X;
+  else pos.y = (pos.y >= 0 ? 1 : -1) * NET_SIDE_Y;
 }
 
 export function createGame(setup: GameSetup): Game {
@@ -102,11 +128,9 @@ export function createGame(setup: GameSetup): Game {
   const tactics: Record<Side, Tactics> = { home: setup.home.tactics, away: setup.away.tactics };
   const events: GameEvent[] = [];
   let drained = 0;
-  /** Players who just released the puck and may not pick it up before tick `until`. */
-  let noPickup: { ids: string[]; until: number } = { ids: [], until: 0 };
-
   const state = initialState(setup);
   startPeriod(state, 1);
+  snapToLineup(state); // the opening line-up; later draws wait for players to skate there
 
   // Per-skater bookkeeping, parallel to state.skaters (whose order never changes).
   // Movement is rebuilt only when the skater's energy changes.
@@ -137,7 +161,7 @@ export function createGame(setup: GameSetup): Game {
     events.push({ tick: state.tick, period: state.period, clock: state.clock, ...e });
   };
   const blockPickup = (ids: string[]): void => {
-    noPickup = { ids, until: state.tick + Math.round(RELEASE_NO_PICKUP_SECONDS / DT) };
+    state.pickupBlock = { ids, untilTick: state.tick + Math.round(RELEASE_NO_PICKUP_SECONDS / DT) };
   };
 
   /** Movement, body separation and boards for every on-ice skater. */
@@ -162,6 +186,7 @@ export function createGame(setup: GameSetup): Game {
     p.vel.y = carrier.vel.y;
     p.z = 0;
     p.vz = 0;
+    keepOutOfNet(p.pos);
     noVel.x = 0;
     noVel.y = 0;
     resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);
@@ -170,7 +195,8 @@ export function createGame(setup: GameSetup): Game {
   function tryPickup(skaters: SkaterState[]): void {
     const p = state.puck;
     if (hypot2(p.vel.x, p.vel.y) >= PICKUP_MAX_SPEED) return;
-    const blocked = state.tick < noPickup.until ? noPickup.ids : [];
+    const block = state.pickupBlock;
+    const blocked = block !== null && state.tick < block.untilTick ? block.ids : [];
     let best: SkaterState | null = null;
     let bestD = PICKUP_RADIUS;
     for (const s of skaters) {
@@ -190,12 +216,15 @@ export function createGame(setup: GameSetup): Game {
     state.phaseT = 0;
     state.carrierId = null;
     state.possession = null;
+    state.pickupBlock = null;
+    restPuck(state);
     state.faceoffSpot = { ...FACEOFF_DOTS.centre };
     headForLineup(state);
   }
 
   function liveTick(): void {
     const prevPuckX = state.puck.pos.x;
+    if (state.pickupBlock !== null && state.tick >= state.pickupBlock.untilTick) state.pickupBlock = null;
     benchTick(state, setup, rng, DT);
     assignJobs(state, defs, tactics);
     brainTick(state, defs, rng);
@@ -229,6 +258,8 @@ export function createGame(setup: GameSetup): Game {
       emit({ type: 'periodEnd', side: 'home', playerId: null, otherId: null, assistIds: [], detail: `period ${state.period}` });
       state.carrierId = null;
       state.possession = null;
+      state.pickupBlock = null;
+      restPuck(state);
       state.phase = state.period >= PERIODS ? 'final' : 'intermission';
       state.phaseT = 0;
     } else if (onNet && state.phase === 'live') {
@@ -250,7 +281,7 @@ export function createGame(setup: GameSetup): Game {
         break;
       case 'faceoffSetup':
         moveSkaters(onIceSkaters());
-        if (state.phaseT >= FACEOFF_SETUP_SECONDS - EPS) {
+        if (state.phaseT >= FACEOFF_MIN_SECONDS - EPS && (state.phaseT >= FACEOFF_MAX_SECONDS - EPS || linedUp(state))) {
           const e = dropPuck(state, defs, rng);
           events.push(e);
           const ids = [e.playerId, e.otherId].filter((id): id is string => id !== null);

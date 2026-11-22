@@ -126,6 +126,8 @@ export type GameState = {
   score: { home: number; away: number };
   faceoffSpot: Vec2;
   onIce: { home: string[]; away: string[] };
+  /** Players who just released the puck and may not pick it up before tick `untilTick`. */
+  pickupBlock: { ids: string[]; untilTick: number } | null;
 };
 
 export type GameEventType =
