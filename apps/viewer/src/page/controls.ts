@@ -1,10 +1,11 @@
 import type { GameSetup } from '@hockey/engine';
 import type { ArenaQuality } from '../arena';
 import { CAMERA_NAMES, type CameraName } from '../cameras';
+import type { MarkerMode } from '../puck-marker';
 import { $, text } from './hud';
 
 /**
- * The watch page's controls (DOM only): Play, speeds, camera angles, the player picker, quality, To end, the seed
+ * The watch page's controls (DOM only): Play, speeds, camera angles, the player picker, quality, the puck marker, To end, the seed
  * field and New game, the frame-counter switch, and the keys (Space plays or pauses, the arrows step five seconds,
  * 1 to 6 pick an angle). Each control calls one of the page's actions; the page tells the controls what to show.
  */
@@ -15,6 +16,8 @@ export type ControlActions = {
   setSpeed(v: number): void;
   setCamera(name: CameraName): void;
   setQuality(q: ArenaQuality): void;
+  /** The puck marker: On, Auto (when the puck is hidden or in a scrum) or Off. */
+  setMarker(mode: MarkerMode): void;
   toEnd(): void;
   newGame(): void;
   follow(id: string): void;
@@ -35,6 +38,7 @@ export type Controls = {
   showCamera(name: CameraName, followId: string): void;
   showFollow(id: string): void;
   showQuality(q: ArenaQuality): void;
+  showMarker(mode: MarkerMode): void;
   /** The players to follow: each team's skaters and its starting goalie, by position and number. */
   fillFollow(setup: GameSetup): void;
   /** The seed typed in the field: a whole number, or null (with nothing silently put in its place). */
@@ -55,6 +59,7 @@ export function createControls(act: ControlActions, page: ControlState): Control
   document.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => b.addEventListener('click', () => act.setSpeed(Number(b.dataset.speed))));
   document.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach((b) => b.addEventListener('click', () => act.setCamera(b.dataset.camera as CameraName)));
   document.querySelectorAll<HTMLButtonElement>('[data-quality]').forEach((b) => b.addEventListener('click', () => act.setQuality(b.dataset.quality as ArenaQuality)));
+  document.querySelectorAll<HTMLButtonElement>('[data-marker]').forEach((b) => b.addEventListener('click', () => act.setMarker(b.dataset.marker as MarkerMode)));
   $('toEnd').addEventListener('click', () => act.toEnd());
   $('toLow').addEventListener('click', () => act.setQuality('low'));
   newGameBtn.addEventListener('click', () => act.newGame());
@@ -95,6 +100,9 @@ export function createControls(act: ControlActions, page: ControlState): Control
     showFollow(id) { followSel.value = id; },
     showQuality(q) {
       document.querySelectorAll<HTMLButtonElement>('[data-quality]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.quality === q)));
+    },
+    showMarker(mode) {
+      document.querySelectorAll<HTMLButtonElement>('[data-marker]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.marker === mode)));
     },
     fillFollow(setup) {
       const order = { G: 0, C: 1, LW: 2, RW: 3, LD: 4, RD: 5 } as const;

@@ -8,6 +8,7 @@ import {
 } from './animator';
 import { buildArena, setGoalLight, TEAM_COLORS as ARENA_TEAM_COLORS, type ArenaQuality } from './arena';
 import { bodyDims, type BodyDims } from './body';
+import { BROADCAST_SIDE } from './cameras';
 import { carryPoint, initialPuckDraw, stepPuckDraw, type IcePoint, type PuckDraw, type PuckDrawInput } from './carry';
 import { cutKind, emptyProbe, goalieJumped, isCut, lastCutAtOrBefore, probeOf, puckJumped, skaterJumped, type CutKind } from './cuts';
 import type { SkaterPose } from './gait';
@@ -15,6 +16,7 @@ import { goalShow } from './goal-show';
 import type { GoalieFigurePose } from './goalie-pose';
 import { createGoalieRig, type GoalieRig } from './goalie-rig';
 import { lerpAngle, type Frame, type Playback } from './playback';
+import { battleHighlight, initialMarker, stepMarker, type MarkerBody, type MarkerMode, type MarkerState } from './puck-marker';
 import { createRigKit, createSkaterRig, isSharedTexture, type RigColors, type SkaterRig } from './rig';
 import { buildRink } from './rink';
 import { buildTimeline, type Timeline } from './timeline';
@@ -62,6 +64,13 @@ export type GameScene = {
   cutKind(): CutKind | null;
   /** How large the puck is drawn, as a multiple of a real puck (default PUCK_SCALE); its shadow scales with it. */
   setPuckScale(k: number): void;
+  /**
+   * The puck marker for this frame (puck-marker.ts), seen from a camera at `cam` (world), with the page's setting;
+   * `dt` is display time since the last frame, `snap` (a seek) shows it as it should be at once. Call after update().
+   */
+  updateMarker(cam: { x: number; y: number; z: number }, mode: MarkerMode, dt: number, snap?: boolean): void;
+  /** How much the marker shows (0..1), the highlight under the man who came away with the puck (0..1), and why. */
+  marker(): Readonly<MarkerState> & { highlight: number };
   dispose(): void;
 };
 /**
@@ -110,6 +119,16 @@ type GoalieFig = {
 };
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+const smooth01 = (t: number): number => { const u = t < 0 ? 0 : t > 1 ? 1 : t; return u * u * (3 - 2 * u); };
+/** The figures as upright capsules for the marker's sight test: radius and height (m). */
+const MARKER_SKATER = { r: 0.28, h: 1.75 }, MARKER_GOALIE = { r: 0.45, h: 1.5 };
+/** How opaque the marker ring is when fully shown. */
+const MARKER_OPACITY = 0.8;
+/** A held puck is tilted from this height (m) over this much more: in the glove, not under it on the ice. */
+const HELD_TILT_FROM = 0.12, HELD_TILT_OVER = 0.2;
+/** The way a puck held in the glove faces: up the ice, up a little, and toward the broadcast side (unnormalised). */
+const HELD_FACE = { upIce: 1, up: 0.45, side: 0.55 };
+const Y_UP = new THREE.Vector3(0, 1, 0);
 
 const newBody = (id: string, kind: 'skater' | 'goalie', side: Side): DrawnBody =>
   ({ id, kind, side, onIce: false, pos: { x: 0, y: 0 }, facing: 0, offset: { x: 0, z: 0 }, eased: { x: 0, z: 0 } });
@@ -202,7 +221,24 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     const f = Number.isFinite(k) && k > 0 ? k / PUCK_SCALE : 1;
     disc.scale.setScalar(f);
     puckShadow.scale.setScalar(PUCK_R * 1.8 * f);
+    markerScale = Math.sqrt(f);
   }
+
+  // ---- The puck marker: a thin light ring on the ice under the puck (puck-marker.ts). Drawn after the opaque figures
+  // and depth-tested against them, so a body standing over it covers it; it never writes depth.
+  const MARKER_R = 0.3, MARKER_W = 0.045;
+  const markerMat = new THREE.MeshBasicMaterial({
+    color: 0xffd84a, transparent: true, opacity: 0, depthWrite: false, depthTest: true, toneMapped: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  const markerGeo = new THREE.RingGeometry(MARKER_R - MARKER_W / 2, MARKER_R + MARKER_W / 2, 40).rotateX(-Math.PI / 2);
+  const marker = new THREE.Mesh(markerGeo, markerMat);
+  marker.name = 'puckMarker';
+  marker.renderOrder = 2;
+  marker.visible = false;
+  root.add(marker);
+  let markerState: MarkerState = initialMarker(), markerHighlight = 0, markerScale = 1;
+  const markerCam = { x: 0, y: 0, z: 0 }, markerPuck = { x: 0, y: 0, z: 0 };
 
   // ---- Real-time shadows on `high`: figures and the puck cast them, the rink takes them.
   if (quality === 'high') {
@@ -213,7 +249,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
 
   // ---- State and scratch (update allocates little of its own beyond what the animation maths returns).
   let puckDraw: PuckDraw = initialPuckDraw();
-  const drawn = new THREE.Vector3();
+  const drawn = new THREE.Vector3(), faceNormal = new THREE.Vector3(), tiltMid = new THREE.Vector3();
   /** The earlier tick last drawn (for cuts between frames), a scratch probe, and the kind of cut the latest update drew. */
   const shown = emptyProbe(), scratchProbe = emptyProbe();
   let cut: CutKind | null = null;
@@ -364,7 +400,20 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     const d = puckDraw.drawn;
     drawn.set(d.x, d.y, d.z);
     puck.position.set(d.x, 0, d.z);
-    disc.position.y = d.y;
+    disc.position.set(0, d.y, 0);
+    // A puck a goalie holds up in his glove: tilted so its face shows, toward up the ice and the broadcast side
+    // (lying flat it was seen edge-on in the pocket); turned about its own middle. Flat on the ice under his glove.
+    const holder = heldBy as GoalieFig | null;
+    const tilt = holder && puckInput.held ? smooth01((d.y - HELD_TILT_FROM) / HELD_TILT_OVER) : 0;
+    if (tilt > 0) {
+      const up = holder!.body.pos.x > 0 ? -1 : 1;
+      faceNormal.set(up * HELD_FACE.upIce, HELD_FACE.up, BROADCAST_SIDE * HELD_FACE.side).normalize();
+      faceNormal.lerp(Y_UP, 1 - tilt).normalize();
+      disc.quaternion.setFromUnitVectors(Y_UP, faceNormal);
+      const h = (PUCK_H / 2) * disc.scale.y;
+      tiltMid.set(0, h, 0).applyQuaternion(disc.quaternion);
+      disc.position.set(-tiltMid.x, d.y + h - tiltMid.y, -tiltMid.z);
+    } else disc.quaternion.identity();
   }
 
   function update(input: Frame, dt: number): void {
@@ -422,11 +471,41 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     setGoalLight(arena, -1, show.light === -1 ? 1 : 0, ctx.time);
   }
 
+  // The figures as the marker's sight test sees them (one record each, refilled every frame): an upright capsule.
+  const markerSkaters: MarkerBody[] = skaters.map(() => ({ x: 0, z: 0, r: MARKER_SKATER.r, h: MARKER_SKATER.h, on: false }));
+  const markerGoalies: MarkerBody[] = goalies.map(() => ({ x: 0, z: 0, r: MARKER_GOALIE.r, h: MARKER_GOALIE.h, on: true }));
+  const markerBodies: readonly MarkerBody[] = [...markerSkaters, ...markerGoalies];
+  const markerColor = new THREE.Color(), MARKER_COLOR = new THREE.Color(0xffd84a), MARKER_HIGH = new THREE.Color(0xfff6c8);
+
+  function updateMarker(cam: { x: number; y: number; z: number }, mode: MarkerMode, dt: number, snap = false): void {
+    for (let i = 0; i < skaters.length; i++) {
+      const v = skaters[i]!.view, b = markerSkaters[i]!;
+      b.x = v.position.x; b.z = v.position.z; b.on = v.onIce;
+    }
+    for (let i = 0; i < goalies.length; i++) {
+      const g = goalies[i]!, b = markerGoalies[i]!;
+      // (A goalie holding the puck does not hide it: it is in his glove or under it.)
+      b.x = g.view.position.x; b.z = g.view.position.z; b.on = g !== heldBy;
+    }
+    markerCam.x = cam.x; markerCam.y = cam.y; markerCam.z = cam.z;
+    markerPuck.x = drawn.x; markerPuck.y = drawn.y; markerPuck.z = drawn.z;
+    markerState = stepMarker(markerState, { mode, cam: markerCam, puck: markerPuck, skaters: markerSkaters, bodies: markerBodies, contests: ctx.contests }, dt, snap);
+    markerHighlight = mode === 'off' || ctx.state === null ? 0 : battleHighlight(timeline, ctx.tick + ctx.alpha, ctx.puck.carrierId);
+    const k = Math.max(markerState.k, markerHighlight);
+    marker.visible = k > 0.002;
+    if (!marker.visible) return;
+    markerMat.opacity = Math.max(MARKER_OPACITY * markerState.k, 0.95 * markerHighlight);
+    markerMat.color.copy(markerColor.copy(MARKER_COLOR).lerp(MARKER_HIGH, markerHighlight));
+    marker.scale.setScalar(markerScale * (1 + 0.35 * markerHighlight));
+    marker.position.set(drawn.x, 0.012, drawn.z);
+  }
+
   function reset(): void {
     for (const f of skaters) f.anim = initialSkaterAnim();
     for (const g of goalies) g.anim = initialGoalieAnim();
     for (const b of bodies) { b.eased.x = 0; b.eased.z = 0; }
     puckDraw = initialPuckDraw();
+    markerState = initialMarker(); markerHighlight = 0; marker.visible = false;
     shown.tick = -1;
     cut = null;
   }
@@ -435,7 +514,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     for (const f of skaters) f.rig.dispose();
     for (const g of goalies) g.rig.dispose();
     kit.dispose();
-    puckGeo.dispose(); black.dispose(); rim.dispose();
+    puckGeo.dispose(); black.dispose(); rim.dispose(); markerGeo.dispose(); markerMat.dispose();
     for (const part of [rink, arena]) {
       part.traverse((o) => {
         // High quality's key light owns a shadow map (a render target) that the renderer keeps until it is freed.
@@ -461,6 +540,8 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     cutNow: () => cut !== null,
     cutKind: () => cut,
     setPuckScale,
+    updateMarker,
+    marker: () => ({ ...markerState, highlight: markerHighlight }),
     dispose,
   };
 }

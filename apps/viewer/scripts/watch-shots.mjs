@@ -7,7 +7,7 @@
 // qualities, and log.json (per frame: is the puck in the picture, how tall the nearest players are drawn; console
 // errors; network requests; the score bug against the event log). ONLY=actions saves the stick-action sequences;
 // ONLY=saves the saves, blocks and goal reactions; ONLY=contact poke checks, hits and falls; ONLY=battles board battles,
-// net-front battles and loose-puck races.
+// net-front battles and loose-puck races; ONLY=task6 goals, held saves, faceoffs, the puck marker and the page in a goal.
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -606,6 +606,111 @@ if (only && only.includes('battles')) {
     }
   }
   await bctx.close();
+}
+
+// ---- Task 6 (ONLY=task6): goals (broadcast and behind the net scored on), held glove saves (in front of the goalie
+// and broadcast), faceoffs (overhead and at ice level, from the set-up through the drop) and a board battle with the
+// puck marker (broadcast and from the side), as 10-frame contact sheets labelled with the time from the moment; then
+// the whole page at 1280 and 390 px, light and dark, one second into a goal (the score bug's flash and GOAL tag).
+// T6_COUNT (default 3) goals and faceoffs, 2 saves.
+if (only && only.includes('task6')) {
+  const { ctx: tctx, p: tp } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light', deviceScaleFactor: 1.5 });
+  await tp.evaluate(() => window.__watch.setManual(true));
+  const count = Number(process.env.T6_COUNT ?? 3);
+  const found = await tp.evaluate((count) => {
+    const w = window.__watch, ev = w.events();
+    const goals = ev.filter((e) => e.type === 'goal').slice(0, count).map((e) => ({ tick: e.tick, x: e.pos.x, y: e.pos.y }));
+    const glove = ev.filter((e) => e.type === 'save' && e.detail.pose === 'glove' && ev.some((f) => f.type === 'freeze' && f.tick === e.tick && f.playerId === e.playerId));
+    const saves = glove.slice(1, 3).map((e) => ({ tick: e.tick, x: e.pos.x, y: e.pos.y, id: e.playerId }));
+    const fos = ev.filter((e) => e.type === 'faceoff');
+    const faceoffs = [fos[3], fos[8], fos[14]].filter(Boolean).slice(0, count).map((e) => ({ tick: e.tick, x: e.detail.spot.x, y: e.detail.spot.y }));
+    const starts = new Map(ev.filter((e) => e.type === 'contestStart').map((e) => [e.detail.contestId, e]));
+    const battles = ev.filter((e) => e.type === 'contestEnd' && e.detail.kind === 'boardBattle' && e.detail.puck === 'toWinner')
+      .map((e) => ({ end: e.tick, start: starts.get(e.detail.contestId)?.tick ?? e.tick, x: e.pos.x, y: e.pos.y, ids: starts.get(e.detail.contestId)?.detail.participants ?? [] }))
+      .filter((b) => b.end - b.start > 45 && b.start > 3000).slice(0, 1);
+    return { goals, saves, faceoffs, battles };
+  }, count);
+  console.log('task6', JSON.stringify(found));
+  log.task6 = found;
+  const NEAR = 1; // the broadcast side (world +z), opposite the benches
+  /** One sequence: frames at `offsets` (ticks) from `at`, from `camera` or a fixed `aim` pose; a 5 x 2 sheet. */
+  const sequence = async (name, at, offsets, view) => {
+    const r = await tp.evaluate(({ at, offsets, view }) => {
+      const w = window.__watch;
+      w.aimAt(null);
+      if (view.camera) w.setCamera(view.camera);
+      w.seek(at + offsets[0] - 18);
+      w.step(18 / 30);
+      const c0 = document.querySelector('.stage canvas'), cols = Math.ceil(offsets.length / 2), fw = 512, fh = 288;
+      const sheet = document.createElement('canvas'); sheet.width = fw * cols; sheet.height = fh * 2;
+      const g = sheet.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, sheet.width, sheet.height);
+      const shots = [];
+      let now = at + offsets[0];
+      for (let i = 0; i < offsets.length; i++) {
+        const t = at + offsets[i];
+        if (t > now) { w.step((t - now) / 30); now = t; }
+        if (view.aim) { w.aimAt(view.aim); w.renderOnce(); } else w.renderOnce();
+        const url = w.grab();
+        const crop = view.crop ?? 1, sw = c0.width * crop, sh = c0.height * crop;
+        g.drawImage(c0, (c0.width - sw) / 2, (c0.height - sh) / 2, sw, sh, (i % cols) * fw, Math.floor(i / cols) * fh, fw, fh);
+        g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect((i % cols) * fw, Math.floor(i / cols) * fh, 130, 22);
+        g.fillStyle = '#fff'; g.font = '16px sans-serif'; g.fillText(`${i + 1}  ${(offsets[i] / 30).toFixed(2)} s`, (i % cols) * fw + 4, Math.floor(i / cols) * fh + 16);
+        shots.push({ url, tick: w.info().tick, marker: w.marker() });
+      }
+      w.aimAt(null);
+      return { shots, sheet: sheet.toDataURL('image/jpeg', 0.9) };
+    }, { at, offsets, view });
+    save(`${name}-sheet.jpg`, r.sheet);
+    r.shots.forEach((s2, i) => save(`${name}-${i + 1}.png`, s2.url));
+    console.log('t6 seq', name, r.shots.map((s2) => `${s2.tick}${s2.marker && s2.marker.k > 0 ? `(m${s2.marker.k.toFixed(1)}${s2.marker.highlight > 0 ? 'h' : ''})` : ''}`).join(' '));
+  };
+  const goalOffsets = [-24, -9, 0, 6, 15, 30, 45, 60, 90, 120];
+  for (const [i, gl] of found.goals.entries()) {
+    const behind = await tp.evaluate((x) => { const s = window.__watch.state(); const homeNetX = s.attackDir.home === 1 ? -1 : 1; return Math.sign(x) === homeNetX ? 'netHome' : 'netAway'; }, gl.x);
+    await sequence(`t6-goal${i + 1}-broadcast`, gl.tick, goalOffsets, { camera: 'broadcast' });
+    await sequence(`t6-goal${i + 1}-behind`, gl.tick, goalOffsets, { camera: behind });
+  }
+  const saveOffsets = [-9, -3, 0, 3, 6, 10, 20, 30, 43, 60];
+  for (const [i, sv] of found.saves.entries()) {
+    const sx = Math.sign(sv.x);
+    const front = { pos: { x: sv.x - sx * 4, y: 1.7, z: sv.y + NEAR * 2.2 }, look: { x: sv.x - sx * 0.3, y: 0.8, z: sv.y }, fov: 30 };
+    await sequence(`t6-save${i + 1}-front`, sv.tick, saveOffsets, { aim: front });
+    await sequence(`t6-save${i + 1}-broadcast`, sv.tick, saveOffsets, { camera: 'broadcast' });
+  }
+  const foOffsets = [-150, -90, -45, -15, -1, 2, 5, 9, 15, 30];
+  for (const [i, fo] of found.faceoffs.entries()) {
+    const over = { pos: { x: fo.x, y: 11, z: fo.y + NEAR * 0.01 }, look: { x: fo.x, y: 0, z: fo.y }, fov: 62 };
+    const ice = { pos: { x: fo.x, y: 1.3, z: fo.y + NEAR * 7 }, look: { x: fo.x, y: 0.5, z: fo.y }, fov: 52 };
+    await sequence(`t6-faceoff${i + 1}-overhead`, fo.tick, foOffsets, { aim: over });
+    await sequence(`t6-faceoff${i + 1}-ice`, fo.tick, foOffsets, { aim: ice });
+  }
+  for (const [i, bt] of found.battles.entries()) {
+    const span = bt.end - bt.start, offs = [];
+    for (let k = 0; k < 10; k++) offs.push(Math.round(-6 + (span + 6 + 36) * k / 9));
+    const nx = Math.abs(bt.y) > 9 ? 0 : -Math.sign(bt.x), nz = Math.abs(bt.y) > 9 ? -Math.sign(bt.y) : 0;
+    const side = { pos: { x: bt.x + nx * 7 + 3, y: 2.6, z: bt.y + nz * 7 }, look: { x: bt.x, y: 0.4, z: bt.y }, fov: 42 };
+    await sequence(`t6-battle${i + 1}-broadcast`, bt.start, offs, { camera: 'broadcast' });
+    await sequence(`t6-battle${i + 1}-side`, bt.start, offs, { aim: side });
+  }
+  await tctx.close();
+  // The whole page one second into the first goal (and at 0.3 s and 3.5 s on the laptop in light).
+  const g0 = found.goals[0];
+  if (g0) {
+    for (const [w, h, scheme] of [[1280, 900, 'light'], [1280, 900, 'dark'], [390, 844, 'light'], [390, 844, 'dark']]) {
+      const { ctx: pc, p: pp } = await open({ viewport: { width: w, height: h }, colorScheme: scheme, deviceScaleFactor: w < 500 ? 2 : 1 });
+      for (const sec of w === 1280 && scheme === 'light' ? [0.3, 1, 3.5] : [1]) {
+        await pp.evaluate(({ t, sec }) => { const v = window.__watch; v.setManual(true); v.seek(t - 30); v.step(1 + sec); v.renderOnce(); }, { t: g0.tick, sec });
+        await pp.screenshot({ path: join(out, prefix + `t6-page-goal-${w}-${scheme}-${sec}s.png`), fullPage: true });
+        const ov = await pp.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        log.pages.push({ name: `t6-page-goal-${w}-${scheme}-${sec}s`, horizontalOverflowPx: ov, hud: await pp.evaluate(() => window.__watch.hud().bug) });
+      }
+      if (w === 1280 && scheme === 'light' && found.saves[0]) {
+        await pp.evaluate((t) => { const v = window.__watch; v.seek(t - 30); v.step(1.1); v.renderOnce(); }, found.saves[0].tick);
+        await pp.screenshot({ path: join(out, prefix + `t6-page-save-${w}-${scheme}.png`), fullPage: true });
+      }
+      await pc.close();
+    }
+  }
 }
 
 // ---- Puck in frame through two minutes of play, per camera (every 0.25 s).

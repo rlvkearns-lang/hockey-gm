@@ -10,6 +10,7 @@ import { createLifecycle, type Game } from './page/lifecycle';
 import { canShow3d, createRenderer } from './page/renderer';
 import { createTimebar } from './page/timebar';
 import type { Vec3 } from './pose-mix';
+import type { MarkerMode } from './puck-marker';
 import type { WorkerLike } from './record-game';
 import RecordWorker from './record.worker?worker&inline';
 import { seekScene } from './scene';
@@ -37,6 +38,8 @@ let playing = false;
 let speed = 1;
 let followId = '';
 let operator = initialOperator('broadcast');
+/** The page's "Puck marker" setting (puck-marker.ts). */
+let markerMode: MarkerMode = 'auto';
 /** Something changed that the picture must show (a seek, a resize, a camera): draw on the next frame even if paused. */
 let dirty = true;
 /** The cost (ms) of the latest seek that played its moment in, for the screenshot script. */
@@ -80,6 +83,7 @@ const controls = createControls({
   setSpeed: (v) => setSpeed(v),
   setCamera: (name) => setCamera(name),
   setQuality: (q) => { void life.setQuality(q); },
+  setMarker: (mode) => setMarker(mode),
   toEnd: () => { const g = game(); if (g) { setPlaying(false); seekTo(g.playback.totalTicks); } },
   newGame: () => { void life.newGame(); },
   follow: (id) => setFollow(id),
@@ -105,7 +109,7 @@ const puckV = new THREE.Vector3();
 let scriptCamera: CameraPose | null = null;
 
 /** Point the camera for the current frame; `dt` is the game time just played (0 when paused); `snap` cuts to it. */
-function aimCamera(dt: number, snap = false): void {
+function aimCamera(dt: number, snap = false, displayDt = 0): void {
   const g = game();
   if (!g) return;
   const { gs, playback } = g;
@@ -131,9 +135,12 @@ function aimCamera(dt: number, snap = false): void {
   if (followOn && fv) input.followed = { pos: { x: fv.position.x, y: 0, z: fv.position.z }, facing: fv.facing, vel: velocityOf(f.prev, f.next, a, followId) };
   const r = stepOperator(operator, input, dt);
   operator = r.state;
-  renderer.aim(scriptCamera ?? r.pose);
+  const camPose = scriptCamera ?? r.pose;
+  renderer.aim(camPose);
   // Draw the puck large enough to find from far away, and true to size up close.
   gs.setPuckScale(renderer.puckScaleAt(puckV));
+  // The puck marker, decided from what this camera sees.
+  gs.updateMarker(camPose.pos, markerMode, displayDt, snap || dt === 0 && displayDt === 0);
   // The overhead camera hangs above the scoreboard; it would hide centre ice.
   if (g.scoreboard) g.scoreboard.visible = operator.camera !== 'overhead';
   const off = operator.camera === 'follow' && !followOn;
@@ -210,6 +217,13 @@ function setCamera(name: CameraName): void {
   dirty = true;
 }
 
+function setMarker(mode: MarkerMode): void {
+  markerMode = mode;
+  controls.showMarker(mode);
+  aimCamera(0);
+  dirty = true;
+}
+
 function setFollow(id: string): void {
   const g = game();
   if (!g || !g.defs.has(id)) return;
@@ -233,7 +247,7 @@ function advance(displayDt: number): void {
   if (gameDt > 0) g.playback.advance(gameDt);
   if (gameDt > 0 || dirty) {
     g.gs.update(g.playback.frame(), gameDt);
-    aimCamera(gameDt);
+    aimCamera(gameDt, false, displayDt);
     updateHud();
   }
 }
@@ -271,6 +285,9 @@ const hook = {
   setFollow: (id: string): void => setFollow(id),
   setSpeed: (v: number): void => setSpeed(v),
   setQuality: (q: ArenaQuality): Promise<void> => life.setQuality(q),
+  setMarker: (mode: MarkerMode): void => setMarker(mode),
+  /** The puck marker now: how much it shows, the battle highlight, and why. */
+  marker: () => game()?.gs.marker() ?? null,
   setManual: (on: boolean): void => { manual = on; lastT = 0; if (on) setPlaying(false); },
   setPlaying: (on: boolean): void => setPlaying(on),
   /** Play `seconds` of display time at the current speed in steps of 1/60 s (as if playing), without drawing. */

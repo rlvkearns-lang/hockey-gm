@@ -43,6 +43,8 @@ export type CameraPose = { pos: Vec3; look: Vec3; fov: number };
 
 /** World z of the side the broadcast camera is on: the side opposite the benches. */
 const NEAR = -(Math.sign(BENCH_DOORS.home.y) || -1);
+/** The side (sign of world z) of the broadcast and ice-level cameras, opposite the benches. */
+export const BROADCAST_SIDE: 1 | -1 = NEAR > 0 ? 1 : -1;
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y, z });

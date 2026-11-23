@@ -43,9 +43,13 @@ import { sharedPlayback } from './test/game';
 // Re-pinned by Task 6 (faceoffs that line up, overlays/faceoff-lineup.ts: the figures turned to the dot in a faceoff
 // setup and the centres' draw; seed 42's 40 s hold a faceoff at 3334, seed 5's none): 5: 303e6178dfc64315 and 42:
 // cad81dcc00ac9916 before (c618028), which this code still gives with faceoffLineup taken out of OVERLAYS.
+// Re-pinned again by Task 6 (the puck held in a goalie's glove tilted so its face shows; seed 42's 40 s hold a frozen
+// glove save): 42: 571a0213d51808a7 before, which this code gives with the tilt off (HELD_TILT_FROM Infinity in
+// scene.ts); with that and faceoffLineup out, cad81dcc00ac9916 as before Task 6. The goal lights and the puck marker are
+// not in the hash (neither is a figure or the puck).
 const PICTURE_HASH: Record<number, string> = {
   5: '303e6178dfc64315',
-  42: '571a0213d51808a7',
+  42: 'd320c1950eefa9b2',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */
