@@ -77,6 +77,11 @@ export type Pose = {
   twist?: number;
   /** Head turned (heading convention) from the torso toward where he looks; 0 if absent. */
   look?: number;
+  /**
+   * How far down the shaft from the butt the top hand holds it (m); 0 if absent. The shaft then runs from the hand
+   * `stick - grip` to the heel, with the butt `grip` back up the shaft behind the hand.
+   */
+  grip?: number;
 };
 
 /**
@@ -385,6 +390,8 @@ type RawPose = {
 };
 
 const armReach = (d: BodyDims): number => d.upperArm + d.forearm;
+/** Share of the stick between its butt and the top hand. */
+const STICK_GRIP = 0.14;
 
 /**
  * Rotate a torso-frame vector by the torso's twist (about its own long axis, heading convention), then pitch, then
@@ -428,13 +435,15 @@ const hipHand = (d: BodyDims, x: number, y: number, z: number): Vec3 => { const 
  * Athletic stance: knees bent, hips back over the heels, torso forward, both hands on the stick with its blade on the
  * ice in front and out to his forehand side. `crouch` (0..1) lowers it into a centre's faceoff stance.
  */
-function standPose(d: BodyDims, lean: number, crouch: number): RawPose {
-  const half = (d.shoulderWidth / 2) * (1.1 + 0.15 * crouch);
+function standPose(d: BodyDims, lean: number, crouch: number, dot: Vec3 | undefined): RawPose {
+  const half = (d.shoulderWidth / 2) * (1.15 + 0.25 * crouch);
+  const blade = v3(0.85, 0, -0.65);
   return {
-    hipY: d.hipHeight * (0.95 - 0.1 * crouch), pitch: 0.32 + 0.3 * crouch + 0.2 * lean, roll: 0, yaw: 0, twist: 0, look: 0,
-    legs: [{ foot: v3(0.1, 0, -half), footYaw: -0.15 }, { foot: v3(0.1, 0, half), footYaw: 0.15 }],
-    top: hipHand(d, 0.3, 0.04 - 0.1 * crouch, 0.1 - 0.05 * crouch), freeRel: swingArm(0.3, 0.95, -0.1, armReach(d)), twoHands: 1,
-    blade: v3(1.2, 0, -0.5 + 0.35 * crouch),
+    hipY: d.hipHeight * (0.89 - 0.17 * crouch), pitch: 0.36 + 0.4 * crouch + 0.2 * lean, roll: 0, yaw: 0, twist: 0, look: 0,
+    legs: [{ foot: v3(0.16 + 0.04 * crouch, 0, -half), footYaw: -0.18 }, { foot: v3(0.16 + 0.04 * crouch, 0, half), footYaw: 0.18 }],
+    top: hipHand(d, 0.22 + 0.04 * crouch, -0.12 * crouch, 0.1 - 0.06 * crouch), freeRel: swingArm(0.3, 0.95, -0.1, armReach(d)), twoHands: 1,
+    // In the faceoff crouch the stick points at the dot.
+    blade: dot ? lerp3(blade, v3(dot.x, 0, dot.z), crouch) : lerp3(blade, v3(0.9, 0, -0.2), crouch),
   };
 }
 
@@ -444,8 +453,8 @@ function glidePose(d: BodyDims, ph: number, H: number, lean: number): RawPose {
   return {
     hipY: d.hipHeight * 0.94, pitch: 0.45 + 0.6 * lean, roll: 0.04 * Math.sin(TAU * ph), yaw: 0.5 * H, twist: 0, look: lookAt(H),
     legs: headed([{ foot: v3(0.08, 0, -half - shift), footYaw: -0.05 }, { foot: v3(0.04, 0, half - shift), footYaw: 0.05 }], H),
-    top: hipHand(d, 0.3, 0.05, 0.1), freeRel: swingArm(0.3, 0.95, -0.1, R), twoHands: 1,
-    blade: add(turn(v3(1.2, 0, -0.45), H), v3(0, 0, 0.05 * Math.sin(TAU * ph))),
+    top: hipHand(d, 0.28, 0.04, 0.1), freeRel: swingArm(0.3, 0.95, -0.1, R), twoHands: 1,
+    blade: add(turn(v3(0.95, 0, -0.5), 0.3 * H), v3(0, 0, 0.05 * Math.sin(TAU * ph))),
   };
 }
 
@@ -462,7 +471,9 @@ const STRIDE_STANCE = 0.6, STRIDE_PUSH = 0.15, STRIDE_SET_YAW = 0.08;
 function stridePose(d: BodyDims, ph: number, speed: number, acc: number, H: number, lean: number): RawPose {
   const R = armReach(d);
   const amp = strideAmp(speed, acc);
-  const reach = 0.62 * (d.thigh + d.shin) * amp;
+  // Striding well off his facing (squared up, moving at an angle) takes shorter pushes, not a wide split.
+  const offFacing = 1 - 0.5 * smooth((Math.abs(H) - 0.4) / 0.8);
+  const reach = 0.62 * (d.thigh + d.shin) * amp * offFacing;
   const diag = reach * Math.SQRT1_2;
   const baseZ = d.hipWidth / 2 + 0.02;
   const setX = 0.1;
@@ -490,12 +501,12 @@ function stridePose(d: BodyDims, ph: number, speed: number, acc: number, H: numb
   // forward as the left push ends, q = 0.6). The free (left) arm swings big; the stick hand rides at the hip.
   const s = amp * Math.sin(TAU * (ph - 0.35));
   return {
-    hipY: d.hipHeight * (0.96 - 0.04 * amp), pitch: 0.4 + 0.12 * amp + lean, roll: shiftZ * 0.8, yaw: 0.5 * H - 0.08 * s,
+    hipY: d.hipHeight * (0.92 - 0.02 * amp), pitch: 0.4 + 0.12 * amp + lean, roll: shiftZ * 0.8, yaw: 0.5 * H - 0.08 * s,
     twist: 0.14 * s, look: lookAt(H),
     legs: headed(legs, H),
-    top: hipHand(d, 0.28 - 0.08 * s, 0.06, 0.12), freeRel: swingArm(0.2 + 0.68 * s, 0.93, -0.08 - 0.12 * Math.max(0, -s), R),
+    top: hipHand(d, 0.22 - 0.04 * s, 0.04, 0.12), freeRel: swingArm(0.2 + 0.55 * s, 0.93, -0.08 - 0.12 * Math.max(0, -s), R),
     twoHands: clamp01((0.75 - amp) / 0.2),
-    blade: turn(v3(1.25, 0, -0.3 - 0.1 * s), H),
+    blade: turn(v3(0.95, 0, -0.5 - 0.04 * s), 0.3 * H),
   };
 }
 
@@ -508,10 +519,12 @@ const CROSS_LAND = 0.45, CROSS_LIFT = 0.75;
  * 0.75) and recovers (0.75 to 1). Built facing along travel and turned to heading H; the body rolls into the turn, so
  * the skates sit outward of the pelvis.
  */
-function crossoverPose(d: BodyDims, ph: number, H: number, dir: 1 | -1, lean: number, roll: number): RawPose {
-  const R = armReach(d), u = d.shoulderWidth / 2;
+function crossoverPose(d: BodyDims, ph: number, H: number, dir: 1 | -1, lean: number, roll: number, speed: number): RawPose {
+  // A slow crossover is a short, narrow step; the full width comes with speed.
+  const wide = 0.55 + 0.45 * clamp01((speed - 2.5) / 4.5);
+  const R = armReach(d), u = (d.shoulderWidth / 2) * wide;
   const p = frac(ph);
-  const hipY = d.hipHeight * 0.93;
+  const hipY = d.hipHeight * 0.9;
   const bodyRoll = roll + dir * 0.12;
   const inYaw = dir * 0.06; // skates slightly into the turn
   // Outside leg.
@@ -542,13 +555,13 @@ function crossoverPose(d: BodyDims, ph: number, H: number, dir: 1 | -1, lean: nu
     ? [{ foot: o, footYaw: oYaw }, { foot: iFoot, footYaw: iYaw }]
     : [{ foot: iFoot, footYaw: iYaw }, { foot: o, footYaw: oYaw }];
   const legs = headed(pattern, H);
-  const outShift = -Math.sign(bodyRoll) * hipY * Math.sin(Math.min(0.6, Math.abs(bodyRoll))) * 0.4;
+  const outShift = -Math.sign(bodyRoll) * hipY * Math.sin(Math.min(0.6, Math.abs(bodyRoll))) * 0.4 * wide;
   for (const l of legs) l.foot.z += outShift;
   return {
     hipY, pitch: 0.45 + 0.8 * lean, roll: bodyRoll, yaw: 0.5 * H + dir * 0.1, twist: dir * 0.12, look: clamp(lookAt(H) + dir * 0.25, -0.9, 0.9),
     legs,
-    top: hipHand(d, 0.3, 0.05, 0.1), freeRel: swingArm(0.4, 0.9, -0.1, R), twoHands: 1,
-    blade: turn(v3(1.2, 0, -0.4 + 0.25 * dir), H),
+    top: hipHand(d, 0.24, 0.02, 0.1), freeRel: swingArm(0.4, 0.9, -0.1, R), twoHands: 1,
+    blade: turn(v3(0.9, 0, -0.5 + 0.15 * dir), 0.3 * H),
   };
 }
 
@@ -581,8 +594,8 @@ function backwardPose(d: BodyDims, ph: number, acc: number, H: number, lean: num
   return {
     hipY: d.hipHeight * 0.86, pitch: 0.25 + 0.3 * lean, roll: -0.6 * shift, yaw: 0.5 * H, twist: 0, look: 0,
     legs: headed(legs, H),
-    top: hipHand(d, 0.3, 0.08, 0.1), freeRel: swingArm(0.3, 0.9, -0.1, R), twoHands: 1,
-    blade: v3(1.1, 0, -0.35),
+    top: hipHand(d, 0.24, 0.05, 0.1), freeRel: swingArm(0.3, 0.9, -0.1, R), twoHands: 1,
+    blade: v3(0.9, 0, -0.5),
   };
 }
 
@@ -611,8 +624,8 @@ function stopPose(d: BodyDims, speed: number, travel: number, s: 1 | -1, lean: n
   return {
     hipY: d.hipHeight * (1 - 0.25 * k), pitch: 0.25 - back * Math.cos(ty), roll: -back * Math.sin(ty), yaw: pelvis, twist: 0, look: 0,
     legs,
-    top: hipHand(d, 0.28, 0.06, 0.1), freeRel: swingArm(0.3, 0.9, -0.1, R), twoHands: 1,
-    blade: v3(1.1, 0, -0.45),
+    top: hipHand(d, 0.22, 0.04, 0.1), freeRel: swingArm(0.3, 0.9, -0.1, R), twoHands: 1,
+    blade: v3(0.9, 0, -0.6),
   };
 }
 
@@ -633,18 +646,21 @@ function downPose(d: BodyDims): RawPose {
   };
 }
 
-/** Extra pose inputs the gait cannot see: `crouch` (0..1) lowers the stance, e.g. a centre at the faceoff dot. */
-export type PoseOptions = { crouch?: number };
+/**
+ * Extra pose inputs the gait cannot see: `crouch` (0..1) lowers the stance, e.g. a centre at the faceoff dot; `dot` is
+ * that dot in his body frame (left-shot frame: mirror z for a right shot), where the crouched stance points the stick.
+ */
+export type PoseOptions = { crouch?: number; dot?: Vec3 };
 
 function rawPose(style: Style, g: GaitState, side: 1 | -1, m: Motion, d: BodyDims, o: PoseOptions): RawPose {
   const acc = fin(g.acc ?? m.accelAlong);
   const travel = fin(g.travel ?? travelYawOf(m));
   const phase = fin(g.phase), lean = fin(g.lean), roll = fin(g.roll), speed = fin(g.speed ?? m.speed);
   switch (style) {
-    case 'stand': return standPose(d, lean, clamp01(fin(o.crouch ?? 0)));
+    case 'stand': return standPose(d, lean, clamp01(fin(o.crouch ?? 0)), o.dot && Number.isFinite(o.dot.x) && Number.isFinite(o.dot.z) ? o.dot : undefined);
     case 'glide': return glidePose(d, phase, forwardHeading(travel), lean);
     case 'stride': return stridePose(d, phase, speed, acc, forwardHeading(travel), lean);
-    case 'crossover': return crossoverPose(d, phase, forwardHeading(travel), side, lean, roll);
+    case 'crossover': return crossoverPose(d, phase, forwardHeading(travel), side, lean, roll, speed);
     case 'backward': return backwardPose(d, phase, acc, backwardHeading(travel), lean);
     case 'stop': return stopPose(d, speed, travel, side, lean);
     case 'down': return downPose(d);
@@ -708,7 +724,9 @@ function fit(raw: RawPose, d: BodyDims): Pose {
   const sl = shoulderJoint(body, 0, d), sr = shoulderJoint(body, 1, d);
   const top = lift(add(v3(0, hipY, 0), raw.top), sr);
   const stickAngle = Math.atan2(raw.blade.z - top.z, raw.blade.x - top.x);
-  const sinT = Math.min(1, top.y / d.stick), cosT = Math.sqrt(1 - sinT * sinT);
+  // The top hand chokes up a little, so the blade is carried about a metre in front rather than at full stick length.
+  const grip = STICK_GRIP * d.stick;
+  const sinT = Math.min(1, top.y / (d.stick - grip)), cosT = Math.sqrt(1 - sinT * sinT);
   const shaft = v3(Math.cos(stickAngle) * cosT, -sinT, Math.sin(stickAngle) * cosT);
   const onShaft = add(top, mul(shaft, shaftGrip(top, shaft, sl, reach, 0.36 * d.stick)));
   const free = add(sl, raw.freeRel);
@@ -716,7 +734,7 @@ function fit(raw: RawPose, d: BodyDims): Pose {
   const leg = (i: 0 | 1): LegPose => ({ foot: feet[i]!, footYaw: raw.legs[i].footYaw, lifted: feet[i]!.y > 0.01 });
   return {
     hipY, pitch: raw.pitch, roll: raw.roll, yaw, twist: raw.twist, look: raw.look,
-    legs: [leg(0), leg(1)], arms: [{ hand: bottom }, { hand: top }], stickAngle,
+    legs: [leg(0), leg(1)], arms: [{ hand: bottom }, { hand: top }], stickAngle, grip,
   };
 }
 

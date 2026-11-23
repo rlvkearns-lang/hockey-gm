@@ -81,13 +81,13 @@ async function sequence(tag, kind, camera, tick, spacing) {
   log.sequences.push({ tag, kind, camera, tick, frames: frames.map((f, i) => ({ file: names[i], tick: f.info.tick, style: f.info.style, speed: +f.info.speed.toFixed(2), onIce: f.info.onIce })) });
   // Contact sheet: each frame cropped round the figure.
   const sheet = await ctx.newPage();
-  const crop = 360;
+  const crop = 360, cropH = 440;
   const cells = frames.map((f, i) => {
     const cx = (f.at?.x ?? 0.5) * 1100, cy = (f.at?.y ?? 0.5) * 619;
-    return `<div class="c"><img src="${f.url}" style="left:${-(cx - crop / 2)}px;top:${-(cy - crop / 2)}px"><b>${i + 1} ${f.info.style} ${f.info.speed.toFixed(1)} m/s</b></div>`;
+    return `<div class="c"><img src="${f.url}" style="left:${-(cx - crop / 2)}px;top:${-(cy - cropH / 2)}px"><b>${i + 1} ${f.info.style} ${f.info.speed.toFixed(1)} m/s</b></div>`;
   }).join('');
   await sheet.setContent(`<style>body{margin:0;background:#222;display:grid;grid-template-columns:repeat(4,${crop}px);gap:2px;width:${crop * 4 + 6}px}
-    .c{position:relative;width:${crop}px;height:${crop}px;overflow:hidden}.c img{position:absolute;width:1100px;height:619px}
+    .c{position:relative;width:${crop}px;height:${cropH}px;overflow:hidden}.c img{position:absolute;width:1100px;height:619px}
     .c b{position:absolute;left:4px;top:2px;font:13px system-ui;color:#fff;background:rgba(0,0,0,.6);padding:1px 4px}</style>${cells}`);
   await sheet.screenshot({ path: join(out, `${prefix}sheet-${tag}-${kind}-${camera}.png`), fullPage: true });
   await sheet.close();

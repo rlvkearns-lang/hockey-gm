@@ -52,6 +52,6 @@ export function bodyDims(heightCm: number, weightKg: number): BodyDims {
     hipWidth: 0.1 * h * (0.9 + 0.1 * girth),
     headRadius: 0.062 * h,
     bulk: 0.15 * girth * (h / 1.85),
-    stick: 0.82 * h,
+    stick: 0.77 * h,
   };
 }

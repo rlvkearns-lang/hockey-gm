@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { bodyRadius, DT, RINK, generateTeam, type GameSetup, type GameState, type PlayerDef, type Side, type SkaterState } from '@hockey/engine';
 import { bodyDims, type BodyDims } from './body';
-import { initialGait, motionOf, poseOf, stepGait, type GaitState, type Motion, type Style } from './gait';
+import { initialGait, motionOf, poseOf, stepGait, type GaitState, type Motion, type Pose, type Style } from './gait';
 import { createMomentScanner, type Moment, type MomentScanner } from './moments';
 import { createPlayback, lerpAngle, type Frame, type Playback } from './playback';
 import { createMarker, createShadowBlob, createSkaterRig, handedMotion, type RigColors, type SkaterRig } from './rig';
@@ -92,6 +92,7 @@ let lastSpeed = 0;
 let lastOnIce = false;
 /** 0..1, eased: how far he is down in a faceoff crouch (at the dot while the faceoff is being set up). */
 let crouch = 0;
+let lastPose: Pose | null = null;
 const CROUCH_DOT = 1.3;
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -129,7 +130,22 @@ function follow(id: string): void {
 const positionName = (p: PlayerDef['position']): string =>
   ({ C: 'centre', LW: 'left wing', RW: 'right wing', LD: 'left defence', RD: 'right defence', G: 'goalie' })[p];
 
+/** Free the GPU memory of everything under `root` (geometry, materials and their textures). */
+function disposeTree(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    o.geometry.dispose();
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      const map = (m as THREE.MeshBasicMaterial).map;
+      if (map && map !== blobMap) map.dispose(); // the shared shadow texture stays
+      m.dispose();
+    }
+  });
+}
+const blobMap = (createShadowBlob().material as THREE.MeshBasicMaterial).map;
+
 function buildMarkers(state: GameState): void {
+  disposeTree(others);
   others.clear();
   markers = new Map();
   for (const s of state.skaters) {
@@ -207,26 +223,43 @@ function setCamera(mode: CameraMode): void {
 
 const nextPaint = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
+let starting = false;
+const setControls = (on: boolean): void => {
+  document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button, input, select').forEach((b) => { b.disabled = !on; });
+};
+
+/** Run a new game up front. Only one at a time; a failure is shown in plain words and the controls come back. */
 async function newGame(): Promise<void> {
+  if (starting) return;
+  starting = true;
   const seed = Math.trunc(Number($<HTMLInputElement>('seed').value)) || 0;
   loading.hidden = false;
   loading.textContent = 'Simulating…';
   setPlaying(false);
-  document.querySelectorAll<HTMLButtonElement>('button').forEach((b) => { b.disabled = true; });
-  await nextPaint();
-  setup = { home: generateTeam(seed * 2 + 1, 'Harbour City', 'HBR'), away: generateTeam(seed * 2 + 2, 'Northern Peaks', 'NPK'), seed, chemistry: [] };
-  defs = new Map();
-  for (const t of [setup.home, setup.away]) for (const p of t.players) defs.set(p.id, p);
-  scanner = createMomentScanner();
-  const t0 = performance.now();
-  playback = createPlayback(setup, { onStep: scanner.onStep });
-  simulateMs = performance.now() - t0;
-  buildMarkers(playback.frame().next);
-  fillPicker();
-  follow(setup.home.lines.defence[0]![0]);
-  seek(0);
-  document.querySelectorAll<HTMLButtonElement>('button').forEach((b) => { b.disabled = false; });
-  loading.hidden = true;
+  setControls(false);
+  try {
+    await nextPaint();
+    setup = { home: generateTeam(seed * 2 + 1, 'Harbour City', 'HBR'), away: generateTeam(seed * 2 + 2, 'Northern Peaks', 'NPK'), seed, chemistry: [] };
+    defs = new Map();
+    for (const t of [setup.home, setup.away]) for (const p of t.players) defs.set(p.id, p);
+    scanner = createMomentScanner();
+    playback = null;
+    const t0 = performance.now();
+    playback = createPlayback(setup, { onStep: scanner.onStep });
+    simulateMs = performance.now() - t0;
+    buildMarkers(playback.frame().next);
+    fillPicker();
+    follow(setup.home.lines.defence[0]![0]);
+    seek(0);
+    loading.hidden = true;
+  } catch (e) {
+    console.error(e);
+    playback = null;
+    loading.textContent = `Sorry, this game could not be set up (seed ${seed}). Try another seed and press New game.`;
+  } finally {
+    setControls(true);
+    starting = false;
+  }
 }
 let simulateMs = 0;
 
@@ -265,7 +298,10 @@ function placeCamera(dt: number, x: number, z: number, vel: { x: number; y: numb
     look.set(0, 0, 0);
   }
   if (orbit) {
-    const a = facing + orbit.angle;
+    let a = facing + orbit.angle;
+    // Keep the camera inside the boards: look from the opposite side if this one is outside.
+    const out = (ang: number): boolean => { const px = x + Math.cos(ang) * orbit!.dist, pz = z + Math.sin(ang) * orbit!.dist; return Math.abs(px) > RINK.halfLength - 0.4 || Math.abs(pz) > iceHalfWidthAt(px) - 0.4; };
+    if (out(a) && !out(a + Math.PI)) a += Math.PI;
     off.set(Math.cos(a) * orbit.dist, orbit.height, Math.sin(a) * orbit.dist);
     look.set(0, 0.8, 0);
   }
@@ -321,7 +357,11 @@ function update(gameDt: number, displayDt = gameDt): void {
     } else if (gameDt > 0) gait = stepGait(gait, m, gameDt);
     const atDot = f.next.phase === 'faceoffSetup' && Math.hypot(s.pos.x - f.next.faceoffSpot.x, s.pos.y - f.next.faceoffSpot.y) < CROUCH_DOT && m.speed < 0.5;
     crouch = fresh ? (atDot ? 1 : 0) : crouch + ((atDot ? 1 : 0) - crouch) * (1 - Math.exp(-Math.max(gameDt, 0) / 0.35));
-    rig.apply(poseOf(gait, m, dims, { crouch }), x, z, facing);
+    // The dot in his body frame (left-shot frame: mirrored for a right shot), where a crouched centre points his stick.
+    const ddx = f.next.faceoffSpot.x - s.pos.x, ddy = f.next.faceoffSpot.y - s.pos.y, cf = Math.cos(s.facing), sf = Math.sin(s.facing);
+    const dot = { x: ddx * cf + ddy * sf, y: 0, z: (followDef.shoots === 'R' ? -1 : 1) * (-ddx * sf + ddy * cf) };
+    lastPose = poseOf(gait, m, dims, { crouch, dot });
+    rig.apply(lastPose, x, z, facing);
     ring.position.set(x, 0.006, z);
     ring.visible = true;
     rig.root.visible = true;
@@ -406,12 +446,12 @@ const hook = {
   moments: (): Moment[] => scanner.momentsFor(followId),
   debug: () => {
     const f = playback!.frame(), sk = f.next.skaters.find((x) => x.id === followId)!;
-    return { cam: camera.position.toArray(), look: camLook.toArray(), root: rig?.root.position.toArray(), rotY: rig?.root.rotation.y, camHeading, facing: sk.facing, vel: sk.vel, gait };
+    return { pose: lastPose, cam: camera.position.toArray(), look: camLook.toArray(), root: rig?.root.position.toArray(), rotY: rig?.root.rotation.y, camHeading, facing: sk.facing, vel: sk.vel, gait };
   },
-  /** Where the followed figure's chest is on the canvas, as fractions of its width and height (0,0 top left). */
+  /** Where the middle of the followed figure (just above the pelvis) is on the canvas, as fractions (0,0 top left). */
   screenPos: (): { x: number; y: number } | null => {
     if (!rig || !rig.root.visible) return null;
-    const v = new THREE.Vector3(0, dims.hipHeight + 0.2, 0).applyMatrix4(rig.root.matrixWorld).project(camera);
+    const v = new THREE.Vector3(0, dims.hipHeight * 0.95, 0).applyMatrix4(rig.root.matrixWorld).project(camera);
     return { x: (v.x + 1) / 2, y: (1 - v.y) / 2 };
   },
   /** The canvas as a PNG data URL, rendered now (so it does not depend on the drawing buffer being kept). */

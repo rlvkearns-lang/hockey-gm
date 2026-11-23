@@ -48,7 +48,7 @@ export function mirrorPose(p: Pose): Pose {
     hipY: p.hipY, pitch: p.pitch, roll: -p.roll, yaw: -p.yaw, twist: -(p.twist ?? 0), look: -(p.look ?? 0),
     legs: [leg(p.legs[1]), leg(p.legs[0])],
     arms: [{ hand: mz(p.arms[1].hand) }, { hand: mz(p.arms[0].hand) }],
-    stickAngle: -p.stickAngle,
+    stickAngle: -p.stickAngle, grip: p.grip,
   };
 }
 
@@ -182,8 +182,8 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors): SkaterRig {
     b.position.y = y;
     torso.add(b);
   };
-  band(torsoBottom + 0.1 * k, 0.05 * k, trim);
-  band(torsoBottom + 0.18 * k, 0.025 * k, trim);
+  band(torsoBottom + 0.06 * k, 0.045 * k, trim);
+  band(torsoBottom + 0.12 * k, 0.022 * k, trim);
   const collar = mesh(new THREE.CylinderGeometry(0.075 * k, 0.09 * k, 0.05 * k, 12), trim, 'collar');
   collar.position.y = torsoTop;
   torso.add(collar);
@@ -199,9 +199,9 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors): SkaterRig {
     ? new THREE.MeshBasicMaterial({ map: numMap, transparent: true, depthWrite: false, toneMapped: false })
     : new THREE.MeshBasicMaterial({ color: colors.trim, transparent: true, opacity: 0 });
   mats.push(numMat);
-  const numSize = torsoW * 0.62;
+  const numSize = torsoW * 0.55;
   const number = mesh(new THREE.PlaneGeometry(numSize, numSize), numMat, 'number');
-  number.position.set(-torsoD / 2 - 0.006, d.torso * 0.5, 0);
+  number.position.set(-torsoD / 2 - 0.006, d.torso * 0.42, 0);
   number.rotation.y = -Math.PI / 2; // faces -x (his back), reading left to right for someone behind him
   torso.add(number);
   root.add(torso);
@@ -212,6 +212,9 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors): SkaterRig {
   const face = mesh(new THREE.SphereGeometry(hr * 0.92, 14, 10), skin, 'head');
   face.scale.set(1, 1.08, 0.92);
   head.add(face);
+  const neckMesh = mesh(new THREE.CylinderGeometry(0.05 * k, 0.055 * k, 0.12 * k, 10), skin, 'neck');
+  neckMesh.position.y = -hr * 0.95;
+  head.add(neckMesh);
   const helmet = mesh(new THREE.SphereGeometry(hr * 1.06, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.56), jersey, 'helmet');
   helmet.position.set(-0.01 * k, 0.015 * k, 0);
   head.add(helmet);
@@ -295,7 +298,7 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors): SkaterRig {
     torso.rotation.copy(scratch.set(p.roll, -twist, -p.pitch, 'XZY')); // Rx(roll) * Rz(-pitch) * Ry(-twist), as torsoRotate
 
     // Head: above the shoulders along the torso, kept more upright than the torso so he looks ahead.
-    const neck = add(v3(0, p.hipY, 0), torsoRotate(v3(0.04 * k, d.torso + hr * 1.25 + 0.04 * k, 0), p.pitch, p.roll, twist));
+    const neck = add(v3(0, p.hipY, 0), torsoRotate(v3(0.04 * k, d.torso + hr * 1.25 + 0.07 * k, 0), p.pitch, p.roll, twist));
     head.position.set(neck.x, neck.y, neck.z);
     // Turned toward where he looks, kept more upright than the torso so his eyes are up the ice.
     head.rotation.set(p.roll * 0.5, -(p.look ?? 0), -p.pitch * 0.25, 'YXZ');
@@ -343,10 +346,12 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors): SkaterRig {
     // Stick: butt in the top hand, running down at stickAngle so its heel reaches the ice.
     const hand = p.arms[top].hand;
     const h = p.stickAngle;
-    const sinT = Math.min(1, Math.max(0, hand.y) / d.stick), cosT = Math.sqrt(1 - sinT * sinT);
+    const grip = Math.min(Math.max(0, p.grip ?? 0), d.stick * 0.5);
+    const sinT = Math.min(1, Math.max(0, hand.y) / (d.stick - grip)), cosT = Math.sqrt(1 - sinT * sinT);
     const dirS = v3(Math.cos(h) * cosT, -sinT, Math.sin(h) * cosT);
-    aim(shaft, hand, add(hand, dirS));
-    const heel = add(hand, mul(dirS, d.stick));
+    const butt = sub(hand, mul(dirS, grip));
+    aim(shaft, butt, add(butt, dirS));
+    const heel = add(butt, mul(dirS, d.stick));
     blade.position.set(heel.x, Math.max(0, heel.y), heel.z);
     // The blade runs on from the heel along the stick's heading, its toe turned a little further out to his stick side.
     blade.rotation.set(0, -(h + (right ? 0.35 : -0.35)), 0);
