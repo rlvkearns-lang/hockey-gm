@@ -89,3 +89,17 @@ Proposed shape **[my call]**:
 - Confidence comes from how much he has been watched (games seen, by how many scouts, how recently), how good those scouts are, and how settled he is (an 18-year-old is less certain than a 22-year-old however much he is watched).
 - Both stars and colour together, so it reads at a glance and works for colour-blind players; more scouting visibly fills stars in.
 - Scouts can be confidently wrong: a weaker scout shows high confidence too easily. Over time the player sees each scout's hit rate.
+
+- Owner agreed (2026-11-23): keep the confidently wrong scouts.
+
+## Per-attribute potential (a friend of the owner, via screenshot of OOTP, 2026-11-23)
+
+- The friend's point: one of the best things in OOTP is seeing where a prospect's growth can come from. Each rating shows current and potential side by side (for example Control 20 / 45, Cutter 35 / 80, as two-part bars), so you can see "this guy will never have good command and we know it". In hockey games you only get an overall potential and have to guess what a centre's faceoffs or skating might grow to.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Every attribute has a current value and a potential, each as scouted estimates, shown as a two-part bar: filled to current, outlined to potential.
+- Potential differs by attribute in a believable way: skating and size-based things are largely set young; hockey sense, faceoffs, defensive positioning and strength grow later; some players have one tool with a huge ceiling and others that are capped.
+- The same confidence marks apply per attribute (a potential nobody has watched much is a wide guess).
+- Development then has something to aim at: the coach and development staff can focus a player on an attribute with room to grow; ice time, linemates, league level and personality (work ethic) decide how much of the gap closes; some potential is never reached, and late bloomers exist.
+- The prospect headline ("high ceiling, flashy") is derived from this picture rather than written separately.
