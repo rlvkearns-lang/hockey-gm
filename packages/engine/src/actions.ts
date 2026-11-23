@@ -4,6 +4,7 @@ import type { Rng } from './rng';
 import { nearestOpponentDist, steeredByContest } from './team-play';
 import { TUNING } from './tuning';
 import { watchTurnover } from './turnovers';
+import { gameEvent } from './events';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
 import { hypot2, segDistXY, type Vec2 } from './vec';
 import { datan2, dcos, dsin } from './dmath';
@@ -51,10 +52,15 @@ function skaterById(state: GameState, id: string): SkaterState {
 
 /**
  * The carrier lets the puck go with this velocity; it becomes loose and he cannot re-take it at once. Released from
- * his own half (behind the centre line), it is watched for icing until someone touches it.
+ * his own half (behind the centre line), it is watched for icing until someone touches it. With `out`, a `release`
+ * event (of `kind`, toward `toId`) goes into it.
  */
-function release(state: GameState, from: SkaterState, vx: number, vy: number, vz: number): void {
+function release(
+  state: GameState, from: SkaterState, vx: number, vy: number, vz: number,
+  out: GameEvent[] | null = null, kind: 'pass' | 'shot' | 'dump' = 'pass', toId: string | null = null,
+): void {
   const p = state.puck;
+  if (out) out.push(gameEvent(state, { type: 'release', side: from.side, playerId: from.id, otherId: toId, pos: p.pos, detail: { kind, toId, vel: { x: vx, y: vy, z: vz } } }));
   recordTouch(state, from.id, from.side); // his touch lasts until he lets it go
   state.icingWatch = p.pos.x * state.attackDir[from.side] < 0
     ? { side: from.side, fromX: p.pos.x, fromY: p.pos.y, tick: state.tick } : null;
@@ -75,14 +81,11 @@ export function releasePuck(state: GameState, fromId: string, vx: number, vy: nu
   release(state, skaterById(state, fromId), vx, vy, vz);
 }
 
-const event = (state: GameState, e: Omit<GameEvent, 'tick' | 'period' | 'clock'>): GameEvent =>
-  ({ tick: state.tick, period: state.period, clock: state.clock, ...e });
-
 /**
  * Pass along the ice to `toId`, led to where he will be. Speed TUNING.pass.speed (base + per point of passing); off by a
- * normal error that shrinks with passing and grows with pressure.
+ * normal error that shrinks with passing and grows with pressure. Its `release` and `pass` events go into `out`.
  */
-export function executePass(state: GameState, fromId: string, toId: string, defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
+export function executePass(state: GameState, fromId: string, toId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
   const from = skaterById(state, fromId), to = skaterById(state, toId);
   const passing = defs.get(fromId)!.attrs.passing;
   const speed = PASS.speed.base + passing * PASS.speed.perPoint;
@@ -93,9 +96,9 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
   const pressure = pressureOn(state, from);
   const sigma = PASS.error.base + (100 - passing) * PASS.error.perPoint + pressure * PASS.error.pressure;
   const angle = datan2(aimY - p.y, aimX - p.x) + rng.gauss() * sigma;
-  release(state, from, dcos(angle) * speed, dsin(angle) * speed, 0);
+  out.push(gameEvent(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'pass', distance: l } }));
+  release(state, from, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'pass', toId);
   state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((lead + PASS.graceSeconds) / DT), tried: [], pressure };
-  return event(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, assistIds: [], detail: `${l.toFixed(1)}m` });
 }
 
 /**
@@ -116,9 +119,9 @@ export function goalieShade(state: GameState, attackingSide: Side): number {
  * Shoot at the attacked net: aim at a spot inside it (more often on the side the goalie leaves open), missed by a
  * normal spread from shootingAccuracy, distance and pressure, or now and then mishit wide or high (TUNING.shot.wild).
  * Speed TUNING.shot.speed (base + per point of power), lifted so it arrives at the aimed height. No event yet: the release is recorded in `state.shotInFlight`, and what happens to the
- * puck decides whether it is a shot on goal, a miss, a post or a block.
+ * puck decides whether it is a shot on goal, a miss, a post or a block. Its `release` event goes into `out`.
  */
-export function executeShot(state: GameState, shooterId: string, defs: Map<string, PlayerDef>, rng: Rng): void {
+export function executeShot(state: GameState, shooterId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
   const s = skaterById(state, shooterId);
   const a = defs.get(shooterId)!.attrs;
   const dir = state.attackDir[s.side];
@@ -150,15 +153,15 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
   const t = l / speed;
   const from = { x: p.x, y: p.y };
   // Lifted to arrive at height z, but never harder than MAX_SHOT_LIFT (from beside the net that would launch it skyward).
-  release(state, s, (dx / l) * speed, (dy / l) * speed, Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * t * t) / t));
+  release(state, s, (dx / l) * speed, (dy / l) * speed, Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * t * t) / t), out, 'shot');
   state.shotInFlight = { shooterId, side: s.side, from, fromDist: d, tick: state.tick, blockTried: [] };
 }
 
 /**
  * Chip the puck deep into the attacked end, toward one corner (picked at random), with a passing-based direction error.
- * Emits a `pass` event with detail `dump` and no receiver.
+ * Its `pass` event (kind `dump`, no receiver) and `release` event go into `out`.
  */
-export function executeDump(state: GameState, fromId: string, defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
+export function executeDump(state: GameState, fromId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
   const s = skaterById(state, fromId);
   const passing = defs.get(fromId)!.attrs.passing;
   const dir = state.attackDir[s.side];
@@ -167,8 +170,8 @@ export function executeDump(state: GameState, fromId: string, defs: Map<string, 
   const speed = DUMP.speed.base + passing * DUMP.speed.perPoint;
   const sigma = DUMP.errorFactor * (PASS.error.base + (100 - passing) * PASS.error.perPoint);
   const angle = datan2(ty - p.y, tx - p.x) + rng.gauss() * sigma;
-  release(state, s, dcos(angle) * speed, dsin(angle) * speed, DUMP.vz);
-  return event(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, assistIds: [], detail: 'dump' });
+  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'dump', distance: null } }));
+  release(state, s, dcos(angle) * speed, dsin(angle) * speed, DUMP.vz, out, 'dump');
 }
 
 /**
@@ -221,7 +224,7 @@ export function tryIntercept(
     }
     return {
       // The interceptor won the puck off the passer (whether it goes in the box score is turnovers.ts's call).
-      event: event(state, { type: 'turnover', side: s.side, playerId: s.id, otherId: pass.fromId, assistIds: [], detail: take ? 'intercepted' : 'deflected' }),
+      event: gameEvent(state, { type: 'turnover', side: s.side, playerId: s.id, otherId: pass.fromId, pos: p.pos, detail: { how: take ? 'intercepted' : 'deflected' } }),
       taker: take ? s : null,
     };
   }

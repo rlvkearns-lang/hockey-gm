@@ -40,7 +40,7 @@ describe('board battles', () => {
   });
   it('a battle won off the man who was carrying the puck is a turnover (clean or loose)', () => {
     const e = battleWonOffCarrier(def({ strength: 55, puckHandling: 55, balance: 55 }), def({ strength: 85, stickChecking: 85, compete: 85 }));
-    expect(e.find((x) => x.type === 'turnover')).toMatchObject({ playerId: 'away-C', otherId: 'home-C', detail: expect.stringMatching(/^battle(Loose)?$/) });
+    expect(e.find((x) => x.type === 'turnover')).toMatchObject({ playerId: 'away-C', otherId: 'home-C', detail: { how: expect.stringMatching(/^battle(Loose)?$/) } });
   });
   it('a moving puck slides into their feet over a few ticks rather than stopping dead', () => {
     const r = puckIntoFeet();
@@ -57,7 +57,7 @@ describe('board battles', () => {
     }
     const dig = log.filter((l) => l.stage === 'dig');
     expect(dig.length).toBeGreaterThan(0);
-    // During the dig the pinned man (participant index) is shown, or -1 when nobody could pin the other.
+    // During the dig the pinned man (his id) is shown, or null when nobody could pin the other.
     expect(dig.every((l) => l.pinned === dig[0]!.pinned)).toBe(true);
   });
   it('the puck sits still in their feet while it runs: nobody carries it and nobody else takes it', () => {
@@ -70,7 +70,7 @@ describe('board battles', () => {
   it('a trapped puck stops play at the nearest end-zone dot inside the blue line', () => {
     const r = trappedBattle();
     expect(r.phase).toBe('stopped');
-    expect(r.freeze?.detail).toBe('trapped');
+    expect(r.freeze?.type === 'freeze' && r.freeze.detail.cause).toBe('trapped');
     expect(r.faceoffSpot).toEqual(FACEOFF_DOTS.end[3]);
     expect(r.contests).toBe(0);
   });

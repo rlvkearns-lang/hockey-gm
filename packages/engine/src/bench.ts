@@ -1,4 +1,5 @@
 import { PERIOD_SECONDS } from './constants';
+import { gameEvent } from './events';
 import { faceoffPosition } from './faceoff';
 import { zoneOf } from './rink';
 import type { Rng } from './rng';
@@ -182,10 +183,10 @@ function startChange(state: GameState, setup: GameSetup, side: Side, unit: Unit,
   b.cur = to;
   b.changing = true;
   b.shiftStart = now;
-  out.push({
-    tick: state.tick, period: state.period, clock: state.clock, type: 'lineChange', side, playerId: null, otherId: null, assistIds: [],
-    detail: `${unit} ${from + 1}>${to + 1} ${state.phase === 'live' ? 'onTheFly' : 'stoppage'} ${phaseFor(state, side)}`,
-  });
+  out.push(gameEvent(state, {
+    type: 'lineChange', side, playerId: null, otherId: null, pos: BENCH_DOORS[side],
+    detail: { unit, from, to, onTheFly: state.phase === 'live', phase: phaseFor(state, side) },
+  }));
   continueChange(state, setup, side, unit, b, now, false);
 }
 

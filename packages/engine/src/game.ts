@@ -3,7 +3,8 @@ import { BENCH_DOORS, benchTick, finishChanges, initialBench } from './bench';
 import { resolveBodies } from './bodies';
 import { brainTick } from './brain';
 import { DT, PERIOD_SECONDS, PERIODS } from './constants';
-import { clearContests, contestTick, puckHeldByContest } from './contests/core';
+import { clearContests, contestEndEvent, contestTick, puckHeldByContest, type ContestRef } from './contests/core';
+import { gameEvent } from './events';
 import { dropPuck, FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, linedUp, restPuck, setupFaceoff, snapToLineup } from './faceoff';
 import { goalieTick, resolveOnNet, trackShot, tryBlock } from './goalie';
 import { stepPuck, type PuckEvent } from './puck';
@@ -16,7 +17,7 @@ import { buildResult } from './stats';
 import { confirmTurnover } from './turnovers';
 import { assignJobs, isTiedUp, steeredByContest } from './team-play';
 import type {
-  GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
+  ContestState, GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
 } from './types';
 import { validateSetup } from './validate';
 import { dist, hypot2, segDistXY } from './vec';
@@ -200,10 +201,6 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     return m;
   };
 
-  const emit = (e: Omit<GameEvent, 'tick' | 'period' | 'clock'>): void => {
-    events.push({ tick: state.tick, period: state.period, clock: state.clock, ...e });
-  };
-
   /** Movement, body separation, boards and net frames for the on-ice skaters (onIceSkaters(), with onIceMoves). */
   function moveSkaters(skaters: SkaterState[]): void {
     for (let i = 0; i < skaters.length; i++) {
@@ -277,8 +274,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
     benchTick(state, setup, rng, DT, events);
     assignJobs(state, defs, tactics);
-    const action = brainTick(state, defs, rng);
-    if (action) events.push(action);
+    brainTick(state, defs, rng, events);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
 
     const skaters = onIceSkaters();
@@ -320,7 +316,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     state.clock = Math.max(0, (PERIOD_TICKS - liveTicks) * DT);
 
     if (liveTicks >= PERIOD_TICKS) {
-      emit({ type: 'periodEnd', side: 'home', playerId: null, otherId: null, assistIds: [], detail: `period ${state.period}` });
+      events.push(gameEvent(state, { type: 'periodEnd', side: null, playerId: null, otherId: null, pos: state.puck.pos, detail: { period: state.period } }));
       state.carrierId = null;
       state.possession = null;
       state.pickupBlock = null;
@@ -339,9 +335,32 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
 
   function step(): void {
     if (state.phase === 'final') return;
+    const before = state.contests.slice();
+    const mark = events.length;
     stepOnce();
+    endCutContests(before, mark);
     noNegativeZero(state);
     state.rng = rng.getState();
+  }
+
+  /**
+   * A contest that a whistle or the end of a period cleared this step (it was running, or started this step, and is
+   * gone without its own `contestEnd`) gets a `contestEnd` with result `whistle`, so the event log closes every contest.
+   */
+  function endCutContests(before: readonly ContestState[], mark: number): void {
+    const open: ContestRef[] = before.slice();
+    const ended = new Set<number>();
+    const n = events.length;
+    for (let i = mark; i < n; i++) {
+      const e = events[i]!;
+      if (e.type === 'contestEnd') ended.add(e.detail.contestId);
+      else if (e.type === 'contestStart') open.push({ id: e.detail.contestId, kind: e.detail.kind, spot: e.pos });
+    }
+    for (const c of open) {
+      if (ended.has(c.id) || state.contests.some((k) => k.id === c.id)) continue;
+      ended.add(c.id);
+      events.push(contestEndEvent(state, c, 'whistle', null, 'unchanged'));
+    }
   }
 
   function stepOnce(): void {

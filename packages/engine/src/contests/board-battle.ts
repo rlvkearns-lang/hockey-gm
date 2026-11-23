@@ -5,12 +5,13 @@ import { boardsNormal, distToBoards, FACEOFF_DOTS, resolveBoards, RINK } from '.
 import { movementOf } from '../skating';
 import { TUNING } from '../tuning';
 import { heldSeconds, watchTurnover } from '../turnovers';
-import type { ContestState, GameState, SkaterState } from '../types';
+import type { ContestStateOf, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
   carrierNow, carrierOf, contestEvent, contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx, type ContestResult, type Weights,
 } from './core';
+import type { ContestOutcome } from '../types';
 
 const KIND = 'boardBattle';
 const T = TUNING.boardBattle;
@@ -42,53 +43,29 @@ const SUPPORT_OFF_BOARDS = 2;
 const PIN_SPEED_CAP = 0.4;
 const DIG_SPEED_CAP = 0.3;
 
-/** No one (for data fields that hold a participant index: 0 is the first participant, 1 the second). */
-const NONE = -1;
+type Battle = ContestStateOf<'boardBattle'>;
 
-/** `ContestState.data` of a board battle (participant indexes, or NONE). */
-type BattleData = {
-  /** 1: the puck is in their feet at `spot` (sliding there for `slide` more ticks), nobody may pick it up. */
-  holdsPuck: number;
-  slide: number;
-  /** The carrier's participant index while he shields a carried puck (`protect`), else NONE. */
-  carrier: number;
-  /** The participant index of a carrier who lost the puck into their feet (a win by the other man is a turnover), else NONE. */
-  stripped: number;
-  /** How long (s) the stripped carrier had had the puck when it went into their feet. */
-  held: number;
-  /** The first man in (+6), and 1 once that is settled. */
-  first: number;
-  firstSet: number;
-  /** Pin draws won by participant 0 less those won by participant 1. */
-  balance: number;
-  /** The man held on the boards. */
-  pinned: number;
-  /** stageT of the next pin or dig draw. */
-  nextAt: number;
-  /** Winner of the last dig round, and how many rounds so far. */
-  digLast: number;
-  digRounds: number;
-  /** The dig winner, and 1 if he comes away with it clean (0: it squirts loose). */
-  winner: number;
-  clean: number;
-  /** Each side's supporting player (side of participant 0, side of participant 1). */
-  supportA: number;
-  supportB: number;
-};
-const dataOf = (c: ContestState): BattleData => c.data as BattleData;
+/** No one (as a participant index: 0 is `roles.a`, 1 is `roles.b`, supporting players come after). */
+const NONE = -1;
+/** Participant index of `id` (NONE for null). Participants of a board battle are only ever added, so it is stable. */
+const ix = (c: Battle, id: string | null): number => (id === null ? NONE : c.participants.indexOf(id));
+const idOf = (c: Battle, i: number): string => c.participants[i]!;
+/** Role value for participant index `i` (null for NONE). */
+const roleOf = (c: Battle, i: number): string | null => (i === NONE ? null : idOf(c, i));
+const other = (i: number): number => 1 - i;
 
 /**
  * Board battle: the puck this close (T.triggerBoards m) to the boards, slower than T.triggerSpeed m/s, on the ice and
  * not a shot, with a skater of each team within T.triggerRange m of it. A carried puck counts (the carrier is then one
- * of the two). Participants: the two men (index 0 and 1), then any supporting players. Stages:
+ * of the two). Participants: the two men (`roles.a`, `roles.b`), then any supporting players. Stages:
  * - `protect` (a carried puck only, PROTECT_SECONDS): the carrier shields it and keeps skating while the other man
  *   leans on him; then he either keeps it and skates out (a `battle` event, detail `protect`; the contest ends) or it
  *   is knocked into their feet and the battle goes on (see protect()).
- * - `arrive` (0.3 to 0.8 s): both go to the puck; the first within reach (`data.first`) has +6 for the rest of it.
+ * - `arrive` (0.3 to 0.8 s): both go to the puck; the first within reach (`roles.first`) has +6 for the rest of it.
  *   `leader`: the first man, else the closer.
  * - `pin` (0.8 to 1.6 s): a shoving draw every 0.2 s (strength .45, balance .3, compete .25, plus mass difference / 4);
- *   `data.balance` is the running score (+ for participant 0) and `leader` whoever is ahead. A lead of two pins the
- *   other man against the boards (`data.pinned`, his participant index); level at the end, nobody is pinned.
+ *   `data.balance` is the running score (+ for `a`) and `leader` whoever is ahead. A lead of two pins the
+ *   other man against the boards (`roles.pinned`); level at the end, nobody is pinned.
  * - `dig` (1.0 to 2.5 s): stick draws (stickChecking .35, puckHandling .3, compete .2, agility .15; a pinned man at
  *   -10). The pinner, with the puck in his feet, wins the dig on the first round he wins; the pinned man has to win two
  *   rounds in a row to dig it out. With nobody pinned either side needs two in a row, and four rounds without that
@@ -97,13 +74,13 @@ const dataOf = (c: ContestState): BattleData => c.data as BattleData;
  * - `resolve` (0.3 s): `leader` is the winner. Then 60% of the time his side comes away with it clean (`toWinner`: to
  *   his supporting player if he has one, else to him), else it squirts loose along the boards.
  * Any time after `arrive`, the first free teammate of either side within 2.5 m joins as that side's support
- * (`data.supportA` / `data.supportB`, his participant index): +8 for his side. One `battle` event at the end: the dig
+ * (`roles.supportA` / `roles.supportB`): +8 for his side. One `battle` event at the end: the dig
  * winner over the loser, detail `support` (his side had support and the other did not: the numbers won it), else
  * `pinned` (the winner had pinned him), `stick` (he dug it out while pinned) or `scramble` (nobody was pinned). From
  * `arrive` on the puck is in their feet (`data.holdsPuck`): it slides on to `spot` over a few ticks and stays there
  * with nobody carrying it until the end; every participant but a shielding carrier is steered by it.
  */
-export const boardBattleContest: Contest = {
+export const boardBattleContest: Contest<'boardBattle'> = {
   kind: KIND,
 
   gate: (ctx) => puckBattleable(ctx),
@@ -125,13 +102,14 @@ export const boardBattleContest: Contest = {
     const state = ctx.state;
     const p = state.puck;
     const carrierIdx = state.carrierId === null ? NONE : participants.indexOf(state.carrierId);
-    const c: ContestState = {
+    const c: Battle = {
       id: -1, kind: KIND, stage: carrierIdx === NONE ? 'arrive' : 'protect', stageT: 0, participants: participants.slice(), leader: null,
       spot: { x: p.pos.x, y: p.pos.y }, freeIds: carrierIdx === NONE ? [] : [participants[carrierIdx]!],
-      data: {
-        holdsPuck: 0, slide: 0, carrier: carrierIdx, stripped: NONE, held: 0, first: NONE, firstSet: 0, balance: 0, pinned: NONE, nextAt: PIN_ROUND,
-        digLast: NONE, digRounds: 0, winner: NONE, clean: 0, supportA: NONE, supportB: NONE,
+      roles: {
+        a: participants[0]!, b: participants[1]!, carrier: carrierIdx === NONE ? null : participants[carrierIdx]!, stripped: null, first: null,
+        pinned: null, digLast: null, supportA: null, supportB: null, winner: null,
       },
+      data: { holdsPuck: false, slide: 0, held: 0, firstSet: false, balance: 0, nextAt: PIN_ROUND, digRounds: 0, clean: false },
     };
     if (carrierIdx === NONE) intoFeet(c, ctx);
     else c.leader = participants[carrierIdx]!;
@@ -188,16 +166,13 @@ function nearestOpponent(state: GameState, s: SkaterState): string[] | null {
   return o ? [s.id, o.id] : null;
 }
 
-const idOf = (c: ContestState, i: number): string => c.participants[i]!;
-const other = (i: number): number => 1 - i;
-
 const scratchVel: Vec2 = { x: 0, y: 0 };
 
 /**
  * The puck goes into their feet: nobody carries it, and it slides on to the battle's spot (where it would be in
  * SLIDE_LEAD s, inside the boards) over SLIDE_TICKS ticks, then stays there.
  */
-function intoFeet(c: ContestState, ctx: ContestCtx): void {
+function intoFeet(c: Battle, ctx: ContestCtx): void {
   const state = ctx.state;
   const p = state.puck;
   state.pendingPass = null;
@@ -209,14 +184,14 @@ function intoFeet(c: ContestState, ctx: ContestCtx): void {
   resolveBoards(c.spot, scratchVel, 0.05, 0);
   p.vel.x = 0;
   p.vel.y = 0;
-  c.data.holdsPuck = 1;
+  c.data.holdsPuck = true;
   c.data.slide = SLIDE_TICKS;
 }
 
 /** The puck in their feet: still at the spot, or still sliding there. */
-function holdPuck(state: GameState, c: ContestState): void {
+function holdPuck(state: GameState, c: Battle): void {
   const p = state.puck;
-  const d = dataOf(c);
+  const d = c.data;
   if (d.slide > 0) {
     p.pos.x += (c.spot.x - p.pos.x) / d.slide;
     p.pos.y += (c.spot.y - p.pos.y) / d.slide;
@@ -232,15 +207,15 @@ function holdPuck(state: GameState, c: ContestState): void {
 }
 
 /** Each side without support takes the first free teammate (skater order) within T.supportRange of the spot. */
-function joinSupport(c: ContestState, ctx: ContestCtx): void {
+function joinSupport(c: Battle, ctx: ContestCtx): void {
   const state = ctx.state;
   for (let i = 0; i < 2; i++) {
     const key = i === 0 ? 'supportA' : 'supportB';
-    if (dataOf(c)[key] !== NONE) continue;
+    if (c.roles[key] !== null) continue;
     const side = skaterById(state, idOf(c, i)).side;
     for (const s of state.skaters) {
       if (s.side !== side || !isFree(s) || dist(s.pos, c.spot) > T.supportRange) continue;
-      dataOf(c)[key] = c.participants.length;
+      c.roles[key] = s.id;
       c.participants.push(s.id);
       s.contestId = c.id;
       break;
@@ -249,11 +224,11 @@ function joinSupport(c: ContestState, ctx: ContestCtx): void {
 }
 
 /** Rating points participant 0 has over participant 1 in a draw with `weights` (first man, support, chemistry in). */
-function sideEdge(c: ContestState, ctx: ContestCtx, weights: Weights): number {
-  const d = dataOf(c);
-  return contestRating(ctx, c, idOf(c, 0), weights) - contestRating(ctx, c, idOf(c, 1), weights)
-    + (d.first === 0 ? T.firstEdge : d.first === 1 ? -T.firstEdge : 0)
-    + (d.supportA !== NONE ? T.supportEdge : 0) - (d.supportB !== NONE ? T.supportEdge : 0);
+function sideEdge(c: Battle, ctx: ContestCtx, weights: Weights): number {
+  const r = c.roles;
+  return contestRating(ctx, c, r.a, weights) - contestRating(ctx, c, r.b, weights)
+    + (r.first === r.a ? T.firstEdge : r.first === r.b ? -T.firstEdge : 0)
+    + (r.supportA !== null ? T.supportEdge : 0) - (r.supportB !== null ? T.supportEdge : 0);
 }
 
 /**
@@ -263,26 +238,25 @@ function sideEdge(c: ContestState, ctx: ContestCtx, weights: Weights): number {
  * `protect`), or it is knocked into their feet and the battle goes on to `arrive`. He letting the puck go, or the
  * other man losing touch with him, ends it with no result.
  */
-function protect(c: ContestState, ctx: ContestCtx): ContestResult | null {
+function protect(c: Battle, ctx: ContestCtx): ContestResult | null {
   const state = ctx.state;
-  const d = dataOf(c);
-  const ci = d.carrier, oi = other(ci);
+  const ci = ix(c, c.roles.carrier), oi = other(ci);
   const carrier = skaterById(state, idOf(c, ci)), opp = skaterById(state, idOf(c, oi));
   c.spot.x = state.puck.pos.x;
   c.spot.y = state.puck.pos.y;
-  if (state.carrierId !== carrier.id) return cooledOff(c, ctx, null);
+  if (state.carrierId !== carrier.id) return cooledOff(c, ctx, null, 'released');
   if (c.stageT < PROTECT_SECONDS - STAGE_EPS) return null;
-  if (dist(carrier.pos, opp.pos) > PROTECT_REACH) return cooledOff(c, ctx, null);
+  if (dist(carrier.pos, opp.pos) > PROTECT_REACH) return cooledOff(c, ctx, null, 'lostTouch');
   const mc = movementOf(ctx.defs.get(carrier.id)!, 1).mass, mo = movementOf(ctx.defs.get(opp.id)!, 1).mass;
   const edge = contestRating(ctx, c, carrier.id, T.protect) - contestRating(ctx, c, opp.id, T.strip) + (mc - mo) / T.massPerPoint + T.protectEdge;
   if (ctx.rng.next() < winProb(edge)) {
-    ctx.emit(contestEvent(state, { type: 'battle', side: carrier.side, playerId: carrier.id, otherId: opp.id, assistIds: [], detail: 'protect' }));
+    ctx.emit(contestEvent(state, { type: 'battle', side: carrier.side, playerId: carrier.id, otherId: opp.id, pos: c.spot, detail: { how: 'protect', contestId: c.id } }));
     setCooldown(state, opp.id, 'pokeCheck', T.loserPokeCooldown);
-    return cooledOff(c, ctx, carrier.id);
+    return cooledOff(c, ctx, carrier.id, 'protected');
   }
-  d.stripped = ci;
-  d.held = heldSeconds(state, carrier.id);
-  d.carrier = NONE;
+  c.roles.stripped = carrier.id;
+  c.data.held = heldSeconds(state, carrier.id);
+  c.roles.carrier = null;
   c.freeIds.length = 0;
   c.leader = null;
   intoFeet(c, ctx);
@@ -291,44 +265,44 @@ function protect(c: ContestState, ctx: ContestCtx): ContestResult | null {
 }
 
 /** Ends the battle with the puck left as it is (to `winnerId`, or nobody); nobody in it starts another for a while. */
-function cooledOff(c: ContestState, ctx: ContestCtx, winnerId: string | null): ContestResult {
+function cooledOff(c: Battle, ctx: ContestCtx, winnerId: string | null, outcome: ContestOutcome): ContestResult {
   for (const id of c.participants) setCooldown(ctx.state, id, KIND, T.cooldownSeconds);
-  return { winnerId, puck: 'unchanged' };
+  return { winnerId, puck: 'unchanged', outcome };
 }
 
 /** Who gets there first. */
-function arrive(c: ContestState, ctx: ContestCtx): void {
+function arrive(c: Battle, ctx: ContestCtx): void {
   const state = ctx.state;
-  const d = dataOf(c);
-  const da = dist(skaterById(state, idOf(c, 0)).pos, c.spot), db = dist(skaterById(state, idOf(c, 1)).pos, c.spot);
+  const d = c.data, r = c.roles;
+  const da = dist(skaterById(state, r.a).pos, c.spot), db = dist(skaterById(state, r.b).pos, c.spot);
   const inA = da <= ARRIVE_REACH, inB = db <= ARRIVE_REACH;
-  if (d.firstSet === 0 && (inA || inB)) {
-    d.firstSet = 1;
-    d.first = inA && inB ? NONE : inA ? 0 : 1;
+  if (!d.firstSet && (inA || inB)) {
+    d.firstSet = true;
+    r.first = inA && inB ? null : inA ? r.a : r.b;
   }
   const over = (c.stageT >= ARRIVE_SECONDS[0] - STAGE_EPS && inA && inB) || c.stageT >= ARRIVE_SECONDS[1] - STAGE_EPS;
-  if (over && d.firstSet === 0) {
-    d.firstSet = 1;
-    d.first = Math.abs(da - db) < FIRST_GAP ? NONE : da < db ? 0 : 1;
+  if (over && !d.firstSet) {
+    d.firstSet = true;
+    r.first = Math.abs(da - db) < FIRST_GAP ? null : da < db ? r.a : r.b;
   }
-  c.leader = d.first !== NONE ? idOf(c, d.first) : da < db ? idOf(c, 0) : db < da ? idOf(c, 1) : null;
+  c.leader = r.first !== null ? r.first : da < db ? r.a : db < da ? r.b : null;
   if (!over) return;
   d.nextAt = PIN_ROUND;
   enterStage(c, 'pin');
 }
 
 /** Shoving draws until one man leads by PIN_MARGIN; the stage ends between PIN_SECONDS[0] and [1]. */
-function pin(c: ContestState, ctx: ContestCtx): void {
-  const d = dataOf(c);
+function pin(c: Battle, ctx: ContestCtx): void {
+  const d = c.data, r = c.roles;
   if (Math.abs(d.balance) < PIN_MARGIN && c.stageT >= d.nextAt - STAGE_EPS) {
-    const ma = movementOf(ctx.defs.get(idOf(c, 0))!, 1).mass, mb = movementOf(ctx.defs.get(idOf(c, 1))!, 1).mass;
+    const ma = movementOf(ctx.defs.get(r.a)!, 1).mass, mb = movementOf(ctx.defs.get(r.b)!, 1).mass;
     const edge = sideEdge(c, ctx, T.pin) + (ma - mb) / T.massPerPoint;
     d.balance += ctx.rng.next() < winProb(edge) ? 1 : -1;
     d.nextAt += PIN_ROUND;
-    if (Math.abs(d.balance) >= PIN_MARGIN) d.pinned = d.balance > 0 ? 1 : 0;
+    if (Math.abs(d.balance) >= PIN_MARGIN) r.pinned = d.balance > 0 ? r.b : r.a;
   }
-  c.leader = d.balance > 0 ? idOf(c, 0) : d.balance < 0 ? idOf(c, 1) : null;
-  const decided = d.pinned !== NONE;
+  c.leader = d.balance > 0 ? r.a : d.balance < 0 ? r.b : null;
+  const decided = r.pinned !== null;
   if ((decided && c.stageT >= PIN_SECONDS[0] - STAGE_EPS) || c.stageT >= PIN_SECONDS[1] - STAGE_EPS) {
     d.nextAt = ctx.rng.range(DIG_ROUND[0], DIG_ROUND[1]);
     enterStage(c, 'dig');
@@ -336,34 +310,37 @@ function pin(c: ContestState, ctx: ContestCtx): void {
 }
 
 /** Stick draws; returns a result only when the puck is trapped (play stops). */
-function dig(c: ContestState, ctx: ContestCtx): ContestResult | null {
-  const d = dataOf(c);
-  if (d.winner === NONE && c.stageT >= d.nextAt - STAGE_EPS) {
-    const pinEdge = d.pinned === 0 ? -T.pinnedEdge : d.pinned === 1 ? T.pinnedEdge : 0;
+function dig(c: Battle, ctx: ContestCtx): ContestResult | null {
+  const d = c.data, r = c.roles;
+  const pinned = ix(c, r.pinned);
+  if (r.winner === null && c.stageT >= d.nextAt - STAGE_EPS) {
+    const pinEdge = pinned === 0 ? -T.pinnedEdge : pinned === 1 ? T.pinnedEdge : 0;
     const w = ctx.rng.next() < winProb(sideEdge(c, ctx, T.dig) + pinEdge) ? 0 : 1;
+    const last = ix(c, r.digLast);
     d.digRounds++;
-    if (d.pinned !== NONE) {
-      if (w !== d.pinned || d.digLast === d.pinned) d.winner = w;
-    } else if (d.digLast === w) d.winner = w;
+    if (pinned !== NONE) {
+      if (w !== pinned || last === pinned) r.winner = idOf(c, w);
+    } else if (last === w) r.winner = idOf(c, w);
     else if (d.digRounds >= T.digMaxRounds) return trapped(c, ctx);
-    d.digLast = w;
-    if (d.winner === NONE) d.nextAt += ctx.rng.range(DIG_ROUND[0], DIG_ROUND[1]);
+    r.digLast = idOf(c, w);
+    if (r.winner === null) d.nextAt += ctx.rng.range(DIG_ROUND[0], DIG_ROUND[1]);
   }
-  const ahead = d.winner !== NONE ? d.winner
-    : d.pinned !== NONE ? (d.digLast === d.pinned ? d.pinned : other(d.pinned)) : d.digLast;
-  c.leader = ahead === NONE ? null : idOf(c, ahead);
-  if (d.winner !== NONE && c.stageT >= DIG_MIN - STAGE_EPS) {
-    d.clean = ctx.rng.chance(T.cleanShare) ? 1 : 0;
+  const last = ix(c, r.digLast);
+  const ahead = r.winner !== null ? ix(c, r.winner)
+    : pinned !== NONE ? (last === pinned ? pinned : other(pinned)) : last;
+  c.leader = roleOf(c, ahead);
+  if (r.winner !== null && c.stageT >= DIG_MIN - STAGE_EPS) {
+    d.clean = ctx.rng.chance(T.cleanShare);
     enterStage(c, 'resolve');
   }
   return null;
 }
 
 /** Neither side can get it out: whistle, faceoff at the nearest end-zone dot inside a blue line, else neutral-zone dot. */
-function trapped(c: ContestState, ctx: ContestCtx): ContestResult {
+function trapped(c: Battle, ctx: ContestCtx): ContestResult {
   const state = ctx.state;
-  const a = skaterById(state, idOf(c, 0));
-  ctx.emit(contestEvent(state, { type: 'freeze', side: a.side, playerId: a.id, otherId: idOf(c, 1), assistIds: [], detail: 'trapped' }));
+  const a = skaterById(state, c.roles.a);
+  ctx.emit(contestEvent(state, { type: 'freeze', side: a.side, playerId: a.id, otherId: c.roles.b, pos: c.spot, detail: { cause: 'trapped' } }));
   const inEnd = Math.abs(c.spot.x) > RINK.blueLineX;
   let best: Vec2 = FACEOFF_DOTS.centre, bestD = Infinity;
   for (const dot of inEnd ? FACEOFF_DOTS.end : FACEOFF_DOTS.neutral) {
@@ -372,27 +349,28 @@ function trapped(c: ContestState, ctx: ContestCtx): ContestResult {
     if (dd < bestD) { bestD = dd; best = dot; }
   }
   stopPlay(state, best);
-  return { winnerId: null, puck: 'unchanged' };
+  return { winnerId: null, puck: 'unchanged', outcome: 'trapped' };
 }
 
 /** The battle is decided: the event, cooldowns, and the puck to the winner (or his support) or squirting loose. */
-function finish(c: ContestState, ctx: ContestCtx): ContestResult {
+function finish(c: Battle, ctx: ContestCtx): ContestResult {
   const state = ctx.state;
-  const d = dataOf(c);
-  const w = d.winner, l = other(w);
-  const winner = skaterById(state, idOf(c, w));
-  const supportIdx = w === 0 ? d.supportA : d.supportB;
-  const outnumbered = (l === 0 ? d.supportA : d.supportB) === NONE;
-  const detail = supportIdx !== NONE && outnumbered ? 'support' : d.pinned === NONE ? 'scramble' : d.pinned === l ? 'pinned' : 'stick';
-  ctx.emit(contestEvent(state, { type: 'battle', side: winner.side, playerId: winner.id, otherId: idOf(c, l), assistIds: [], detail }));
+  const d = c.data, r = c.roles;
+  const w = ix(c, r.winner), l = other(w);
+  const winner = skaterById(state, idOf(c, w)), loserId = idOf(c, l);
+  const support = w === 0 ? r.supportA : r.supportB;
+  const outnumbered = (l === 0 ? r.supportA : r.supportB) === null;
+  const how = support !== null && outnumbered ? 'support' : r.pinned === null ? 'scramble' : r.pinned === loserId ? 'pinned' : 'stick';
+  ctx.emit(contestEvent(state, { type: 'battle', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot, detail: { how, contestId: c.id } }));
   // Won off the man who was carrying it: a turnover, clean (`battle`) or squirting loose (`battleLoose`).
-  if (d.stripped === l) ctx.emit(contestEvent(state, { type: 'turnover', side: winner.side, playerId: winner.id, otherId: idOf(c, l), assistIds: [], detail: d.clean === 1 ? 'battle' : 'battleLoose' }));
+  const stripped = r.stripped === loserId;
+  if (stripped) ctx.emit(contestEvent(state, { type: 'turnover', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot, detail: { how: d.clean ? 'battle' : 'battleLoose' } }));
   for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
-  setCooldown(state, idOf(c, l), 'pokeCheck', T.loserPokeCooldown);
-  if (d.clean === 1) {
-    const to = supportIdx !== NONE ? idOf(c, supportIdx) : winner.id;
-    if (d.stripped === l) watchTurnover(state, winner.side, winner.id, idOf(c, l), 'battle', { held: d.held });
-    return { winnerId: to, puck: 'toWinner' };
+  setCooldown(state, loserId, 'pokeCheck', T.loserPokeCooldown);
+  if (d.clean) {
+    const to = support !== null ? support : winner.id;
+    if (stripped) watchTurnover(state, winner.side, winner.id, loserId, 'battle', { held: d.held });
+    return { winnerId: to, puck: 'toWinner', outcome: how };
   }
   // He gets a piece of it, but it squirts along the boards.
   state.lastTouch = { id: winner.id, side: winner.side };
@@ -404,7 +382,7 @@ function finish(c: ContestState, ctx: ContestCtx): ContestResult {
   state.puck.vel.x = -n.y * dirAlong * v - n.x * 0.5;
   state.puck.vel.y = n.x * dirAlong * v - n.y * 0.5;
   blockPickup(state, c.participants.slice());
-  return { winnerId: winner.id, puck: 'unchanged' };
+  return { winnerId: winner.id, puck: 'unchanged', outcome: how };
 }
 
 const scratchN: Vec2 = { x: 0, y: 0 };
@@ -418,15 +396,15 @@ function setFace(s: SkaterState, x: number, y: number): void {
  * pin; once one is pinned, he is held on the boards with the pinner on his back, both at the puck; supporting players
  * wait on the ice side.
  */
-function steer(c: ContestState, ctx: ContestCtx): void {
+function steer(c: Battle, ctx: ContestCtx): void {
   const state = ctx.state;
-  const d = dataOf(c);
+  const d = c.roles;
   const n = boardsNormal(c.spot, scratchN);
   const toBoards = distToBoards(c.spot);
   const bx = c.spot.x + n.x * toBoards, by = c.spot.y + n.y * toBoards;
   for (let i = 0; i < c.participants.length; i++) {
     const s = skaterById(state, c.participants[i]!);
-    if (i === d.supportA || i === d.supportB) {
+    if (s.id === d.supportA || s.id === d.supportB) {
       s.target.x = c.spot.x - n.x * SUPPORT_OFF_BOARDS;
       s.target.y = c.spot.y - n.y * SUPPORT_OFF_BOARDS;
       setFace(s, c.spot.x, c.spot.y);
@@ -435,7 +413,7 @@ function steer(c: ContestState, ctx: ContestCtx): void {
     }
     const r = movementOf(ctx.defs.get(s.id)!, 1).radius;
     if (c.stage === 'protect') {
-      if (i === d.carrier) continue; // he keeps skating his own way, the puck on his stick
+      if (s.id === d.carrier) continue; // he keeps skating his own way, the puck on his stick
       const o = skaterById(state, idOf(c, other(i)));
       s.target.x = o.pos.x;
       s.target.y = o.pos.y;
@@ -446,7 +424,7 @@ function steer(c: ContestState, ctx: ContestCtx): void {
       s.target.y = c.spot.y;
       setFace(s, c.spot.x, c.spot.y);
       s.speedCap = 1;
-    } else if (d.pinned === NONE) {
+    } else if (d.pinned === null) {
       // Shoulder to shoulder at the puck; the man ahead leans into the other.
       const o = skaterById(state, idOf(c, other(i)));
       const leaning = c.leader === s.id;
@@ -454,7 +432,7 @@ function steer(c: ContestState, ctx: ContestCtx): void {
       s.target.y = leaning ? o.pos.y : c.spot.y;
       setFace(s, bx, by);
       s.speedCap = c.stage === 'pin' ? PIN_SPEED_CAP : DIG_SPEED_CAP;
-    } else if (i === d.pinned) {
+    } else if (s.id === d.pinned) {
       s.target.x = bx - n.x * r;
       s.target.y = by - n.y * r;
       setFace(s, bx, by);

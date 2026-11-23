@@ -1,9 +1,10 @@
 import { recordTouch } from './actions';
 import { clearContests, effective, winProb } from './contests/core';
+import { gameEvent } from './events';
 import { resolveBoards } from './rink';
 import type { Rng } from './rng';
 import { TUNING } from './tuning';
-import type { GameEvent, GameState, PlayerDef, Position, Side, SkaterState } from './types';
+import type { GameEventOf, GameState, PlayerDef, Position, Side, SkaterState } from './types';
 import { hypot2, type Vec2 } from './vec';
 
 /** The puck drops once every on-ice skater is this close to his line-up spot (m)... */
@@ -144,7 +145,7 @@ export function drawChance(state: GameState, defs: Map<string, PlayerDef>): numb
  * ratings) and the puck slides back toward one of its defencemen; the winner has possession. Sets phase live and lifts
  * any `noChange`. Returns the faceoff event (side = winner, playerId = winning centre, otherId = losing centre).
  */
-export function dropPuck(state: GameState, defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
+export function dropPuck(state: GameState, defs: Map<string, PlayerDef>, rng: Rng): GameEventOf<'faceoff'> {
   const winner: Side = rng.chance(drawChance(state, defs)) ? 'home' : 'away';
   const loser: Side = winner === 'home' ? 'away' : 'home';
   const winC = onIceIn(state, winner, ['C'])[0] ?? null;
@@ -163,9 +164,7 @@ export function dropPuck(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   state.noChange = null;
   state.phase = 'live';
   state.phaseT = 0;
-  return {
-    tick: state.tick, period: state.period, clock: state.clock, type: 'faceoff', side: winner,
-    playerId: winC?.id ?? null, otherId: loseC?.id ?? null, assistIds: [],
-    detail: `${spot.x},${spot.y}`,
-  };
+  return gameEvent(state, {
+    type: 'faceoff', side: winner, playerId: winC?.id ?? null, otherId: loseC?.id ?? null, pos: spot, detail: { spot: { x: spot.x, y: spot.y } },
+  });
 }

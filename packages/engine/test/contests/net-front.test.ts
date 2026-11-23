@@ -24,6 +24,6 @@ describe('net-front battles', () => {
     const r = netFrontEnded(3);
     expect(r.leader).not.toBeNull();
     expect(r.battles).toHaveLength(1);
-    expect(r.battles[0]).toMatchObject({ playerId: r.leader, detail: 'netFront' });
+    expect(r.battles[0]).toMatchObject({ playerId: r.leader, detail: { how: 'netFront' } });
   });
 });

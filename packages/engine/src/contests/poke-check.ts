@@ -2,7 +2,7 @@ import { recordTouch } from '../actions';
 import { sitBack } from '../team-play';
 import { TUNING } from '../tuning';
 import { heldSeconds, watchTurnover } from '../turnovers';
-import type { ContestState, PlayerDef, SkaterState } from '../types';
+import type { ContestStateOf, PlayerDef, SkaterState } from '../types';
 import { dist, hypot2 } from '../vec';
 import {
   carrierNow, carrierOf, contestEvent, contestRating, dropParticipant, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS,
@@ -20,8 +20,6 @@ const BEATEN_SECONDS = 0.7;
 const BEATEN_SPEED_CAP = 0.5;
 /** How fast the checker moves while the stick is out (fraction of top speed). */
 const REACH_SPEED_CAP = 0.5;
-/** `data.outcome` codes (numbers, so the state stays plain numeric data). */
-const OUTCOME = { undecided: 0, take: 1, loose: 2, kept: 3, beaten: 4 } as const;
 
 function setTarget(s: SkaterState, x: number, y: number): void {
   s.target.x = x;
@@ -41,10 +39,10 @@ function steerReach(ctx: ContestCtx, checker: SkaterState): void {
  * winner) and, after a failure by a wide margin, `beaten` (the checker alone, a step behind). Participants: the
  * checker, then the carrier (in `freeIds`: only the checker is steered). The carrier letting the puck go before it
  * resolves, or being out of the checker's reach when the reach ends, ends it with no result.
- * `data.outcome` is one of OUTCOME: undecided, the checker takes it, knocks it loose, the carrier keeps it, or keeps it
- * and the checker is beaten.
+ * Roles: `checker`, `carrier`. `data.outcome`: undecided, the checker takes it, knocks it loose, the carrier keeps it,
+ * or keeps it and the checker is beaten.
  */
-export const pokeCheckContest: Contest = {
+export const pokeCheckContest: Contest<'pokeCheck'> = {
   kind: KIND,
 
   gate(ctx) {
@@ -75,22 +73,23 @@ export const pokeCheckContest: Contest = {
     steerReach(ctx, skaterById(state, checkerId));
     return {
       id: -1, kind: KIND, stage: 'reach', stageT: 0, participants: participants.slice(), leader: null,
-      spot: { x: state.puck.pos.x, y: state.puck.pos.y }, freeIds: [carrierId], data: { outcome: OUTCOME.undecided },
+      spot: { x: state.puck.pos.x, y: state.puck.pos.y }, freeIds: [carrierId], roles: { checker: checkerId, carrier: carrierId },
+      data: { outcome: 'undecided' },
     };
   },
 
   update(c, ctx) {
     const state = ctx.state;
-    const checker = skaterById(state, c.participants[0]!);
+    const checker = skaterById(state, c.roles.checker);
     if (c.stage === 'beaten') {
       const carrier = carrierOf(state);
       setTarget(checker, carrier ? carrier.pos.x : checker.pos.x, carrier ? carrier.pos.y : checker.pos.y);
       checker.faceTarget = null;
       checker.speedCap = BEATEN_SPEED_CAP;
-      return c.stageT >= BEATEN_SECONDS - STAGE_EPS ? { winnerId: c.leader, puck: 'unchanged' } : null;
+      return c.stageT >= BEATEN_SECONDS - STAGE_EPS ? { winnerId: c.leader, puck: 'unchanged', outcome: 'beaten' } : null;
     }
-    const carrierId = c.participants[1]!;
-    if (state.carrierId !== carrierId) return { winnerId: null, puck: 'unchanged' }; // he got rid of it in time
+    const carrierId = c.roles.carrier;
+    if (state.carrierId !== carrierId) return { winnerId: null, puck: 'unchanged', outcome: 'released' }; // he got rid of it in time
     const carrier = skaterById(state, carrierId);
     steerReach(ctx, checker);
     c.spot.x = state.puck.pos.x;
@@ -98,9 +97,9 @@ export const pokeCheckContest: Contest = {
 
     if (c.stage === 'reach') {
       if (c.stageT < REACH_SECONDS - STAGE_EPS) return null;
-      if (dist(checker.pos, carrier.pos) > T.stickReach) return { winnerId: null, puck: 'unchanged' }; // the stick cannot get there
+      if (dist(checker.pos, carrier.pos) > T.stickReach) return { winnerId: null, puck: 'unchanged', outcome: 'outOfReach' }; // the stick cannot get there
       c.data.outcome = roll(c, ctx, checker, carrier);
-      c.leader = c.data.outcome === OUTCOME.take || c.data.outcome === OUTCOME.loose ? checker.id : carrier.id;
+      c.leader = c.data.outcome === 'take' || c.data.outcome === 'loose' ? checker.id : carrier.id;
       enterStage(c, 'resolve');
       return null;
     }
@@ -117,13 +116,13 @@ export function pokeAttemptChance(d: PlayerDef): number {
 /**
  * The poke itself: one roll against winProb of the checker's edge. A failed poke then leaves him beaten with its own
  * chance, T.beatenChance at an even contest, more when he was the underdog, less when he was favoured (never certain
- * either way). Returns the `data.outcome` code.
+ * either way). Returns the `data.outcome`.
  */
-function roll(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): number {
+function roll(c: ContestStateOf<'pokeCheck'>, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): 'take' | 'loose' | 'kept' | 'beaten' {
   const edge = contestRating(ctx, c, checker.id, T.stick) - contestRating(ctx, c, carrier.id, T.hands) - T.carrierEdge;
   const p = winProb(edge);
-  if (ctx.rng.next() < p) return ctx.rng.chance(T.takeShare) ? OUTCOME.take : OUTCOME.loose;
-  return ctx.rng.chance(beatenChance(p)) ? OUTCOME.beaten : OUTCOME.kept;
+  if (ctx.rng.next() < p) return ctx.rng.chance(T.takeShare) ? 'take' : 'loose';
+  return ctx.rng.chance(beatenChance(p)) ? 'beaten' : 'kept';
 }
 
 /** Chance that a failed poke leaves the checker beaten, from his chance `p` of winning it: within [0.03, 0.97]. */
@@ -131,21 +130,21 @@ export function beatenChance(p: number): number {
   return Math.max(0.03, Math.min(0.97, T.beatenChance * 2 * (1 - p)));
 }
 
-function finish(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): ContestResult | null {
+function finish(c: ContestStateOf<'pokeCheck'>, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): ContestResult | null {
   const state = ctx.state;
   const outcome = c.data.outcome;
-  if (outcome === OUTCOME.beaten) {
+  if (outcome === 'beaten') {
     dropParticipant(state, c, carrier.id);
     enterStage(c, 'beaten');
     return null;
   }
-  if (outcome === OUTCOME.kept) return { winnerId: carrier.id, puck: 'unchanged' };
+  if (outcome === 'kept') return { winnerId: carrier.id, puck: 'unchanged', outcome: 'kept' };
   ctx.emit(contestEvent(state, {
-    type: 'turnover', side: checker.side, playerId: checker.id, otherId: carrier.id, assistIds: [], detail: outcome === OUTCOME.take ? 'poke' : 'pokeLoose',
+    type: 'turnover', side: checker.side, playerId: checker.id, otherId: carrier.id, pos: state.puck.pos, detail: { how: outcome === 'take' ? 'poke' : 'pokeLoose' },
   }));
-  if (outcome === OUTCOME.take) {
+  if (outcome === 'take') {
     watchTurnover(state, checker.side, checker.id, carrier.id, 'poke', { held: heldSeconds(state, carrier.id) });
-    return { winnerId: checker.id, puck: 'toWinner' };
+    return { winnerId: checker.id, puck: 'toWinner', outcome: 'take' };
   }
   // His stick knocks it off the carrier's: a touch, and the puck squirts away from him.
   const p = state.puck.pos;
@@ -155,7 +154,7 @@ function finish(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier:
   const a = datan2(p.y - checker.pos.y, p.x - checker.pos.x) + ctx.rng.gauss() * T.looseSpread;
   const v = ctx.rng.range(T.looseSpeed[0], T.looseSpeed[1]);
   return {
-    winnerId: checker.id, puck: 'loose',
+    winnerId: checker.id, puck: 'loose', outcome: 'loose',
     looseVel: { x: dcos(a) * v + carrier.vel.x * 0.5, y: dsin(a) * v + carrier.vel.y * 0.5 },
   };
 }

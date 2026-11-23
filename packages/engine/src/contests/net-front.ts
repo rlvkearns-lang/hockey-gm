@@ -3,7 +3,7 @@ import { RINK, zoneOf } from '../rink';
 import { movementOf } from '../skating';
 import { ozoneSpotPos } from '../team-play';
 import { TUNING } from '../tuning';
-import type { ContestState, GameState, SkaterState } from '../types';
+import type { ContestStateOf, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
   carrierNow, carrierOf, contestEvent, contestRating, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS, winProb,
@@ -42,7 +42,7 @@ const netOf = (state: GameState, s: SkaterState): Vec2 => ({ x: state.attackDir[
  * puck, or he skates away from the net front; after at least one round, a `battle` event (detail `netFront`) credits
  * the last round's winner.
  */
-export const netFrontContest: Contest = {
+export const netFrontContest: Contest<'netFront'> = {
   kind: KIND,
 
   gate(ctx) {
@@ -68,9 +68,10 @@ export const netFrontContest: Contest = {
   start(ctx, participants) {
     const state = ctx.state;
     const att = skaterById(state, participants[0]!);
-    const c: ContestState = {
+    const c: ContestStateOf<'netFront'> = {
       id: -1, kind: KIND, stage: 'jostle', stageT: 0, participants: participants.slice(), leader: null,
-      spot: { x: att.pos.x, y: att.pos.y }, freeIds: [att.id], data: { rounds: 0, outX: 0, outY: 0 },
+      spot: { x: att.pos.x, y: att.pos.y }, freeIds: [att.id], roles: { attacker: att.id, defender: participants[1]! },
+      data: { rounds: 0, outX: 0, outY: 0 },
     };
     steer(c, ctx);
     return c;
@@ -78,7 +79,7 @@ export const netFrontContest: Contest = {
 
   update(c, ctx) {
     const state = ctx.state;
-    const att = skaterById(state, c.participants[0]!), def = skaterById(state, c.participants[1]!);
+    const att = skaterById(state, c.roles.attacker), def = skaterById(state, c.roles.defender);
     const carrier = carrierOf(state);
     const over = carrier === att || (carrier !== null && carrier.side !== att.side)
       || (carrier === null && state.pendingPass === null)
@@ -90,9 +91,9 @@ export const netFrontContest: Contest = {
       if (c.leader !== null) {
         // Whoever won the last round won the battle for the net front.
         const w = c.leader === att.id ? att : def, l = w === att ? def : att;
-        ctx.emit(contestEvent(state, { type: 'battle', side: w.side, playerId: w.id, otherId: l.id, assistIds: [], detail: 'netFront' }));
+        ctx.emit(contestEvent(state, { type: 'battle', side: w.side, playerId: w.id, otherId: l.id, pos: c.spot, detail: { how: 'netFront', contestId: c.id } }));
       }
-      return { winnerId: c.leader, puck: 'unchanged' };
+      return { winnerId: c.leader, puck: 'unchanged', outcome: c.leader === null ? 'noRound' : c.leader === att.id ? 'attacker' : 'defender' };
     }
     if (c.stageT >= ROUND_SECONDS - STAGE_EPS) round(c, ctx, att, def);
     c.spot.x = att.pos.x;
@@ -102,12 +103,12 @@ export const netFrontContest: Contest = {
   },
 };
 
-function round(c: ContestState, ctx: ContestCtx, att: SkaterState, def: SkaterState): void {
+function round(c: ContestStateOf<'netFront'>, ctx: ContestCtx, att: SkaterState, def: SkaterState): void {
   const state = ctx.state;
   const ma = movementOf(ctx.defs.get(att.id)!, 1).mass, md = movementOf(ctx.defs.get(def.id)!, 1).mass;
   const edge = contestRating(ctx, c, att.id, T.body) - contestRating(ctx, c, def.id, T.body) + (ma - md) / T.massPerPoint;
   const effectTick = state.tick + Math.round(EFFECT_SECONDS / DT);
-  c.data.rounds!++;
+  c.data.rounds++;
   if (ctx.rng.next() < winProb(edge)) {
     state.screenedUntilTick[def.side] = effectTick;
     state.reboundEdge = { id: att.id, untilTick: state.tick + Math.round(REBOUND_EDGE_SECONDS / DT) };
@@ -131,9 +132,9 @@ function round(c: ContestState, ctx: ContestCtx, att: SkaterState, def: SkaterSt
 }
 
 /** The defender stays goal-side of the attacker, leaning on him; a tied-up attacker is moved out. */
-function steer(c: ContestState, ctx: ContestCtx): void {
+function steer(c: ContestStateOf<'netFront'>, ctx: ContestCtx): void {
   const state = ctx.state;
-  const att = skaterById(state, c.participants[0]!), def = skaterById(state, c.participants[1]!);
+  const att = skaterById(state, c.roles.attacker), def = skaterById(state, c.roles.defender);
   const net = netOf(state, att);
   const dx = net.x - att.pos.x, dy = net.y - att.pos.y;
   const d = hypot2(dx, dy) || 1;
@@ -143,8 +144,8 @@ function steer(c: ContestState, ctx: ContestCtx): void {
   if (def.faceTarget) { def.faceTarget.x = att.pos.x; def.faceTarget.y = att.pos.y; } else def.faceTarget = { x: att.pos.x, y: att.pos.y };
   def.speedCap = DEFENDER_SPEED_CAP;
   if (c.stage === 'tied') {
-    att.target.x = c.data.outX!;
-    att.target.y = c.data.outY!;
+    att.target.x = c.data.outX;
+    att.target.y = c.data.outY;
     const p = state.puck.pos;
     if (att.faceTarget) { att.faceTarget.x = p.x; att.faceTarget.y = p.y; } else att.faceTarget = { x: p.x, y: p.y };
     att.speedCap = PUSHED_SPEED_CAP;

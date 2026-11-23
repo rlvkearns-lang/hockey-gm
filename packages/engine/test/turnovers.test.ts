@@ -32,7 +32,7 @@ describe('box-score takeaways and giveaways', () => {
     expect(keep(st, B.keepSeconds - 0.2)).toEqual([]);
     const e = keep(st, 0.4);
     expect(e).toHaveLength(1);
-    expect(e[0]).toMatchObject({ type: 'takeaway', side: 'away', playerId: 'away-C', otherId: 'home-RW', detail: 'poke' });
+    expect(e[0]).toMatchObject({ type: 'takeaway', side: 'away', playerId: 'away-C', otherId: 'home-RW', detail: { how: 'poke', atTick: ticks(B.controlSeconds + 1) } });
   });
   it('a strip of a puck the man had only just got is not a takeaway (a scramble, not a possession)', () => {
     expect(keep(cleanStrip(B.controlSeconds - 0.5), 4)).toEqual([]);
@@ -51,9 +51,11 @@ describe('box-score takeaways and giveaways', () => {
   it('the box score counts takeaways and giveaways, not raw turnovers', () => {
     const setup = gameSetup(1);
     const [a, b] = [setup.home.players[0]!.id, setup.away.players[0]!.id];
-    const ev = (type: GameEvent['type'], side: 'home' | 'away', playerId: string, otherId: string): GameEvent =>
-      ({ tick: 1, period: 1, clock: 1000, type, side, playerId, otherId, assistIds: [], detail: 'poke' });
-    const r = buildResult(setup, [ev('turnover', 'home', a, b), ev('turnover', 'home', a, b), ev('takeaway', 'home', a, b), ev('giveaway', 'away', b, a)], new Map());
+    const base = { tick: 1, period: 1, clock: 1000, assistIds: [], pos: { x: 0, y: 0 } };
+    const turnover: GameEvent = { ...base, type: 'turnover', side: 'home', playerId: a, otherId: b, detail: { how: 'poke' } };
+    const takeaway: GameEvent = { ...base, type: 'takeaway', side: 'home', playerId: a, otherId: b, detail: { how: 'poke', atTick: 1 } };
+    const giveaway: GameEvent = { ...base, type: 'giveaway', side: 'away', playerId: b, otherId: a, detail: { how: 'intercepted', atTick: 1 } };
+    const r = buildResult(setup, [turnover, turnover, takeaway, giveaway], new Map());
     expect(r.team.home.takeaways).toBe(1); expect(r.team.away.giveaways).toBe(1);
     expect(r.players.find((p) => p.id === a)!.takeaways).toBe(1); expect(r.players.find((p) => p.id === b)!.giveaways).toBe(1);
   });

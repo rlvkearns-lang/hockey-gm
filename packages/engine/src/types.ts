@@ -121,24 +121,100 @@ export type ShotInFlight = {
   blockTried: string[];
 };
 
+/** The kinds of staged contest (contests/*.ts). */
+export type ContestKind = 'hit' | 'pokeCheck' | 'boardBattle' | 'netFront' | 'looseRace';
+
+/** The stages of each kind, in the order they can come (see each contest's module for what happens in each). */
+export type ContestStages = {
+  hit: 'close' | 'impact' | 'recover';
+  pokeCheck: 'reach' | 'resolve' | 'beaten';
+  boardBattle: 'protect' | 'arrive' | 'pin' | 'dig' | 'resolve';
+  netFront: 'jostle' | 'free' | 'tied';
+  looseRace: 'race' | 'resolve';
+};
+
+/** Who plays which part in each kind of contest (skater ids; null while nobody has that part). */
+export type ContestRoles = {
+  hit: { hitter: string; target: string };
+  pokeCheck: { checker: string; carrier: string };
+  boardBattle: {
+    /** The two men in it (participants 0 and 1). */
+    a: string;
+    b: string;
+    /** The carrier while he shields a carried puck (`protect`). */
+    carrier: string | null;
+    /** A carrier who lost the puck into their feet (a win by the other man is a turnover). */
+    stripped: string | null;
+    /** The first man in (+6 for the rest of it). */
+    first: string | null;
+    /** The man held on the boards, and whoever won the last dig round. */
+    pinned: string | null;
+    digLast: string | null;
+    /** Each side's supporting player (a's side, b's side). */
+    supportA: string | null;
+    supportB: string | null;
+    /** The dig winner, once decided. */
+    winner: string | null;
+  };
+  netFront: { attacker: string; defender: string };
+  looseRace: { a: string; b: string };
+};
+
+/** Each kind's own working values. */
+export type ContestData = {
+  /** `p`: the hitter's chance once contact is made; `recover`: how long he regathers; `result` once decided. */
+  hit: { p: number; recover: number; result: 'pending' | 'landed' | 'absorbed' | 'bounced' | 'missed' };
+  pokeCheck: { outcome: 'undecided' | 'take' | 'loose' | 'kept' | 'beaten' };
+  boardBattle: {
+    /** The puck is in their feet at `spot` (sliding there for `slide` more ticks): nobody may pick it up. */
+    holdsPuck: boolean;
+    slide: number;
+    /** How long (s) the stripped carrier had had the puck when it went into their feet. */
+    held: number;
+    /** Whether the first man in is settled. */
+    firstSet: boolean;
+    /** Pin draws won by `a` less those won by `b`. */
+    balance: number;
+    /** stageT of the next pin or dig draw, and dig rounds so far. */
+    nextAt: number;
+    digRounds: number;
+    /** The winner comes away with it clean (else it squirts loose). */
+    clean: boolean;
+  };
+  netFront: { rounds: number; outX: number; outY: number };
+  looseRace: { outcome: 'undecided' | 'a' | 'b' | 'bounce'; gap: number };
+};
+
+/** How a contest ended (the `contestEnd` event); `abandoned`: a player in it left the ice; `whistle`: play stopped. */
+export type ContestOutcome =
+  | 'landed' | 'absorbed' | 'bounced' | 'missed' // hit
+  | 'take' | 'loose' | 'kept' | 'beaten' | 'released' | 'outOfReach' // poke check (released: he let the puck go)
+  | 'protected' | 'pinned' | 'stick' | 'support' | 'scramble' | 'trapped' | 'lostTouch' // board battle
+  | 'attacker' | 'defender' | 'noRound' // net-front battle
+  | 'won' | 'bounce' | 'off' // loose-puck race
+  | 'abandoned' | 'whistle';
+
 /**
  * A contest under way (see contests/core.ts), what a viewer animates from. `stage` and `stageT` (seconds into that
  * stage) are kept current every tick; `leader` is whoever is ahead (null while undecided); `participants` are the
- * skaters in it now (each has `contestId` = `id`); `spot` is where it happens. `freeIds` are the participants who keep
- * their normal steering (team-play job, carrier decisions, may receive a pass) while in it; the contest steers the
- * rest. `data` is the kind's own working numbers.
+ * skaters in it now (each has `contestId` = `id`); `roles` says who plays which part; `spot` is where it happens.
+ * `freeIds` are the participants who keep their normal steering (team-play job, carrier decisions, may receive a pass)
+ * while in it; the contest steers the rest. `data` is the kind's own working values.
  */
-export type ContestState = {
+export type ContestStateOf<K extends ContestKind> = {
   id: number;
-  kind: string;
-  stage: string;
+  kind: K;
+  stage: ContestStages[K];
   stageT: number;
   participants: string[];
   leader: string | null;
   spot: Vec2;
   freeIds: string[];
-  data: Record<string, number>;
+  roles: ContestRoles[K];
+  data: ContestData[K];
 };
+
+export type ContestState = { [K in ContestKind]: ContestStateOf<K> }[ContestKind];
 
 /**
  * Plain JSON data only: a viewer reads it between steps, and it holds everything that decides the rest of the game, so
@@ -175,7 +251,9 @@ export type GameState = {
    * (a takeaway) or `otherId` gave it to him (a giveaway, credited to `otherId`) on `tick`; it counts once `side` has
    * kept the puck for TUNING.boxScore.keepSeconds.
    */
-  turnoverWatch: { kind: 'takeaway' | 'giveaway'; side: Side; playerId: string; otherId: string; how: string; tick: number } | null;
+  turnoverWatch: {
+    kind: 'takeaway' | 'giveaway'; side: Side; playerId: string; otherId: string; how: 'poke' | 'battle' | 'intercepted'; tick: number; pos: Vec2;
+  } | null;
   /** The last skater to let the puck go (pass, shot, dump) and the tick he did; a hit on him counts for a moment after. */
   lastRelease: { id: string; tick: number } | null;
   /** Skater `id` may not start a contest of `kind` before tick `untilTick` (expired entries are dropped). */
@@ -231,23 +309,77 @@ export type BenchUnit = {
 
 export type BenchState = { forwards: BenchUnit; defence: BenchUnit };
 
-export type GameEventType =
-  | 'faceoff' | 'pass' | 'shot' | 'save' | 'goal' | 'miss' | 'post' | 'block' | 'hit' | 'turnover' | 'takeaway'
-  | 'giveaway' | 'battle' | 'offside' | 'icing' | 'freeze' | 'lineChange' | 'periodEnd';
+/** A team's situation, as team play sees it (team-play.ts). */
+export type TeamPhase = 'breakout' | 'rush' | 'ozone' | 'forecheck' | 'neutralDefence' | 'dzone' | 'looseChase';
 
-export type GameEvent = {
+/** A goalie's save poses. */
+export type SavePose = 'glove' | 'blocker' | 'pad' | 'butterfly';
+
+/** How a turnover happened (`turnover`); a box-score takeaway or giveaway keeps the turnover's `how`. */
+export type TurnoverHow = 'poke' | 'pokeLoose' | 'hit' | 'battle' | 'battleLoose' | 'intercepted' | 'deflected';
+
+/**
+ * The structured detail of each event type. Distances are metres from the net centre to where a shot was let go;
+ * `releaseTick` is the tick of the matching `release` event (the shooting animation starts there).
+ */
+export type EventDetails = {
+  /** The draw (side, playerId: the winning team and centre; otherId: the losing centre). */
+  faceoff: { spot: Vec2 };
+  /** playerId let the puck go (every pass, shot and dump): velocity (m/s, z up) as it left his stick. */
+  release: { kind: 'pass' | 'shot' | 'dump'; toId: string | null; vel: { x: number; y: number; z: number } };
+  /** A pass (otherId: its intended receiver) or a dump-in (no receiver), at its release. */
+  pass: { kind: 'pass' | 'dump'; distance: number | null };
+  /** A shot on goal reached the net (otherId: the goalie); followed by `save` or `goal`. releaseTick null: not shot (a pass or loose puck that slid in). */
+  shot: { distance: number; releaseTick: number | null; speed: number };
+  save: { pose: SavePose };
+  goal: { distance: number; releaseTick: number | null };
+  miss: { distance: number; releaseTick: number };
+  post: { distance: number; releaseTick: number };
+  /** playerId blocked otherId's shot. */
+  block: { distance: number; releaseTick: number };
+  hit: { result: 'landed' | 'absorbed' | 'bounced'; contestId: number };
+  /** playerId won the puck off otherId (shown, not counted in the box score). */
+  turnover: { how: TurnoverHow };
+  /** Box score: playerId took it off otherId at `atTick` (pos is where), and his team kept it. */
+  takeaway: { how: 'poke' | 'battle'; atTick: number };
+  /** Box score: playerId's pass was picked off by otherId at `atTick` (pos is where), under little pressure. */
+  giveaway: { how: 'intercepted'; atTick: number };
+  /** playerId beat otherId in a board battle (how it was won) or a net-front battle (`netFront`). */
+  battle: { how: 'protect' | 'pinned' | 'stick' | 'support' | 'scramble' | 'netFront'; contestId: number };
+  /** Offside against `side`; faceoff at `spot`. */
+  offside: { spot: Vec2 };
+  /** Icing by `side`; faceoff at `spot`. */
+  icing: { spot: Vec2 };
+  /** Play stopped: the goalie (playerId) held a save or covered a loose puck, or the puck was trapped in a board battle. */
+  freeze: { cause: 'save' | 'cover' | 'trapped' };
+  /** `side` started changing a unit from line/pair `from` to `to` (0-based), on the fly or at a stoppage. */
+  lineChange: { unit: 'forwards' | 'defence'; from: number; to: number; onTheFly: boolean; phase: TeamPhase };
+  periodEnd: { period: number };
+  /** A contest began (pos: its spot). */
+  contestStart: { contestId: number; kind: ContestKind; participants: string[] };
+  /** A contest ended: how, who won it, and what happened to the puck. */
+  contestEnd: { contestId: number; kind: ContestKind; result: ContestOutcome; winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged' };
+};
+
+export type GameEventType = keyof EventDetails;
+
+/** What every event has. `pos` is where on the ice it happened (m). `side` is null only for periodEnd and contest events. */
+export type GameEventBase = {
   tick: number;
   period: number;
   clock: number;
-  type: GameEventType;
-  side: Side;
+  side: Side | null;
   playerId: string | null;
   otherId: string | null;
   assistIds: string[];
-  detail: string;
+  pos: Vec2;
   /** On a goal: the skaters of each side on the ice when it went in (for plus/minus). */
   onIce?: { home: string[]; away: string[] };
 };
+
+export type GameEventOf<T extends GameEventType> = GameEventBase & { type: T; detail: EventDetails[T] };
+
+export type GameEvent = { [T in GameEventType]: GameEventOf<T> }[GameEventType];
 
 export type PlayerLine = {
   id: string;

@@ -1,6 +1,7 @@
 import { recordTouch } from './actions';
 import type { GoalieAttrs } from './attributes';
 import { DT } from './constants';
+import { gameEvent } from './events';
 import { stopPlay } from './faceoff';
 import type { PuckEvent } from './puck';
 import { FACEOFF_DOTS, RINK, resolveBoards } from './rink';
@@ -45,8 +46,6 @@ function goalieAttrs(defs: Map<string, PlayerDef>, id: string): GoalieAttrs {
   return a;
 }
 
-const event = (state: GameState, e: Omit<GameEvent, 'tick' | 'period' | 'clock'>): GameEvent =>
-  ({ tick: state.tick, period: state.period, clock: state.clock, ...e });
 
 /** The side whose net is at `end` (+1 or -1 along x). */
 const defenderOf = (state: GameState, end: 1 | -1): Side => (state.attackDir.home === end ? 'away' : 'home');
@@ -158,7 +157,7 @@ function tryCover(state: GameState, side: Side, g: GoalieState, end: 1 | -1, out
   if (!threat) return false;
   g.pose = 'cover';
   g.poseT = COVER_SECONDS;
-  out.push(event(state, { type: 'freeze', side, playerId: g.id, otherId: null, assistIds: [], detail: 'cover' }));
+  out.push(gameEvent(state, { type: 'freeze', side, playerId: g.id, otherId: null, pos: pk.pos, detail: { cause: 'cover' } }));
   stopPlay(state, endDotNear(end, pk.pos));
   return true;
 }
@@ -211,7 +210,7 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
     state.shotInFlight = null;
     state.lastTouch = { id: s.id, side: s.side };
     recordTouch(state, s.id, s.side);
-    out.push(event(state, { type: 'block', side: s.side, playerId: s.id, otherId: shot.shooterId, assistIds: [], detail: `${shot.fromDist.toFixed(1)}m` }));
+    out.push(gameEvent(state, { type: 'block', side: s.side, playerId: s.id, otherId: shot.shooterId, pos: pk.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick } }));
     return true;
   }
   return false;
@@ -238,10 +237,8 @@ export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEv
     if (!gone) return;
   }
   state.shotInFlight = null;
-  out.push(event(state, {
-    type: post ? 'post' : 'miss', side: shot.side, playerId: shot.shooterId, otherId: state.goalies[other(shot.side)].id,
-    assistIds: [], detail: `${shot.fromDist.toFixed(1)}m`,
-  }));
+  const e = { side: shot.side, playerId: shot.shooterId, otherId: state.goalies[other(shot.side)].id, pos: pk.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick } };
+  out.push(post ? gameEvent(state, { type: 'post', ...e }) : gameEvent(state, { type: 'miss', ...e }));
 }
 
 /** Pose for a save on a puck crossing at (y, z), from where it is against the goalie (his glove is on his left). */
@@ -318,20 +315,20 @@ export function resolveOnNet(
     screened: state.screenedUntilTick[defSide] > state.tick, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
     night: state.goalieNight[defSide],
   });
-  const detail = `${distance.toFixed(1)}m`;
-  out.push(event(state, { type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, assistIds: [], detail }));
+  const releaseTick = shot ? shot.tick : null;
+  out.push(gameEvent(state, { type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, pos: state.puck.pos, detail: { distance, releaseTick, speed: ev.speed } }));
 
   if (rng.chance(p)) {
     const pose = savePose(g, ev.y, ev.z, end);
     g.pose = pose;
     g.poseT = POSE_SECONDS;
-    out.push(event(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, assistIds: [], detail: pose }));
+    out.push(gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: state.puck.pos, detail: { pose } }));
     const rc = ga.reboundControl;
     const pk = state.puck;
     if (rng.chance(clamp(G.freeze[pose].base + G.freeze[pose].perPoint * rc, 0.03, 0.97))) {
       g.pose = 'cover';
       g.poseT = COVER_SECONDS;
-      out.push(event(state, { type: 'freeze', side: defSide, playerId: g.id, otherId: null, assistIds: [], detail: 'save' }));
+      out.push(gameEvent(state, { type: 'freeze', side: defSide, playerId: g.id, otherId: null, pos: pk.pos, detail: { cause: 'save' } }));
       stopPlay(state, endDotNear(end, pk.pos));
       return 'save';
     }
@@ -368,7 +365,7 @@ export function resolveOnNet(
     }
   }
   state.score[attSide]++;
-  out.push(event(state, { type: 'goal', side: attSide, playerId: shooterId, otherId: g.id, assistIds: assists, detail, onIce: onIceIds(state) }));
+  out.push(gameEvent(state, { type: 'goal', side: attSide, playerId: shooterId, otherId: g.id, assistIds: assists, pos: state.puck.pos, detail: { distance, releaseTick }, onIce: onIceIds(state) }));
   stopPlay(state, FACEOFF_DOTS.centre);
   return 'goal';
 }

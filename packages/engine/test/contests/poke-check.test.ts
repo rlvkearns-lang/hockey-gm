@@ -27,6 +27,9 @@ describe('poke checks', () => {
   it('a checker out of stick reach when the reach ends gets no result, and nothing is decided', () => {
     const r = pokeOutOfReach();
     expect(r.c.stage).toBe('reach'); expect(r.c.leader).toBeNull();
-    expect(r.events).toEqual([]); expect(r.carrierId).toBe('home-C'); expect(r.contestIds).toBe(0);
+    // Nothing happens but the contest's own start and end (its end says the stick could not get there).
+    expect(r.events.filter((e) => e.type !== 'contestStart' && e.type !== 'contestEnd')).toEqual([]);
+    expect(r.events.find((e) => e.type === 'contestEnd')).toMatchObject({ detail: { kind: 'pokeCheck', result: 'outOfReach', winnerId: null } });
+    expect(r.carrierId).toBe('home-C'); expect(r.contestIds).toBe(0);
   });
 });

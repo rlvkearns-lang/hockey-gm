@@ -2,7 +2,11 @@ import { blockPickup, recordTouch } from '../actions';
 import { composite, type SkaterAttrs } from '../attributes';
 import { DT } from '../constants';
 import type { Rng } from '../rng';
-import type { ContestState, GameEvent, GameSetup, GameState, PlayerDef, SkaterState } from '../types';
+import { gameEvent, type EventFields } from '../events';
+import type {
+  ContestKind, ContestOutcome, ContestStages, ContestState, ContestStateOf, GameEvent, GameEventOf, GameEventType, GameSetup, GameState, PlayerDef,
+  SkaterState,
+} from '../types';
 import type { Vec2 } from '../vec';
 import { boardBattleContest } from './board-battle';
 import { hitContest } from './hit';
@@ -31,9 +35,10 @@ export type ContestCtx = {
 
 /**
  * What a finished contest does to the puck: `toWinner` gives it to `winnerId`; `loose` knocks it off the carrier
- * (who must be a participant) with `looseVel`; `unchanged` leaves it be.
+ * (who must be a participant) with `looseVel`; `unchanged` leaves it be. `outcome` says how it ended (the
+ * `contestEnd` event).
  */
-export type ContestResult = { winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged'; looseVel?: Vec2 };
+export type ContestResult = { winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged'; looseVel?: Vec2; outcome: ContestOutcome };
 
 /**
  * One kind of staged contest. Its state's `freeIds` name the participants who keep their normal steering; the
@@ -43,13 +48,13 @@ export type ContestResult = { winnerId: string | null; puck: 'toWinner' | 'loose
  * `stageT`: it steers its players (target, faceTarget, speedCap), moves the stages on (setting `stageT` to 0 at each
  * new stage), and returns a result once it is over.
  */
-export interface Contest {
-  readonly kind: string;
+export interface Contest<K extends ContestKind = ContestKind> {
+  readonly kind: K;
   /** Optional: false when the trigger cannot fire for anyone now (checked once per round of triggers, before asking each skater). */
   gate?(ctx: ContestCtx): boolean;
   trigger(ctx: ContestCtx, s: SkaterState): string[] | null;
-  start(ctx: ContestCtx, participants: string[]): ContestState;
-  update(c: ContestState, ctx: ContestCtx, dt: number): ContestResult | null;
+  start(ctx: ContestCtx, participants: string[]): ContestStateOf<K>;
+  update(c: ContestStateOf<K>, ctx: ContestCtx, dt: number): ContestResult | null;
 }
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -147,15 +152,15 @@ export function setCooldown(state: GameState, id: string, kind: string, seconds:
 
 /**
  * True while a contest holds the loose puck in place (a board battle: the puck is in the players' feet, `carrierId`
- * null). Nobody may pick it up then; its `data.holdsPuck` is 1.
+ * null). Nobody may pick it up then; its `data.holdsPuck` is true.
  */
 export function puckHeldByContest(state: GameState): boolean {
-  for (const c of state.contests) if (c.data.holdsPuck === 1) return true;
+  for (const c of state.contests) if (c.kind === 'boardBattle' && c.data.holdsPuck) return true;
   return false;
 }
 
 /** Moves `c` to `stage` (stageT back to 0). */
-export function enterStage(c: ContestState, stage: string): void {
+export function enterStage<K extends ContestKind>(c: ContestStateOf<K>, stage: ContestStages[K]): void {
   c.stage = stage;
   c.stageT = 0;
 }
@@ -197,14 +202,17 @@ export function applyResult(ctx: ContestCtx, c: ContestState, r: ContestResult):
   }
 }
 
-let registry: readonly Contest[] | null = null;
+/** A contest of any kind (its state and update function are of the same kind; see update()). */
+type AnyContest = Contest<ContestKind>;
+
+let registry: readonly AnyContest[] | null = null;
 /** Every kind of contest, in the order their triggers are asked (built on first use: the kinds import this module). */
-export function contestKinds(): readonly Contest[] {
-  registry ??= [hitContest, pokeCheckContest, boardBattleContest, netFrontContest, looseRaceContest];
+export function contestKinds(): readonly AnyContest[] {
+  registry ??= [hitContest, pokeCheckContest, boardBattleContest, netFrontContest, looseRaceContest] as unknown as AnyContest[];
   return registry;
 }
 
-function kindOf(kind: string): Contest {
+function kindOf(kind: ContestKind): AnyContest {
   for (const k of contestKinds()) if (k.kind === kind) return k;
   throw new Error(`no contest kind ${kind}`);
 }
@@ -228,13 +236,14 @@ export function contestTick(
   for (let i = 0; i < state.contests.length;) {
     const c = state.contests[i]!;
     let r: ContestResult | null;
-    if (anyGone(state, c)) r = { winnerId: null, puck: 'unchanged' };
+    if (anyGone(state, c)) r = { winnerId: null, puck: 'unchanged', outcome: 'abandoned' };
     else {
       c.stageT += dt;
       r = kindOf(c.kind).update(c, ctx, dt);
     }
     if (r === null) { i++; continue; }
     applyResult(ctx, c, r);
+    ctx.emit(contestEndEvent(state, c, r.outcome, r.winnerId, r.puck));
     for (const id of c.participants) { const s = skaterById(state, id); if (s.contestId === c.id) s.contestId = null; }
     state.contests.splice(i, 1);
   }
@@ -284,27 +293,44 @@ function dropExpired(state: GameState): void {
   tu.length = n;
 }
 
-/** Starts a contest of kind `k` with `participants`: gives it the next id of this tick and marks its players. */
-function begin(ctx: ContestCtx, k: Contest, participants: string[]): ContestState {
+/** Starts a contest of kind `k` with `participants`: gives it the next id of this tick, marks its players, emits `contestStart`. */
+function begin(ctx: ContestCtx, k: AnyContest, participants: string[]): ContestState {
   const state = ctx.state;
   let n = 0;
   for (const c of state.contests) if (Math.floor(c.id / ID_STRIDE) === state.tick) n++;
   ctx.memo.clear();
-  const c = k.start(ctx, participants);
+  const c = k.start(ctx, participants) as ContestState;
   c.id = state.tick * ID_STRIDE + n;
   for (const id of c.participants) skaterById(state, id).contestId = c.id;
   state.contests.push(c);
+  ctx.emit(gameEvent(state, {
+    type: 'contestStart', side: null, playerId: c.participants[0] ?? null, otherId: c.participants[1] ?? null, pos: c.spot,
+    detail: { contestId: c.id, kind: c.kind, participants: c.participants.slice() },
+  }));
   return c;
+}
+
+/** What identifies a contest in its events. */
+export type ContestRef = Pick<ContestState, 'id' | 'kind' | 'spot'>;
+
+/** The `contestEnd` event of `c` (pos: its spot). */
+export function contestEndEvent(
+  state: GameState, c: ContestRef, result: ContestOutcome, winnerId: string | null, puck: ContestResult['puck'],
+): GameEventOf<'contestEnd'> {
+  return gameEvent(state, {
+    type: 'contestEnd', side: null, playerId: winnerId, otherId: null, pos: c.spot,
+    detail: { contestId: c.id, kind: c.kind, result, winnerId, puck },
+  });
 }
 
 /**
  * Starts a contest of kind `k` with `participants` (all free) now, without its trigger: for set pieces and tests.
  * contestTick advances it from the next tick.
  */
-export function startContest(
-  state: GameState, defs: Map<string, PlayerDef>, rng: Rng, k: Contest, participants: string[], out: GameEvent[] = [], chemistry: Chemistry = [],
-): ContestState {
-  return begin({ state, defs, rng, emit: (e) => { out.push(e); }, chemistry, memo: new Map() }, k, participants);
+export function startContest<K extends ContestKind>(
+  state: GameState, defs: Map<string, PlayerDef>, rng: Rng, k: Contest<K>, participants: string[], out: GameEvent[] = [], chemistry: Chemistry = [],
+): ContestStateOf<K> {
+  return begin({ state, defs, rng, emit: (e) => { out.push(e); }, chemistry, memo: new Map() }, k as unknown as AnyContest, participants) as ContestStateOf<K>;
 }
 
 /** Every contest ends at once with no result and its players are free (whistles, period ends). */
@@ -314,6 +340,6 @@ export function clearContests(state: GameState): void {
 }
 
 /** A GameEvent stamped with the state's tick, period and clock. */
-export function contestEvent(state: GameState, e: Omit<GameEvent, 'tick' | 'period' | 'clock'>): GameEvent {
-  return { tick: state.tick, period: state.period, clock: state.clock, ...e };
+export function contestEvent<T extends GameEventType>(state: GameState, e: EventFields<T>): GameEventOf<T> {
+  return gameEvent(state, e);
 }

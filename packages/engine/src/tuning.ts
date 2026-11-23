@@ -1,14 +1,28 @@
 import type { GoalieAttrs, SkaterAttrs } from './attributes';
+import type { SavePose } from './types';
 
 type SkaterWeights = Partial<Record<keyof SkaterAttrs, number>>;
-type SavePose = 'glove' | 'blocker' | 'pad' | 'butterfly';
+/** Read-only all the way down (tuples stay tuples). */
+type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
+
+/** Freezes `o` and everything in it. */
+function deepFreeze<T>(o: T): DeepReadonly<T> {
+  if (typeof o === 'object' && o !== null) {
+    for (const v of Object.values(o)) deepFreeze(v);
+    Object.freeze(o);
+  }
+  return o as DeepReadonly<T>;
+}
 
 /**
  * Every tunable number of the hockey logic (player brain, passes and shots, goalies, contests, fatigue), in one place
  * so calibration (scripts/calibrate.ts) can work through them group by group. Modules read these values; geometry
  * (rink lines, spots, line-ups) and the parity curve (winProb) are not tunables and live with their modules.
+ *
+ * Internal and frozen: it is not part of the public surface (index.ts), and nothing can change it at run time (some
+ * values are baked into module constants at import, so a change would only half take effect).
  */
-export const TUNING = {
+export const TUNING = deepFreeze({
   /** The carrier's decision (brain.ts). */
   brain: {
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
@@ -327,4 +341,4 @@ export const TUNING = {
     /** A unit is due a change when its mean energy is below this. */
     tired: 0.45,
   },
-};
+});

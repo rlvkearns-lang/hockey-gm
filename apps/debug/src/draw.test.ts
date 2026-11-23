@@ -9,8 +9,17 @@ const defsWith = (names: Record<string, string>): Map<string, PlayerDef> => {
 
 describe('labelFor', () => {
   it('labels a contest with kind, stage and leader', () => {
-    expect(labelFor({ id: 1, kind: 'boardBattle', stage: 'pin', stageT: 0.4, participants: ['a', 'b'], leader: 'a', spot: { x: 0, y: 0 }, freeIds: [], data: {} } satisfies ContestState, defsWith({ a: 'Dmitri Osgood', b: 'Finn Aldous' }))).toBe('Board battle · pin · Osgood leading');
-    expect(labelFor({ id: 2, kind: 'looseRace', stage: 'race', stageT: 0, participants: ['a', 'b'], leader: null, spot: { x: 0, y: 0 }, freeIds: [], data: {} } satisfies ContestState, defsWith({ a: 'A B', b: 'C D' }))).toBe('Loose-puck race · race');
+    const battle: ContestState = {
+      id: 1, kind: 'boardBattle', stage: 'pin', stageT: 0.4, participants: ['a', 'b'], leader: 'a', spot: { x: 0, y: 0 }, freeIds: [],
+      roles: { a: 'a', b: 'b', carrier: null, stripped: null, first: 'a', pinned: null, digLast: null, supportA: null, supportB: null, winner: null },
+      data: { holdsPuck: true, slide: 0, held: 0, firstSet: true, balance: 1, nextAt: 0.6, digRounds: 0, clean: false },
+    };
+    const race: ContestState = {
+      id: 2, kind: 'looseRace', stage: 'race', stageT: 0, participants: ['a', 'b'], leader: null, spot: { x: 0, y: 0 }, freeIds: [],
+      roles: { a: 'a', b: 'b' }, data: { outcome: 'undecided', gap: 0 },
+    };
+    expect(labelFor(battle, defsWith({ a: 'Dmitri Osgood', b: 'Finn Aldous' }))).toBe('Board battle · pin · Osgood leading');
+    expect(labelFor(race, defsWith({ a: 'A B', b: 'C D' }))).toBe('Loose-puck race · race');
   });
 });
 
@@ -46,7 +55,8 @@ describe('draw', () => {
     for (const t of [setup.home, setup.away]) for (const p of t.players) defs.set(p.id, p);
     const onIce = game.state.skaters.filter((s) => s.onIce);
     const [a, b] = onIce;
-    game.state.contests.push({ id: 99, kind: 'hit', stage: 'close', stageT: 0, participants: [a!.id, b!.id], leader: null, spot: { x: 0, y: 0 }, freeIds: [], data: {} });
+    game.state.contests.push({ id: 99, kind: 'hit', stage: 'close', stageT: 0, participants: [a!.id, b!.id], leader: null, spot: { x: 0, y: 0 }, freeIds: [],
+      roles: { hitter: a!.id, target: b!.id }, data: { p: 0, recover: 0, result: 'pending' } });
     const { ctx, calls, texts } = recorder();
     draw(ctx, game.state, defs, 10);
     expect(calls.filter((c) => c.startsWith('arc')).length).toBeGreaterThanOrEqual(onIce.length);

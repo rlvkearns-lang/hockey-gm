@@ -52,10 +52,12 @@ function appendEvents(): void {
   const box = $('events');
   const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
   for (const e of list) {
+    const text = describe(e, defs, abbrs());
+    if (text === null) continue; // release and contest bookkeeping: the canvas shows those
     const row = document.createElement('div');
-    row.textContent = describe(e, defs, abbrs());
+    row.textContent = text;
     const kind = kindOf(e);
-    row.className = `ev-${kind === 'other' ? e.type : kind}${kind === 'goal' ? ' ' + e.side : ''}`;
+    row.className = `ev-${kind === 'other' ? e.type : kind}${kind === 'goal' && e.side !== null ? ' ' + e.side : ''}`;
     box.appendChild(row);
   }
   while (box.childElementCount > MAX_EVENT_ROWS) box.firstElementChild?.remove();

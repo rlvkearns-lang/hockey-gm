@@ -4,11 +4,11 @@ import { distToBoards } from '../rink';
 import { movementOf, wrapAngle, type Movement } from '../skating';
 import { isTiedUp, steeredByContest } from '../team-play';
 import { TUNING } from '../tuning';
-import type { ContestState, GameState, PlayerDef, SkaterState } from '../types';
+import type { ContestOutcome, ContestStateOf, GameState, PlayerDef, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
   contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
-  type Contest, type ContestCtx,
+  type Contest, type ContestCtx, type ContestResult,
 } from './core';
 import { datan2, dcos, dsin } from '../dmath';
 
@@ -25,8 +25,6 @@ const BOUNCE_SPEED: [number, number] = [1, 3];
 const MAX_LEAD_SECONDS = 1;
 /** Parity floor of each man's chance in a race. */
 const MIN_RACE_CHANCE = 0.03;
-/** `data.outcome` codes. */
-const OUTCOME = { undecided: 0, a: 1, b: 2, bounce: 3 } as const;
 
 /**
  * Seconds `s` (skating `m`) needs to get within REACH of `p`: the turn from his facing toward it (at `m.turnRate`),
@@ -125,7 +123,7 @@ function firstMen(ctx: ContestCtx): FirstMen {
  * (twice T.bounceBand; see raceChances) it is a bounce that stays loose. Someone else getting to it, a pass, or the puck speeding up or reaching the
  * boards ends it with no result.
  */
-export const looseRaceContest: Contest = {
+export const looseRaceContest: Contest<'looseRace'> = {
   kind: KIND,
 
   gate: (ctx) => raceableNow(ctx),
@@ -143,9 +141,10 @@ export const looseRaceContest: Contest = {
 
   start(ctx, participants) {
     const state = ctx.state;
-    const c: ContestState = {
+    const c: ContestStateOf<'looseRace'> = {
       id: -1, kind: KIND, stage: 'race', stageT: 0, participants: participants.slice(), leader: null,
-      spot: { x: state.puck.pos.x, y: state.puck.pos.y }, freeIds: [], data: { outcome: OUTCOME.undecided, gap: 0 },
+      spot: { x: state.puck.pos.x, y: state.puck.pos.y }, freeIds: [], roles: { a: participants[0]!, b: participants[1]! },
+      data: { outcome: 'undecided', gap: 0 },
     };
     steer(c, ctx);
     return c;
@@ -153,13 +152,13 @@ export const looseRaceContest: Contest = {
 
   update(c, ctx) {
     const state = ctx.state;
-    const a = skaterById(state, c.participants[0]!), b = skaterById(state, c.participants[1]!);
+    const a = skaterById(state, c.roles.a), b = skaterById(state, c.roles.b);
     const p = state.puck;
     c.spot.x = p.pos.x;
     c.spot.y = p.pos.y;
-    if (state.carrierId !== null || state.pendingPass !== null) return end(c, ctx, null); // someone else got there
+    if (state.carrierId !== null || state.pendingPass !== null) return end(c, ctx, null, 'off'); // someone else got there
     if (c.stage === 'race') {
-      if (!raceable(state) || c.stageT >= RACE_MAX_SECONDS - STAGE_EPS) return end(c, ctx, null);
+      if (!raceable(state) || c.stageT >= RACE_MAX_SECONDS - STAGE_EPS) return end(c, ctx, null, 'off');
       const ta = etaOf(ctx, a), tb = etaOf(ctx, b);
       c.leader = ta <= tb ? a.id : b.id;
       if (dist(a.pos, p.pos) <= REACH || dist(b.pos, p.pos) <= REACH) {
@@ -172,23 +171,23 @@ export const looseRaceContest: Contest = {
     steer(c, ctx);
     if (c.stageT < RESOLVE_SECONDS - STAGE_EPS) return null;
     const o = c.data.outcome;
-    if (o === OUTCOME.a || o === OUTCOME.b) {
-      const w = o === OUTCOME.a ? a : b;
+    if (o === 'a' || o === 'b') {
+      const w = o === 'a' ? a : b;
       for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
-      return { winnerId: w.id, puck: 'toWinner' };
+      return { winnerId: w.id, puck: 'toWinner', outcome: 'won' };
     }
     // A bounce: off both sticks, it stays loose.
     const ang = ctx.rng.range(-Math.PI, Math.PI), v = ctx.rng.range(BOUNCE_SPEED[0], BOUNCE_SPEED[1]);
     p.vel.x = dcos(ang) * v;
     p.vel.y = dsin(ang) * v;
     blockPickup(state, c.participants.slice());
-    return end(c, ctx, null);
+    return end(c, ctx, null, 'bounce');
   },
 };
 
-function end(c: ContestState, ctx: ContestCtx, winnerId: string | null): { winnerId: string | null; puck: 'unchanged' } {
+function end(c: ContestStateOf<'looseRace'>, ctx: ContestCtx, winnerId: string | null, outcome: ContestOutcome): ContestResult {
   for (const id of c.participants) setCooldown(ctx.state, id, KIND, T.cooldownSeconds);
-  return { winnerId, puck: 'unchanged' };
+  return { winnerId, puck: 'unchanged', outcome };
 }
 
 /**
@@ -203,7 +202,7 @@ export function raceChances(edge: number): { a: number; b: number; bounce: numbe
 }
 
 /** The draw when the first man reaches the puck; `ta`, `tb` are each man's time to it now. */
-function decide(c: ContestState, ctx: ContestCtx, a: SkaterState, b: SkaterState, ta: number, tb: number): void {
+function decide(c: ContestStateOf<'looseRace'>, ctx: ContestCtx, a: SkaterState, b: SkaterState, ta: number, tb: number): void {
   const state = ctx.state;
   const rb = state.reboundEdge !== null && state.tick < state.reboundEdge.untilTick ? state.reboundEdge.id : null;
   const edge = (tb - ta) * T.edgePerSecond + contestRating(ctx, c, a.id, T.race) - contestRating(ctx, c, b.id, T.race)
@@ -211,12 +210,12 @@ function decide(c: ContestState, ctx: ContestCtx, a: SkaterState, b: SkaterState
   const u = ctx.rng.next();
   c.data.gap = tb - ta;
   const p = raceChances(edge);
-  c.data.outcome = u < p.bounce ? OUTCOME.bounce : u < p.bounce + p.a ? OUTCOME.a : OUTCOME.b;
-  c.leader = c.data.outcome === OUTCOME.a ? a.id : c.data.outcome === OUTCOME.b ? b.id : null;
+  c.data.outcome = u < p.bounce ? 'bounce' : u < p.bounce + p.a ? 'a' : 'b';
+  c.leader = c.data.outcome === 'a' ? a.id : c.data.outcome === 'b' ? b.id : null;
 }
 
 /** Both skate flat out to where the puck will be. */
-function steer(c: ContestState, ctx: ContestCtx): void {
+function steer(c: ContestStateOf<'looseRace'>, ctx: ContestCtx): void {
   const state = ctx.state;
   const p = state.puck;
   for (const id of c.participants) {

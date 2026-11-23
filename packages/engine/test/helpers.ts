@@ -4,7 +4,7 @@ import { DT, PERIOD_SECONDS } from '../src/constants';
 import { drainEnergy, recoverEnergy } from '../src/bench';
 import { stepPuck } from '../src/puck';
 import type { Puck, PuckEvent } from '../src/puck';
-import type { ContestState, GameEvent, GameEventType, GameResult, GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
+import type { ContestState, ContestStateOf, GameEvent, GameEventOf, GameEventType, GameResult, GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
 import { PLAYER_TYPES } from '../src/player-types';
 import { RINK, resolveBoards } from '../src/rink';
 import { createRng, type Rng } from '../src/rng';
@@ -495,7 +495,7 @@ export function median(xs: number[]): number {
 
 /** `lineChange` events of the result, optionally only those of one kind (`onTheFly` or `stoppage`). */
 export function lineChangeEvents(r: GameResult, kind?: 'onTheFly' | 'stoppage'): GameEvent[] {
-  return r.events.filter((e) => e.type === 'lineChange' && (kind === undefined || e.detail.split(' ').includes(kind)));
+  return r.events.filter((e) => e.type === 'lineChange' && (kind === undefined || e.detail.onTheFly === (kind === 'onTheFly')));
 }
 
 /** Game seconds elapsed (clock time) at an event. */
@@ -511,7 +511,7 @@ export function shiftLengths(r: GameResult): { forwards: number[]; defence: numb
     for (const unit of ['forwards', 'defence'] as const) {
       let last = 0;
       for (const e of lineChangeEvents(r)) {
-        if (e.side !== side || !e.detail.startsWith(unit)) continue;
+        if (e.type !== 'lineChange' || e.side !== side || e.detail.unit !== unit) continue;
         const t = gameSecondsAt(e);
         out[unit].push(t - last);
         last = t;
@@ -680,7 +680,7 @@ function hitDuel(hitter: PlayerDef, tgt: PlayerDef, closing: number): Duel {
 
 /** One hit as in hitDuel: true when it lands (the target goes down). */
 export function runHit(hitter: PlayerDef, tgt: PlayerDef, closing: number): boolean {
-  return hitDuel(hitter, tgt, closing).events.some((e) => e.type === 'hit' && e.detail === 'landed');
+  return hitDuel(hitter, tgt, closing).events.some((e) => e.type === 'hit' && e.detail.result === 'landed');
 }
 
 /** A big hitter's check on a smaller carrier, stopped on the tick it lands (seeds tried in turn). */
@@ -689,7 +689,7 @@ export function hitThatLands(): GameState {
     const h = hitDuelStart(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), def({ balance: 62, strength: 60, weightKg: 80 }), 6);
     for (let k = 0; k < 90; k++) {
       duelStep(h);
-      if (h.events.some((e) => e.type === 'hit' && e.detail === 'landed')) return h.st;
+      if (h.events.some((e) => e.type === 'hit' && e.detail.result === 'landed')) return h.st;
     }
   }
   throw new Error('no hit landed in 50 tries');
@@ -832,7 +832,7 @@ const place2 = (st: GameState, id: string, x: number, y: number, facing: number)
 const BATTLE_SPOT = { x: 12, y: 12 };
 
 export type BattleOpts = { supportFor?: 'a' | 'b'; firstIn?: 'a' | 'b' };
-export type BattleTick = { stage: string; stageT: number; leader: string | null; pinned: number };
+export type BattleTick = { stage: string; stageT: number; leader: string | null; pinned: string | null };
 export type BattleOutcome = {
   /** 'a' (home C, the first def), 'b' (away C), or null when the puck was trapped. */
   winner: 'a' | 'b' | null;
@@ -863,19 +863,19 @@ function battle(a: PlayerDef, b: PlayerDef, o: BattleOpts = {}): BattleOutcome {
   if (o.supportFor === 'b') place2(st, 'away-LW', S.x + 1.5, S.y - 1.75, Math.PI);
   const c = startContest(st, h.ds, h.rng, boardBattleContest, ['home-C', 'away-C'], h.events);
   const log: BattleTick[] = [];
-  const snap = (): void => { log.push({ stage: c.stage, stageT: c.stageT, leader: c.leader, pinned: c.data.pinned! }); };
+  const snap = (): void => { log.push({ stage: c.stage, stageT: c.stageT, leader: c.leader, pinned: c.roles.pinned }); };
   snap();
   for (let i = 0; i < 300 && st.contests.includes(c); i++) {
     harnessStep(h);
     if (st.contests.includes(c)) snap();
   }
   if (st.contests.includes(c)) throw new Error('board battle still running after 10 s');
-  const e = h.events.find((x) => x.type === 'battle' || (x.type === 'freeze' && x.detail === 'trapped'));
+  const e = h.events.find((x): x is GameEventOf<'battle'> | GameEventOf<'freeze'> => x.type === 'battle' || (x.type === 'freeze' && x.detail.cause === 'trapped'));
   if (!e) throw new Error('board battle ended without a result');
   if (e.type === 'freeze') return { winner: null, detail: 'trapped', puckTo: null, log, h };
   const supporter = e.side === 'home' ? 'home-LW' : 'away-LW';
   const puckTo = st.carrierId === null ? 'loose' : st.carrierId === e.playerId ? 'winner' : st.carrierId === supporter ? 'support' : null;
-  return { winner: e.side === 'home' ? 'a' : 'b', detail: e.detail, puckTo, log, h };
+  return { winner: e.side === 'home' ? 'a' : 'b', detail: e.detail.how, puckTo, log, h };
 }
 
 /** One board battle (see battle()): its winner, the event's detail and where the puck went. */
@@ -969,7 +969,7 @@ export function heldPuckInGame(s: GameSetup): { ticks: number; carried: number; 
 /** The net-front attacker in the net-front helpers. */
 export const attackerId = 'home-C';
 
-type NetFront = { h: Harness; c: ContestState };
+type NetFront = { h: Harness; c: ContestStateOf<'netFront'> };
 function netFrontStart(att: PlayerDef = even, dfn: PlayerDef = even): NetFront {
   const h = harness(['home-LD', 'home-C', 'away-LD'], { 'home-C': att, 'away-LD': dfn }, { carrier: 'home', puckX: 9.8, puckY: 8.5, carrierSlot: 'LD' });
   const st = h.st;
@@ -1017,8 +1017,8 @@ export function netFrontRounds(seconds: number): {
   for (let i = 0; i < Math.round(seconds / DT) && st.contests.includes(c); i++) {
     const before = { x: att.pos.x, y: att.pos.y };
     harnessStep(h);
-    if (c.data.rounds! > rounds) {
-      rounds = c.data.rounds!;
+    if (c.data.rounds > rounds) {
+      rounds = c.data.rounds;
       out.roundTimes.push(st.tick * DT);
       out.rounds.push({ stage: c.stage, leader: c.leader, attackerTarget: Math.hypot(att.target.x - before.x, att.target.y - before.y) });
     }
@@ -1081,7 +1081,7 @@ export function hitOutcomes(hitter: PlayerDef, tgt: PlayerDef, closing: number, 
   const out: Record<string, number> = { landed: 0, absorbed: 0, bounced: 0 };
   for (let i = 0; i < n; i++) {
     const e = hitDuel(hitter, tgt, closing).events.find((x) => x.type === 'hit');
-    if (e) out[e.detail] = (out[e.detail] ?? 0) + 1;
+    if (e?.type === 'hit') out[e.detail.result] = (out[e.detail.result] ?? 0) + 1;
   }
   return out;
 }
@@ -1093,10 +1093,10 @@ export function pokeOutcomes(defender: PlayerDef, carrier: PlayerDef, n: number)
     const h = pokeDuel(defender, carrier);
     let c: ContestState | null = null;
     for (let k = 0; k < 180 && (c === null || h.st.contests.includes(c)); k++) { duelStep(h); c ??= h.st.contests[0] ?? null; }
-    const o = c?.data.outcome;
-    if (o === 1 || o === 2) out.won++;
-    else if (o === 3) out.kept++;
-    else if (o === 4) out.beaten++;
+    const o = c?.kind === 'pokeCheck' ? c.data.outcome : undefined;
+    if (o === 'take' || o === 'loose') out.won++;
+    else if (o === 'kept') out.kept++;
+    else if (o === 'beaten') out.beaten++;
   }
   return out;
 }
@@ -1117,14 +1117,14 @@ export function shieldAlongBoards(carrier: PlayerDef, opp: PlayerDef): 'kept' | 
   const c = startContest(st, h.ds, h.rng, boardBattleContest, ['away-C', 'home-C'], h.events);
   for (let i = 0; i < 60 && st.contests.includes(c) && c.stage === 'protect'; i++) harnessStep(h);
   if (c.stage === 'arrive' || c.stage === 'pin') return 'lost';
-  return h.events.some((e) => e.type === 'battle' && e.detail === 'protect') ? 'kept' : 'none';
+  return h.events.some((e) => e.type === 'battle' && e.detail.how === 'protect') ? 'kept' : 'none';
 }
 
 /** The events of the first hit (of up to 50, as in hitThatLands) that lands on the carrier. */
 export function landedHitEvents(): GameEvent[] {
   for (let i = 0; i < 50; i++) {
     const h = hitDuel(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), def({ balance: 62, strength: 60, weightKg: 80 }), 6);
-    if (h.events.some((e) => e.type === 'hit' && e.detail === 'landed')) return h.events;
+    if (h.events.some((e) => e.type === 'hit' && e.detail.result === 'landed')) return h.events;
   }
   throw new Error('no hit landed in 50 tries');
 }
@@ -1142,7 +1142,7 @@ export function battleWonOffCarrier(carrier: PlayerDef, opp: PlayerDef): GameEve
     st.puck.pos = { x: S.x + 0.6, y: S.y - 0.1 };
     const c = startContest(st, h.ds, h.rng, boardBattleContest, ['away-C', 'home-C'], h.events);
     for (let k = 0; k < 300 && st.contests.includes(c); k++) harnessStep(h);
-    if (h.events.some((e) => e.type === 'battle' && e.playerId === 'away-C' && e.detail !== 'protect')) return h.events;
+    if (h.events.some((e) => e.type === 'battle' && e.playerId === 'away-C' && e.detail.how !== 'protect')) return h.events;
   }
   throw new Error('away C never won the puck off the carrier');
 }
@@ -1275,6 +1275,21 @@ export type GameRecord = {
 
 export type CalibrationOpts = { homeOverall?: number; awayOverall?: number };
 
+/** The one word that says how an event happened (e.g. `landed` for a hit, `trapped` for a freeze), for counting. */
+export function detailKey(e: GameEvent): string {
+  switch (e.type) {
+    case 'hit': return e.detail.result;
+    case 'freeze': return e.detail.cause;
+    case 'takeaway': case 'giveaway': case 'turnover': return e.detail.how;
+    case 'battle': return e.detail.how;
+    case 'save': return e.detail.pose;
+    case 'pass': return e.detail.kind;
+    case 'lineChange': return e.detail.onTheFly ? 'onTheFly' : 'stoppage';
+    case 'contestEnd': return e.detail.result;
+    default: return '';
+  }
+}
+
 /** Event types whose detail is counted too (e.g. `hit:landed`, `freeze:trapped`, `takeaway:poke`). */
 const DETAILED = new Set(['hit', 'freeze', 'takeaway', 'giveaway', 'turnover', 'battle', 'save', 'pass', 'lineChange']);
 
@@ -1303,7 +1318,7 @@ export function playRecord(i: number, o: CalibrationOpts = {}): GameRecord {
   for (const e of r.events) {
     counts[e.type] = (counts[e.type] ?? 0) + 1;
     if (DETAILED.has(e.type)) {
-      const k = `${e.type}:${e.type === 'lineChange' ? e.detail.split(' ')[2] : e.detail}`;
+      const k = `${e.type}:${detailKey(e)}`;
       counts[k] = (counts[k] ?? 0) + 1;
     }
   }

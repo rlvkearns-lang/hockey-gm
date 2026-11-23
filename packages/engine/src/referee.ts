@@ -1,3 +1,4 @@
+import { gameEvent } from './events';
 import { stopPlay } from './faceoff';
 import { FACEOFF_DOTS, RINK } from './rink';
 import { bodyRadius, movementOf } from './skating';
@@ -90,7 +91,7 @@ export function refereeTick(state: GameState, prevPuckX: number, defs?: Map<stri
   if (carrier && carrier.side === off.side) {
     const offender = firstInZone(state, off.side, carrier, defs);
     const spot = dotNear(FACEOFF_DOTS.neutral, dir, off.y);
-    const e = event(state, 'offside', off.side, carrier.id, offender?.id ?? null, `${spot.x},${spot.y}`);
+    const e = call(state, 'offside', off.side, carrier.id, offender?.id ?? null, spot);
     stopPlay(state, spot);
     return e;
   }
@@ -134,17 +135,19 @@ function hybridIcing(state: GameState, side: Side, dir: 1 | -1, fromY: number, d
     // It went in offside first: the offside is the call.
     const offender = firstInZone(state, side, null, defs);
     const spot = dotNear(FACEOFF_DOTS.neutral, dir, off.y);
-    const e = event(state, 'offside', side, shooter, offender?.id ?? null, `${spot.x},${spot.y}`);
+    const e = call(state, 'offside', side, shooter, offender?.id ?? null, spot);
     stopPlay(state, spot);
     return e;
   }
   const spot = dotNear(FACEOFF_DOTS.end, (-dir) as 1 | -1, fromY);
-  const e = event(state, 'icing', side, shooter, defender, `${spot.x},${spot.y}`);
+  const e = call(state, 'icing', side, shooter, defender, spot);
   stopPlay(state, spot);
   state.noChange = side;
   return e;
 }
 
-function event(state: GameState, type: 'offside' | 'icing', side: Side, playerId: string | null, otherId: string | null, detail: string): GameEvent {
-  return { tick: state.tick, period: state.period, clock: state.clock, type, side, playerId, otherId, assistIds: [], detail };
+/** An offside or icing call against `side` (pos: the puck), with the faceoff `spot`. */
+function call(state: GameState, type: 'offside' | 'icing', side: Side, playerId: string | null, otherId: string | null, spot: Vec2): GameEvent {
+  const fields = { side, playerId, otherId, pos: state.puck.pos, detail: { spot: { x: spot.x, y: spot.y } } };
+  return type === 'offside' ? gameEvent(state, { type: 'offside', ...fields }) : gameEvent(state, { type: 'icing', ...fields });
 }

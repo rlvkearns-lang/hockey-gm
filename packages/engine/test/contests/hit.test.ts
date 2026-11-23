@@ -31,7 +31,7 @@ describe('hits', () => {
   });
   it('a landed hit that knocks the puck off the carrier is the hitter\'s turnover', () => {
     const e = landedHitEvents();
-    expect(e.find((x) => x.type === 'turnover')).toMatchObject({ playerId: 'away-C', otherId: 'home-C', detail: 'hit' });
+    expect(e.find((x) => x.type === 'turnover')).toMatchObject({ playerId: 'away-C', otherId: 'home-C', detail: { how: 'hit' } });
   });
   it('a landed hit puts the target down and frees the puck', () => { const st = hitThatLands(); expect(target(st).downT).toBeGreaterThan(0.5); expect(st.carrierId).toBeNull(); });
   it('the target keeps playing while the hitter closes: team play still moves his target', () => {

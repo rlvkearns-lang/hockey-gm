@@ -1,4 +1,4 @@
-import { bodyRadius, FACEOFF_DOTS, RINK, type ContestState, type GameState, type PlayerDef, type Side, type Vec2 } from '@hockey/engine';
+import { bodyRadius, FACEOFF_DOTS, RINK, type ContestKind, type ContestState, type GameState, type PlayerDef, type Side, type Vec2 } from '@hockey/engine';
 
 const MARGIN = 2;
 const TIRED_BELOW = 0.45;
@@ -28,7 +28,7 @@ export type DrawOptions = {
   minRadiusPx?: number;
 };
 
-const KIND_NAMES: Record<string, string> = {
+const KIND_NAMES: Record<ContestKind, string> = {
   boardBattle: 'Board battle',
   looseRace: 'Loose-puck race',
   hit: 'Hit',
@@ -45,7 +45,7 @@ const surname = (name: string): string => name.trim().split(/\s+/).slice(-1)[0] 
 
 /** For example `Board battle · pin · Osgood leading` (no leader yet: `Loose-puck race · race`). */
 export function labelFor(c: ContestState, defs: Map<string, PlayerDef>): string {
-  const kind = KIND_NAMES[c.kind] ?? c.kind.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/^./, (ch) => ch.toUpperCase());
+  const kind = KIND_NAMES[c.kind];
   const parts = [kind, c.stage];
   if (c.leader !== null) parts.push(`${surname(defs.get(c.leader)?.name ?? c.leader)} leading`);
   return parts.join(' · ');

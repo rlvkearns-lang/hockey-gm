@@ -23,8 +23,10 @@ export function buildResult(setup: GameSetup, events: GameEvent[], toi: Map<stri
   const line = (id: string | null): PlayerLine | undefined => (id === null ? undefined : byId.get(id));
 
   for (const e of events) {
+    if (e.side === null) continue; // period ends and contest events count for nobody
+    const side = e.side;
     const me = line(e.playerId), other = line(e.otherId);
-    const t = team[e.side];
+    const t = team[side];
     switch (e.type) {
       case 'faceoff':
         t.faceoffsWon++;
@@ -36,13 +38,13 @@ export function buildResult(setup: GameSetup, events: GameEvent[], toi: Map<stri
         if (me) me.shots++;
         break;
       case 'goal':
-        score[e.side]++;
+        score[side]++;
         if (me) me.goals++;
         for (const a of e.assistIds) { const al = line(a); if (al) al.assists++; }
         if (other) other.shotsAgainst++;
         if (e.onIce) {
-          for (const id of e.onIce[e.side]) { const l = line(id); if (l) l.plusMinus++; }
-          for (const id of e.onIce[e.side === 'home' ? 'away' : 'home']) { const l = line(id); if (l) l.plusMinus--; }
+          for (const id of e.onIce[side]) { const l = line(id); if (l) l.plusMinus++; }
+          for (const id of e.onIce[side === 'home' ? 'away' : 'home']) { const l = line(id); if (l) l.plusMinus--; }
         }
         break;
       case 'save':

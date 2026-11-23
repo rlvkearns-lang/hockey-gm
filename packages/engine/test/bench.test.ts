@@ -19,7 +19,7 @@ describe('fatigue and line changes', () => {
   }, GAME_TIMEOUT);
   it('shifts are a sensible length', () => { const s = shiftLengths(simulateGame(setup(2))); expect(median(s.forwards)).toBeGreaterThan(30); expect(median(s.forwards)).toBeLessThan(60); }, GAME_TIMEOUT);
   it('no change for the team that iced it', () => { const st = afterIcingBy('home'); const before = [...st.onIce.home]; runThroughFaceoff(st); expect(st.onIce.home).toEqual(before); }, GAME_TIMEOUT);
-  it('never changes while defending in its own zone', () => { for (const c of lineChangeEvents(simulateGame(setup(6)), 'onTheFly')) expect(c.detail).not.toMatch(/dzone/); }, GAME_TIMEOUT);
+  it('never changes while defending in its own zone', () => { for (const c of lineChangeEvents(simulateGame(setup(6)), 'onTheFly')) expect(c.type === 'lineChange' && c.detail.phase).not.toBe('dzone'); }, GAME_TIMEOUT);
 
   // Beyond the brief: the pieces behind those.
   it('the other team may change at that stoppage', () => {

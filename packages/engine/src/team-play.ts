@@ -2,10 +2,11 @@ import { composite } from './attributes';
 import { DT, PERIODS } from './constants';
 import { boardsNormal, clipToNets, RINK, resolveBoards, resolveNets, zoneOf } from './rink';
 import { TUNING } from './tuning';
-import type { ContestState, GameState, PlayerDef, Position, Side, SkaterState, Tactics } from './types';
+import type { ContestStateOf, GameState, PlayerDef, Position, Side, SkaterState, Tactics, TeamPhase } from './types';
+
+export type { TeamPhase } from './types';
 import { dist, hypot2, type Vec2 } from './vec';
 
-export type TeamPhase = 'breakout' | 'rush' | 'ozone' | 'forecheck' | 'neutralDefence' | 'dzone' | 'looseChase';
 
 /** Named offensive-zone spots: the three the forwards cycle through, and the two points the defencemen hold. */
 export type OzoneSpot = 'corner' | 'netFront' | 'highSlot' | 'leftPoint' | 'rightPoint';
@@ -84,10 +85,10 @@ const SUPPORT_OFF_BOARDS = 2;
 const normalScratch: Vec2 = { x: 0, y: 0 };
 
 /**
- * The board battle running now (contest kind `boardBattle`, before its `resolve`), or null. Its `data.supportA` and
- * `data.supportB` are the participant indexes of each side's supporting player (-1 for none yet).
+ * The board battle running now (contest kind `boardBattle`, before its `resolve`), or null. Its `roles.supportA` and
+ * `roles.supportB` are each side's supporting player (null for none yet).
  */
-function boardBattle(state: GameState): ContestState | null {
+function boardBattle(state: GameState): ContestStateOf<'boardBattle'> | null {
   for (const c of state.contests) if (c.kind === 'boardBattle' && c.stage !== 'resolve' && c.stage !== 'protect') return c;
   return null;
 }
@@ -105,7 +106,7 @@ export function supportTarget(state: GameState, side: Side): Vec2 | null {
     const id = c.participants[i];
     for (const s of state.skaters) if (s.id === id && s.side === side) slot = i;
   }
-  if (slot < 0 || (slot === 0 ? c.data.supportA : c.data.supportB) !== -1) return null;
+  if (slot < 0 || (slot === 0 ? c.roles.supportA : c.roles.supportB) !== null) return null;
   const n = boardsNormal(c.spot, normalScratch);
   return { x: c.spot.x - n.x * SUPPORT_OFF_BOARDS, y: c.spot.y - n.y * SUPPORT_OFF_BOARDS };
 }
