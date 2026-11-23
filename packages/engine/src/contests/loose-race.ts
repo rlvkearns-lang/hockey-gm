@@ -10,6 +10,7 @@ import {
   contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx,
 } from './core';
+import { datan2, dcos, dsin } from '../dmath';
 
 const KIND = 'looseRace';
 const T = TUNING.looseRace;
@@ -34,7 +35,7 @@ export function timeToReach(s: SkaterState, m: Movement, p: Vec2): number {
   const l = hypot2(dx, dy);
   const d = l - REACH;
   if (d <= 0) return 0;
-  const turn = Math.abs(wrapAngle(Math.atan2(dy, dx) - s.facing)) / m.turnRate;
+  const turn = Math.abs(wrapAngle(datan2(dy, dx) - s.facing)) / m.turnRate;
   const top = m.topSpeed, a = m.accel;
   const v0 = Math.max(-top, Math.min(top, (s.vel.x * dx + s.vel.y * dy) / l));
   const dAccel = (top * top - v0 * v0) / (2 * a);
@@ -176,8 +177,8 @@ export const looseRaceContest: Contest = {
     }
     // A bounce: off both sticks, it stays loose.
     const ang = ctx.rng.range(-Math.PI, Math.PI), v = ctx.rng.range(BOUNCE_SPEED[0], BOUNCE_SPEED[1]);
-    p.vel.x = Math.cos(ang) * v;
-    p.vel.y = Math.sin(ang) * v;
+    p.vel.x = dcos(ang) * v;
+    p.vel.y = dsin(ang) * v;
     blockPickup(state, c.participants.slice());
     return end(c, ctx, null);
   },

@@ -12,7 +12,9 @@
     "bench": "tsx packages/engine/scripts/bench.ts",
     "typecheck": "tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.test.json && npm -w apps/debug run typecheck",
     "calibrate": "tsx packages/engine/scripts/calibrate.ts",
-    "debug": "npm -w apps/debug run dev"
+    "debug": "npm -w apps/debug run dev",
+    "test:browser": "npm -w packages/engine run test:browser",
+    "golden:update": "npm -w packages/engine run golden:update"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

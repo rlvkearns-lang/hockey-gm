@@ -1,6 +1,7 @@
 import type { Vec2 } from './vec';
 import { RINK, resolveBoards } from './rink';
 import { hypot2 } from './vec';
+import { dexp, hypot3 } from './dmath';
 
 export type Puck = { pos: Vec2; z: number; vel: Vec2; vz: number };
 
@@ -56,7 +57,7 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
   const speed = hypot2(puck.vel.x, puck.vel.y);
   const n = Math.max(1, Math.ceil((speed * dt) / MAX_SUBSTEP));
   const h = dt / n;
-  const friction = Math.exp(-ICE_DECAY * h);
+  const friction = dexp(-ICE_DECAY * h);
   let boardsHit = false;
 
   for (let i = 0; i < n; i++) {
@@ -100,7 +101,7 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
       if (Math.abs(y) >= RINK.netHalfWidth) continue;
       const z = pz + (puck.z - pz) * t;
       if (z < RINK.netHeight) {
-        const sp = Math.hypot(puck.vel.x, puck.vel.y, puck.vz);
+        const sp = hypot3(puck.vel.x, puck.vel.y, puck.vz);
         puck.pos.x = gx;
         puck.pos.y = y;
         puck.z = z;

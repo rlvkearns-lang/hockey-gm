@@ -98,5 +98,17 @@ describe('game loop', () => {
     expect(violations).toEqual([]);
   }, GAME_TIMEOUT);
   it('time on ice adds up', () => { const r = simulateGame(setup()); const total = sum(r.players.filter(isSkaterOf('home')).map(p => p.toiSeconds)); expect(total).toBeGreaterThan(3600 * 5 * 0.97); expect(total).toBeLessThan(3600 * 5 * 1.06); }, GAME_TIMEOUT);
+  it('no -0 anywhere in the state or the result (JSON would drop its sign)', () => {
+    const found: string[] = [];
+    const walk = (v: unknown, path: string): void => {
+      if (typeof v === 'number') { if (Object.is(v, -0)) found.push(path); }
+      else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`));
+      else if (v !== null && typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(x, `${path}.${k}`);
+    };
+    const g = createGame(setup(42));
+    while (!g.done) { g.step(); if (g.state.tick % 5 === 0) walk(g.state, `tick ${g.state.tick}`); }
+    walk(g.result(), 'result');
+    expect(found.slice(0, 10)).toEqual([]);
+  }, GAME_TIMEOUT);
   it('rejects a bad setup before play', () => { const s = setup(); s.home.lines.goalie = 'nobody'; expect(() => createGame(s)).toThrow(/nobody/); });
 });

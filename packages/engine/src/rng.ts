@@ -1,3 +1,4 @@
+import { dcos, dlog } from './dmath';
 export type Rng = {
   next(): number;
   range(min: number, max: number): number;
@@ -49,7 +50,7 @@ export function createRng(seed: number): Rng {
     gauss: () => {
       const u = 1 - next(); // (0, 1]
       const v = next();
-      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+      return Math.sqrt(-2 * dlog(u)) * dcos(2 * Math.PI * v);
     },
     pick: <T>(items: readonly T[]): T => {
       if (items.length === 0) throw new Error('pick from empty list');

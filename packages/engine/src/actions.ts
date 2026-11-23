@@ -5,6 +5,7 @@ import { nearestOpponentDist, steeredByContest } from './team-play';
 import { TUNING } from './tuning';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
 import { hypot2, segDistXY, type Vec2 } from './vec';
+import { datan2, dcos, dsin } from './dmath';
 
 /** After a release (draw, pass, shot, dump), the releasing players cannot pick the puck up again for this long. */
 export const RELEASE_NO_PICKUP_SECONDS = 0.3;
@@ -87,8 +88,8 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
   const lead = l / speed;
   const aimX = to.pos.x + to.vel.x * lead, aimY = to.pos.y + to.vel.y * lead;
   const sigma = PASS.error.base + (100 - passing) * PASS.error.perPoint + pressureOn(state, from) * PASS.error.pressure;
-  const angle = Math.atan2(aimY - p.y, aimX - p.x) + rng.gauss() * sigma;
-  release(state, from, Math.cos(angle) * speed, Math.sin(angle) * speed, 0);
+  const angle = datan2(aimY - p.y, aimX - p.x) + rng.gauss() * sigma;
+  release(state, from, dcos(angle) * speed, dsin(angle) * speed, 0);
   state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((lead + PASS.graceSeconds) / DT), tried: [] };
   return event(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, assistIds: [], detail: `${l.toFixed(1)}m` });
 }
@@ -151,8 +152,8 @@ export function executeDump(state: GameState, fromId: string, defs: Map<string, 
   const tx = dir * DUMP.spot.x, ty = (rng.chance(0.5) ? 1 : -1) * DUMP.spot.y;
   const speed = DUMP.speed.base + passing * DUMP.speed.perPoint;
   const sigma = DUMP.errorFactor * (PASS.error.base + (100 - passing) * PASS.error.perPoint);
-  const angle = Math.atan2(ty - p.y, tx - p.x) + rng.gauss() * sigma;
-  release(state, s, Math.cos(angle) * speed, Math.sin(angle) * speed, DUMP.vz);
+  const angle = datan2(ty - p.y, tx - p.x) + rng.gauss() * sigma;
+  release(state, s, dcos(angle) * speed, dsin(angle) * speed, DUMP.vz);
   return event(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, assistIds: [], detail: 'dump' });
 }
 
@@ -198,9 +199,9 @@ export function tryIntercept(
       p.vel.y = s.vel.y;
     } else {
       const turn = (rng.chance(0.5) ? 1 : -1) * rng.range(PASS.deflectTurn[0], PASS.deflectTurn[1]);
-      const a = Math.atan2(p.vel.y, p.vel.x) + turn, v = speed * PASS.deflectKeep;
-      p.vel.x = Math.cos(a) * v;
-      p.vel.y = Math.sin(a) * v;
+      const a = datan2(p.vel.y, p.vel.x) + turn, v = speed * PASS.deflectKeep;
+      p.vel.x = dcos(a) * v;
+      p.vel.y = dsin(a) * v;
       blockPickup(state, [s.id]);
     }
     return {

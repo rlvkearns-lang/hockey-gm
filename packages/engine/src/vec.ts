@@ -1,3 +1,4 @@
+import { datan2, dcos, dsin } from './dmath';
 export type Vec2 = { x: number; y: number };
 
 export const add = (a: Vec2, b: Vec2): Vec2 => ({ x: a.x + b.x, y: a.y + b.y });
@@ -25,10 +26,10 @@ export const norm = (a: Vec2): Vec2 => {
 };
 export const dot = (a: Vec2, b: Vec2): number => a.x * b.x + a.y * b.y;
 export const rotate = (a: Vec2, angle: number): Vec2 => {
-  const c = Math.cos(angle), s = Math.sin(angle);
+  const c = dcos(angle), s = dsin(angle);
   return { x: a.x * c - a.y * s, y: a.x * s + a.y * c };
 };
-export const angleOf = (a: Vec2): number => Math.atan2(a.y, a.x);
+export const angleOf = (a: Vec2): number => datan2(a.y, a.x);
 
 /** Shortest distance from point (px, py) to segment (ax, ay)-(bx, by); allocation-free. */
 export function segDistXY(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {

@@ -9,6 +9,7 @@ import { wrapAngle } from './skating';
 import { TUNING } from './tuning';
 import type { GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, Side, SkaterState } from './types';
 import { dist, hypot2, segDistXY, type Vec2 } from './vec';
+import { datan2, dcos, dexp, dsin, dtanh } from './dmath';
 
 const GOAL = RINK.goalLineX;
 const SIDES = ['home', 'away'] as const;
@@ -35,7 +36,7 @@ const SHOT_MAX_SECONDS = 3;
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const other = (s: Side): Side => (s === 'home' ? 'away' : 'home');
-const logistic = (x: number): number => 1 / (1 + Math.exp(-x));
+const logistic = (x: number): number => 1 / (1 + dexp(-x));
 const wrap = wrapAngle;
 
 function goalieAttrs(defs: Map<string, PlayerDef>, id: string): GoalieAttrs {
@@ -80,7 +81,7 @@ export function saveChance(input: SaveInput): number {
   const lm = input.lateralMiss;
   // Skill counts nearly linearly around 70 (less above it than below) and flattens out toward the extremes.
   const per = skill >= 70 ? G.save.perPointAbove : G.save.perPoint;
-  const skillTerm = per * G.save.skillSpan * Math.tanh((skill - 70) / G.save.skillSpan);
+  const skillTerm = per * G.save.skillSpan * dtanh((skill - 70) / G.save.skillSpan);
   const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0)
     - (input.screened ? G.save.screened : 0)
     - G.save.perMovingSpeed * input.goalieMovingSpeed
@@ -125,7 +126,7 @@ function moveGoalie(g: GoalieState, a: GoalieAttrs, p: Vec2, end: 1 | -1, dt: nu
   g.vel.y = (dy * k) / dt;
   g.pos.x += dx * k;
   g.pos.y += dy * k;
-  const want = Math.atan2(p.y - g.pos.y, p.x - g.pos.x);
+  const want = datan2(p.y - g.pos.y, p.x - g.pos.x);
   const turn = wrap(want - g.facing);
   const maxTurn = (G.squareRate.base + a.positioning * G.squareRate.perPoint) * dt;
   g.facing = wrap(g.facing + clamp(turn, -maxTurn, maxTurn));
@@ -202,9 +203,9 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
     shot.blockTried.push(s.id);
     if (!rng.chance(clamp(BLOCK.base + defs.get(s.id)!.attrs.shotBlocking * BLOCK.perPoint, 0.03, 0.97))) continue;
     const speed = hypot2(pk.vel.x, pk.vel.y) * rng.range(BLOCK.keep[0], BLOCK.keep[1]);
-    const angle = Math.atan2(pk.vel.y, pk.vel.x) + Math.PI + rng.gauss() * BLOCK.spread;
-    pk.vel.x = Math.cos(angle) * speed;
-    pk.vel.y = Math.sin(angle) * speed;
+    const angle = datan2(pk.vel.y, pk.vel.x) + Math.PI + rng.gauss() * BLOCK.spread;
+    pk.vel.x = dcos(angle) * speed;
+    pk.vel.y = dsin(angle) * speed;
     pk.z = 0;
     pk.vz = 0;
     state.shotInFlight = null;
@@ -311,7 +312,7 @@ export function resolveOnNet(
   const lx = netX - fx, ly = ev.y - fy;
   const ll = hypot2(lx, ly) || 1;
   const offLine = Math.abs((g.pos.x - fx) * ly - (g.pos.y - fy) * lx) / ll;
-  const squareErr = Math.abs(wrap(Math.atan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
+  const squareErr = Math.abs(wrap(datan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
   const p = saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
     screened: state.screenedUntilTick[defSide] > state.tick, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
@@ -336,17 +337,17 @@ export function resolveOnNet(
     }
     // Rebound: off the reflected line of the shot, turned by the pose and spread by poor rebound control.
     const out0 = end === 1 ? Math.PI : 0;
-    let rel = wrap(Math.atan2(ly / ll, (-lx / ll)) - out0);
+    let rel = wrap(datan2(ly / ll, (-lx / ll)) - out0);
     if (pose === 'blocker') rel -= G.blockerTurn;
     else if (pose === 'pad') rel += (ev.y - g.pos.y) * -end >= 0 ? G.padTurn : -G.padTurn;
     rel = clamp(rel + rng.gauss() * (G.reboundSpread.base + G.reboundSpread.perPoint * (100 - rc)), -G.reboundMaxAngle, G.reboundMaxAngle);
     const angle = out0 + rel;
     const speed = ev.speed * clamp(G.reboundSpeed.base - G.reboundSpeed.perPoint * rc, G.reboundSpeed.min, G.reboundSpeed.max) * G.reboundPoseSpeed[pose];
-    pk.pos.x = g.pos.x + Math.cos(angle) * RB_START;
-    pk.pos.y = g.pos.y + Math.sin(angle) * RB_START;
+    pk.pos.x = g.pos.x + dcos(angle) * RB_START;
+    pk.pos.y = g.pos.y + dsin(angle) * RB_START;
     if (pk.pos.x * end > GOAL - 0.1) pk.pos.x = end * (GOAL - 0.1);
-    pk.vel.x = Math.cos(angle) * speed;
-    pk.vel.y = Math.sin(angle) * speed;
+    pk.vel.x = dcos(angle) * speed;
+    pk.vel.y = dsin(angle) * speed;
     pk.z = 0;
     pk.vz = 0;
     resolveBoards(pk.pos, pk.vel, 0.05, 0);

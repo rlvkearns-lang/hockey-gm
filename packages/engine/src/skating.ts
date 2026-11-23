@@ -2,6 +2,7 @@ import { resolveBoards } from './rink';
 import { TUNING } from './tuning';
 import { hypot2 } from './vec';
 import type { PlayerDef, SkaterState } from './types';
+import { datan2, dcos, dexp, dsin } from './dmath';
 
 export type Movement = {
   topSpeed: number;
@@ -70,14 +71,14 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
     const dist = hypot2(dx, dy);
     const speed = hypot2(s.vel.x, s.vel.y);
     const hasGoal = dist > 0.05;
-    const travel = hasGoal ? Math.atan2(dy, dx) : s.facing;
+    const travel = hasGoal ? datan2(dy, dx) : s.facing;
 
     let backward = false;
     let wantFacing = travel;
     if (s.faceTarget) {
       const fx = s.faceTarget.x - s.pos.x, fy = s.faceTarget.y - s.pos.y;
       if (fx !== 0 || fy !== 0) {
-        const toFace = Math.atan2(fy, fx);
+        const toFace = datan2(fy, fx);
         if (!hasGoal) wantFacing = toFace;
         else {
           const off = Math.abs(roughWrap(toFace - travel));
@@ -91,7 +92,7 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
     const maxTurn = (m.turnRate / (1 + speed / 6)) * dt;
     s.facing = wrapAngle(s.facing + clampedTurn(wantFacing - s.facing, maxTurn));
 
-    const fx = Math.cos(s.facing), fy = Math.sin(s.facing);
+    const fx = dcos(s.facing), fy = dsin(s.facing);
     const moveDir = backward ? -1 : 1;
     // Only effort along the facing counts; scale by how well it points at the goal.
     const align = hasGoal ? Math.max(0, (moveDir * fx * dx + moveDir * fy * dy) / dist) : 0;
@@ -104,7 +105,7 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
     const latX = s.vel.x - fx * along, latY = s.vel.y - fy * along;
     const step = m.accel * dt;
     const newAlong = along + Math.max(-step, Math.min(step, wantAlong - along));
-    if (dt !== gripDt) { gripDt = dt; gripFactor = Math.exp(-EDGE_GRIP * dt); }
+    if (dt !== gripDt) { gripDt = dt; gripFactor = dexp(-EDGE_GRIP * dt); }
     const grip = gripFactor;
     s.vel.x = fx * newAlong + latX * grip;
     s.vel.y = fy * newAlong + latY * grip;

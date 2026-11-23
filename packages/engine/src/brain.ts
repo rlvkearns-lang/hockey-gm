@@ -8,6 +8,7 @@ import { bodyRadius } from './skating';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, SkaterState } from './types';
 import { dist, hypot2, segDistXY, type Vec2 } from './vec';
+import { dexp, dpow } from './dmath';
 
 export type Decision =
   | { kind: 'carry'; to: Vec2 }
@@ -31,7 +32,7 @@ function shotQuality(rx: number, ly: number): number {
   if (dx < 0.3 || rx < RINK.blueLineX) return 0;
   const d = hypot2(dx, ly);
   if (d > T.maxShotDistance) return 0;
-  return Math.exp(-d / T.shotDistanceScale) * (dx / d);
+  return dexp(-d / T.shotDistanceScale) * (dx / d);
 }
 
 function skaterById(state: GameState, id: string): SkaterState | null {
@@ -135,9 +136,9 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   // The longer he has had it, the more he wants to move it on (nobody holds the puck for long).
   const t = state.touches;
   const since = t.side === s.side && t.ids[t.ids.length - 1] === s.id ? t.ticks[t.ticks.length - 1]! : state.tick;
-  const keep = Math.max(T.holdMin, Math.exp(-((state.tick - since) * DT) / T.holdSeconds));
+  const keep = Math.max(T.holdMin, dexp(-((state.tick - since) * DT) / T.holdSeconds));
   const shootOn = 1 + T.holdBoost.shoot * (1 - keep), passOn = 1 + T.holdBoost.pass * (1 - keep);
-  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * (T.shootSkill.base + composite(a, SHOOTING) * T.shootSkill.perPoint) * tend.shoot * calm ** T.shootPressure * scoreShoot * shootOn;
+  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * (T.shootSkill.base + composite(a, SHOOTING) * T.shootSkill.perPoint) * tend.shoot * dpow(calm, T.shootPressure) * scoreShoot * shootOn;
   const passSkill = T.weight.pass * skill(a.passing) * tend.pass * calm * passOn;
   const carryW = T.weight.carry * (T.carrySpace[0] + T.carrySpace[1] * spaceAhead) * skill(a.puckHandling) * tend.carry * calm * keep;
   const zone = zoneOf(p.x, dir);

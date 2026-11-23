@@ -7,6 +7,7 @@ import {
   carrierNow, carrierOf, contestEvent, contestRating, dropParticipant, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS,
   winProb, type Contest, type ContestCtx, type ContestResult,
 } from './core';
+import { datan2, dcos, dsin } from '../dmath';
 
 const KIND = 'pokeCheck';
 const T = TUNING.poke;
@@ -57,7 +58,7 @@ export const pokeCheckContest: Contest = {
     const dx = s.pos.x - carrier.pos.x, dy = s.pos.y - carrier.pos.y;
     const d = hypot2(dx, dy);
     if (d > T.triggerRange) return null;
-    if (d > 0 && (Math.cos(carrier.facing) * dx + Math.sin(carrier.facing) * dy) / d < T.frontCos) return null;
+    if (d > 0 && (dcos(carrier.facing) * dx + dsin(carrier.facing) * dy) / d < T.frontCos) return null;
     if (onCooldown(state, s.id, KIND)) return null;
     // He makes up his mind once per cooldown: poke now, or keep his position.
     setCooldown(state, s.id, KIND, T.cooldownSeconds);
@@ -147,10 +148,10 @@ function finish(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier:
   state.lastTouch = { id: checker.id, side: checker.side };
   state.possession = checker.side;
   recordTouch(state, checker.id, checker.side);
-  const a = Math.atan2(p.y - checker.pos.y, p.x - checker.pos.x) + ctx.rng.gauss() * T.looseSpread;
+  const a = datan2(p.y - checker.pos.y, p.x - checker.pos.x) + ctx.rng.gauss() * T.looseSpread;
   const v = ctx.rng.range(T.looseSpeed[0], T.looseSpeed[1]);
   return {
     winnerId: checker.id, puck: 'loose',
-    looseVel: { x: Math.cos(a) * v + carrier.vel.x * 0.5, y: Math.sin(a) * v + carrier.vel.y * 0.5 },
+    looseVel: { x: dcos(a) * v + carrier.vel.x * 0.5, y: dsin(a) * v + carrier.vel.y * 0.5 },
   };
 }

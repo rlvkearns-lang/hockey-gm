@@ -19,6 +19,7 @@ import type {
 } from './types';
 import { validateSetup } from './validate';
 import { dist, hypot2, segDistXY } from './vec';
+import { dcos, dsin } from './dmath';
 
 export type Game = {
   readonly state: GameState;
@@ -105,6 +106,20 @@ function startPeriod(state: GameState, period: number): void {
   setupFaceoff(state, FACEOFF_DOTS.centre);
 }
 
+/** x + 0 is x, except that -0 becomes +0. */
+const z = (v: { x: number; y: number }): void => { v.x += 0; v.y += 0; };
+
+/**
+ * Turns every -0 in the moving parts of the state into +0 (velocities pick up -0 from products like 0 * -0.4). JSON
+ * drops the sign of zero, so this keeps a state that has been through JSON identical to the one that has not.
+ */
+function noNegativeZero(state: GameState): void {
+  for (const s of state.skaters) { z(s.pos); z(s.vel); s.facing += 0; }
+  const p = state.puck;
+  z(p.pos); z(p.vel); p.z += 0; p.vz += 0;
+  for (const g of [state.goalies.home, state.goalies.away]) { z(g.pos); z(g.vel); g.facing += 0; }
+}
+
 export function createGame(setup: GameSetup): Game {
   validateSetup(setup);
   const rng = createRng(setup.seed);
@@ -176,8 +191,8 @@ export function createGame(setup: GameSetup): Game {
 
   function carryPuck(carrier: SkaterState): void {
     const p = state.puck;
-    p.pos.x = carrier.pos.x + Math.cos(carrier.facing) * CARRY_REACH;
-    p.pos.y = carrier.pos.y + Math.sin(carrier.facing) * CARRY_REACH;
+    p.pos.x = carrier.pos.x + dcos(carrier.facing) * CARRY_REACH;
+    p.pos.y = carrier.pos.y + dsin(carrier.facing) * CARRY_REACH;
     p.vel.x = carrier.vel.x;
     p.vel.y = carrier.vel.y;
     p.z = 0;
@@ -290,6 +305,11 @@ export function createGame(setup: GameSetup): Game {
 
   function step(): void {
     if (state.phase === 'final') return;
+    stepOnce();
+    noNegativeZero(state);
+  }
+
+  function stepOnce(): void {
     state.tick++;
     state.phaseT += DT;
     switch (state.phase) {

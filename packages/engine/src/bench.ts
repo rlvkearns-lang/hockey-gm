@@ -7,6 +7,7 @@ import { phaseFor } from './team-play';
 import { TUNING } from './tuning';
 import type { BenchState, BenchUnit, GameEvent, GameSetup, GameState, Position, Side, SkaterState } from './types';
 import { hypot2, type Vec2 } from './vec';
+import { dexp, dlog } from './dmath';
 
 export type Unit = 'forwards' | 'defence';
 
@@ -25,7 +26,7 @@ const SIDES = ['home', 'away'] as const;
 /** Energy drain and recovery (see TUNING.fatigue). With the defaults a 45 s shift flat out takes a stamina-50 player from 1.0 to 0.55. */
 const F = TUNING.fatigue;
 /** On the bench the gap to full energy keeps F.benchKeep of itself every F.benchSeconds s. */
-const RECOVERY_RATE = -Math.log(F.benchKeep) / F.benchSeconds;
+const RECOVERY_RATE = -dlog(F.benchKeep) / F.benchSeconds;
 /** A unit is due a change when its mean energy is below F.tired, or its shift has passed shiftSeconds; at a stoppage, this fraction of shiftSeconds is enough. */
 const STOPPAGE_SHIFT_FRACTION = 0.5;
 /** Attack-relative x (m) past which the puck is deep in a team's far end: it may change whoever has the puck. */
@@ -54,7 +55,7 @@ export function drainEnergy(energy: number, stamina: number, effort: number, dt:
 
 /** Energy after `dt` seconds of rest on the bench. */
 export function recoverEnergy(energy: number, dt: number): number {
-  return rested(energy, Math.exp(-RECOVERY_RATE * dt));
+  return rested(energy, dexp(-RECOVERY_RATE * dt));
 }
 
 /** A fresh bench: the first line and pair on, nobody credited with ice time yet. */
@@ -107,7 +108,7 @@ export function benchTick(state: GameState, setup: GameSetup, _rng: Rng, dt: num
   const skaters = state.skaters;
   const info = infoFor(setup, skaters);
   const live = state.phase === 'live';
-  const benchRest = Math.exp(-RECOVERY_RATE * dt), iceRest = Math.exp(-RECOVERY_RATE * dt * F.stoppageRecovery);
+  const benchRest = dexp(-RECOVERY_RATE * dt), iceRest = dexp(-RECOVERY_RATE * dt * F.stoppageRecovery);
   let carrierSide: Side | null = null;
   for (let u = 0; u < 4; u++) { energySum[u] = 0; headCount[u] = 0; }
   for (let k = 0; k < skaters.length; k++) {

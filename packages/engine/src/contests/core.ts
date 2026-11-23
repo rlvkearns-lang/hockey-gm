@@ -9,6 +9,7 @@ import { hitContest } from './hit';
 import { looseRaceContest } from './loose-race';
 import { netFrontContest } from './net-front';
 import { pokeCheckContest } from './poke-check';
+import { dexp } from '../dmath';
 
 export type Weights = Partial<Record<keyof SkaterAttrs, number>>;
 export type Chemistry = GameSetup['chemistry'];
@@ -60,7 +61,7 @@ const PARITY_MAX = 0.9;
 
 /** Chance that the side with an `edge` (difference in rating points) wins. A 15-point edge gives about 0.65. */
 export function winProb(edge: number): number {
-  return clamp(1 / (1 + Math.exp(-edge / PARITY_SCALE)), PARITY_MIN, PARITY_MAX);
+  return clamp(1 / (1 + dexp(-edge / PARITY_SCALE)), PARITY_MIN, PARITY_MAX);
 }
 
 /** Rating points lost at energy 0 (linear in energy), and at most gained or lost for form, morale and chemistry. */
