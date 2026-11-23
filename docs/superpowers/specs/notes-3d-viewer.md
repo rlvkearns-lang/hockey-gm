@@ -108,3 +108,15 @@ What follows **[my call]**:
 - Overhead: stop it moving with the puck. Either a fixed view of the whole rink, or a view of one zone that changes only when play has clearly moved to another zone and stayed there, with a slow slide between them. No rotation, north always the same way.
 - The other angles get the same treatment: the camera's job is to be calm; the players move, not the frame.
 - Check every angle by counting how far and how often the frame moves over a period, and set limits.
+
+## How the players look (owner, 2026-11-24)
+
+Asked whether to bring the per-player look forward, the owner said "Whatever you think. In a perfect world I would love a bit higher quality body parts and stuff, with weight."
+
+- **[my call]** The order stays: how players play (engine round 2) comes before how they look, because better-looking figures doing odd things would not help.
+- A **figure quality pass** is added to the viewer work, done together with the player card (milestone 5), since the card shows the model close up and needs it anyway:
+  - Body parts with real shape instead of plain blocks and capsules: shaped torso with shoulder pads under the jersey, tapered limbs, proper gloves, skates with blades, helmet with visor or cage, pants and socks as separate pieces, goalie pads with shape.
+  - Weight in the picture: heavier players visibly thicker through the chest and legs, not only scaled; jerseys that hang; a lower, wider stance for big men.
+  - Weight in the movement: heavier players take longer to start and stop, lean harder into turns, and move less when hit; lighter players are quicker on their edges. The animation reads the player's mass, it does not change the engine's result.
+  - Per-player look: skin tone, hair and beards showing under the helmet, stick tape, number and name, generated crest.
+- Still code-built figures (no imported models), so the style stays clean rather than photo-real. If the pass falls short of what the owner wants, the next step up is hand-made models, which is a bigger decision to raise with him then.
