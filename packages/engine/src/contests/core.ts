@@ -14,6 +14,7 @@ import { looseRaceContest } from './loose-race';
 import { netFrontContest } from './net-front';
 import { pokeCheckContest } from './poke-check';
 import { dexp } from '../dmath';
+import { carrierOf, clamp, skaterById } from '../util';
 
 export type Weights = Partial<Record<keyof SkaterAttrs, number>>;
 export type Chemistry = GameSetup['chemistry'];
@@ -57,7 +58,6 @@ export interface Contest<K extends ContestKind = ContestKind> {
   update(c: ContestStateOf<K>, ctx: ContestCtx, dt: number): ContestResult | null;
 }
 
-const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
 /** Steepness of the parity curve (rating points per unit of log-odds) and its limits: no contest is ever certain. */
 const PARITY_SCALE = 24;
@@ -111,20 +111,10 @@ export function contestRating(ctx: ContestCtx, c: ContestState, id: string, weig
   return effective(ctx.defs.get(id)!, s, weights, contestChemistry(ctx, c, id)) + ctx.state.teamJump[s.side];
 }
 
-export function skaterById(state: GameState, id: string): SkaterState {
-  for (const s of state.skaters) if (s.id === id) return s;
-  throw new Error(`no skater ${id}`);
-}
+export { carrierOf, skaterById } from '../util';
 
 /** Can take part in a new contest: on the ice, not heading off, not down, in no contest now. */
 export const isFree = (s: SkaterState): boolean => s.onIce && !s.leaving && s.downT === 0 && s.contestId === null;
-
-/** The skater carrying the puck, or null. */
-export function carrierOf(state: GameState): SkaterState | null {
-  if (state.carrierId === null) return null;
-  for (const s of state.skaters) if (s.id === state.carrierId) return s;
-  return null;
-}
 
 const CARRIER = 'core.carrier';
 

@@ -2,11 +2,11 @@ import { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from '
 import { PLAYER_TYPES } from './player-types';
 import { createRng, type Rng } from './rng';
 import type { PlayerDef, Position, TeamDef, Tendencies } from './types';
+import { clamp } from './util';
 
 const FIRST = ['Alex', 'Ben', 'Cal', 'Dan', 'Eli', 'Finn', 'Gus', 'Hank', 'Ivan', 'Jon', 'Kai', 'Leo', 'Max', 'Nate', 'Owen', 'Pete', 'Quin', 'Ray', 'Sam', 'Theo'];
 const LAST = ['Arden', 'Brandt', 'Carver', 'Dahl', 'Ekberg', 'Frost', 'Grey', 'Holm', 'Ingram', 'Jarvis', 'Keane', 'Lund', 'Marsh', 'Novak', 'Oakes', 'Pryor', 'Quist', 'Reyes', 'Sorel', 'Thorne'];
 
-const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 const rating = (v: number): number => clamp(Math.round(v), 1, 100);
 
 const typesFor = (pos: Position): string[] =>
@@ -55,6 +55,24 @@ function makePlayer(rng: Rng, team: string, n: number, position: Position, typeN
   };
 }
 
+/** Numbers goalies wear; skaters wear anything else from 2 to 98. */
+const GOALIE_NUMBERS = [30, 31, 35, 1, 29, 33, 34, 39, 40, 41, 70];
+const SKATER_NUMBERS = Array.from({ length: 97 }, (_, i) => i + 2).filter((k) => !GOALIE_NUMBERS.includes(k));
+
+/**
+ * Sweater numbers: goalies from the conventional goalie numbers, skaters from the rest, all different. Drawn from a
+ * stream of their own (seed + 0.5), so they leave the players themselves exactly as they were.
+ */
+function assignNumbers(seed: number, players: PlayerDef[]): void {
+  const rng = createRng(seed + 0.5);
+  const draw = (pool: readonly number[]): (() => number) => {
+    const left = pool.slice();
+    return () => left.splice(rng.int(0, left.length - 1), 1)[0]!;
+  };
+  const goalie = draw(GOALIE_NUMBERS), skater = draw(SKATER_NUMBERS);
+  for (const p of players) p.number = p.position === 'G' ? goalie() : skater();
+}
+
 /** 12 forwards, 6 defencemen, 2 goalies. `overall` is the mean attribute before type bias. */
 export function generateTeam(seed: number, name: string, abbr: string, overall = 70): TeamDef {
   const rng = createRng(seed);
@@ -79,6 +97,7 @@ export function generateTeam(seed: number, name: string, abbr: string, overall =
   }
   const goalie = add('G', 'Goalie');
   add('G', 'Goalie');
+  assignNumbers(seed, players);
 
   return {
     id: abbr.toLowerCase(),

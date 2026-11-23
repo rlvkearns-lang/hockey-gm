@@ -8,17 +8,16 @@ import { gameEvent } from './events';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
 import { hypot2, segDistXY, type Vec2 } from './vec';
 import { datan2, dcos, dsin } from './dmath';
+import { clamp, GRAVITY, skaterById } from './util';
 
 /** After a release (draw, pass, shot, dump), the releasing players cannot pick the puck up again for this long. */
 export const RELEASE_NO_PICKUP_SECONDS = 0.3;
-const GRAVITY = 9.81;
 /** Upward speed (m/s) a shot can be lifted with, at most: about 5 m high at the top of its flight. */
 const MAX_SHOT_LIFT = 10;
 const PASS = TUNING.pass;
 const SHOT = TUNING.shot;
 const DUMP = TUNING.dump;
 
-const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
 /** 0 (nobody within 5 m) to 1 (an opponent on top of him). */
 export function pressureOn(state: GameState, s: SkaterState): number {
@@ -45,11 +44,6 @@ export function blockPickup(state: GameState, ids: string[]): void {
   state.pickupBlock = { ids, untilTick: state.tick + Math.round(RELEASE_NO_PICKUP_SECONDS / DT) };
 }
 
-function skaterById(state: GameState, id: string): SkaterState {
-  for (const s of state.skaters) if (s.id === id) return s;
-  throw new Error(`no skater ${id}`);
-}
-
 /**
  * The carrier lets the puck go with this velocity; it becomes loose and he cannot re-take it at once. Released from
  * his own half (behind the centre line), it is watched for icing until someone touches it. With `out`, a `release`
@@ -62,8 +56,7 @@ function release(
   const p = state.puck;
   if (out) out.push(gameEvent(state, { type: 'release', side: from.side, playerId: from.id, otherId: toId, pos: p.pos, detail: { kind, toId, vel: { x: vx, y: vy, z: vz } } }));
   recordTouch(state, from.id, from.side); // his touch lasts until he lets it go
-  state.icingWatch = p.pos.x * state.attackDir[from.side] < 0
-    ? { side: from.side, fromX: p.pos.x, fromY: p.pos.y, tick: state.tick } : null;
+  state.icingWatch = p.pos.x * state.attackDir[from.side] < 0 ? { side: from.side, fromY: p.pos.y } : null;
   p.vel.x = vx;
   p.vel.y = vy;
   p.z = 0;
@@ -74,11 +67,6 @@ function release(
   state.pendingPass = null;
   state.lastRelease = { id: from.id, tick: state.tick };
   blockPickup(state, [from.id]);
-}
-
-/** `fromId` (the carrier) lets the puck go with velocity (vx, vy, vz) m/s: the release behind every pass, shot and dump. */
-export function releasePuck(state: GameState, fromId: string, vx: number, vy: number, vz: number): void {
-  release(state, skaterById(state, fromId), vx, vy, vz);
 }
 
 /**

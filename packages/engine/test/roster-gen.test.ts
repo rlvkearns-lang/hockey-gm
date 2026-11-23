@@ -17,6 +17,17 @@ describe('roster-gen', () => {
         expect(Number.isInteger(p.attrs[k])).toBe(true);
       }
   });
+  it('every player has his own number; goalies wear goalie numbers', () => {
+    for (const seed of [1, 2, 7, 42]) {
+      const t = generateTeam(seed, 'T', 'TTT');
+      expect(new Set(t.players.map((p) => p.number)).size).toBe(t.players.length);
+      for (const p of t.players) {
+        expect(Number.isInteger(p.number) && p.number >= 1 && p.number <= 98).toBe(true);
+        if (p.position === 'G') expect([30, 31, 35, 1, 29, 33, 34, 39, 40, 41, 70]).toContain(p.number);
+      }
+    }
+    expect(generateTeam(1, 'A', 'AAA').players.map((p) => p.number)).not.toEqual(generateTeam(2, 'B', 'BBB').players.map((p) => p.number));
+  });
   it('types look different', () => {
     const ps = Array.from({ length: 40 }, (_, i) => generateTeam(i, 'T', 'T').players).flat();
     const mean = (type: string, k: keyof SkaterAttrs) =>

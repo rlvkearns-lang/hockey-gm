@@ -6,6 +6,7 @@ import type { ContestStateOf, GameState, PlayerDef, Position, Side, SkaterState,
 
 export type { TeamPhase } from './types';
 import { dist, hypot2, type Vec2 } from './vec';
+import { carrierOf, clamp } from './util';
 
 
 /** Named offensive-zone spots: the three the forwards cycle through, and the two points the defencemen hold. */
@@ -50,12 +51,6 @@ function phaseOf(carrierSide: Side | null, puckX: number, side: Side, dir: 1 | -
   const zone = zoneOf(puckX, dir);
   if (carrierSide === side) return zone === 'D' ? 'breakout' : zone === 'N' ? 'rush' : 'ozone';
   return zone === 'O' ? 'forecheck' : zone === 'N' ? 'neutralDefence' : 'dzone';
-}
-
-function carrierOf(state: GameState): SkaterState | null {
-  if (state.carrierId === null) return null;
-  for (const s of state.skaters) if (s.id === state.carrierId) return s;
-  return null;
 }
 
 export function phaseFor(state: GameState, side: Side): TeamPhase {
@@ -141,7 +136,6 @@ export function ozoneSpotPos(state: GameState, side: Side, spot: OzoneSpot, out:
   return out;
 }
 
-const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
 function setRel(s: SkaterState, rx: number, ly: number, dir: 1 | -1): void {
   s.target.x = rx * dir;

@@ -2,6 +2,7 @@ import type { Vec2 } from './vec';
 import { RINK, resolveBoards } from './rink';
 import { hypot2 } from './vec';
 import { dexp, hypot3 } from './dmath';
+import { GRAVITY, PUCK_RADIUS } from './util';
 
 export type Puck = { pos: Vec2; z: number; vel: Vec2; vz: number };
 
@@ -12,11 +13,9 @@ export type PuckEvent =
   | { kind: 'overNet'; end: 1 | -1 };
 
 const ICE_DECAY = 0.38; // per second, on speed, while on the ice
-const GRAVITY = 9.81;
 const BOARDS_RESTITUTION = 0.55;
 const NET_RESTITUTION = 0.3;
 const POST_RESTITUTION = 0.6;
-const PUCK_RADIUS = 0.05;
 const POST_RADIUS = 0.03;
 /** A post contact is a `post` (it rings) when the puck's speed into the post is at least this share of its speed. */
 const POST_RING = 0.25;

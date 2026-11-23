@@ -9,6 +9,7 @@ import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, SkaterState } from './types';
 import { dist, hypot2, segDistXY, type Vec2 } from './vec';
 import { dexp, dpow } from './dmath';
+import { clamp, findSkater } from './util';
 
 export type Decision =
   | { kind: 'carry'; to: Vec2 }
@@ -22,7 +23,6 @@ const T = TUNING.brain;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
 const PROTECTING = { puckHandling: 0.5, strength: 0.5 };
 
-const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 /** How much a skill rating scales an option: T.skill.base + T.skill.perPoint * rating (0.81 at 0, 1.31 at 100). */
 const skill = (rating: number): number => T.skill.base + rating * T.skill.perPoint;
 
@@ -33,11 +33,6 @@ function shotQuality(rx: number, ly: number): number {
   const d = hypot2(dx, ly);
   if (d > T.maxShotDistance) return 0;
   return dexp(-d / T.shotDistanceScale) * (dx / d);
-}
-
-function skaterById(state: GameState, id: string): SkaterState | null {
-  for (const s of state.skaters) if (s.id === id) return s;
-  return null;
 }
 
 /**
@@ -62,7 +57,7 @@ const laneValues: number[] = [];
  * be), and while one is in there he holds up at the blue line instead of carrying in.
  */
 export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, rng: Rng): Decision {
-  const s = skaterById(state, me.id);
+  const s = findSkater(state, me.id);
   if (!s) throw new Error(`no skater ${me.id}`);
   const a = me.attrs, tend = me.tendencies;
   const dir = state.attackDir[s.side];
@@ -195,7 +190,7 @@ function carryTarget(rx: number, ly: number, zone: 'D' | 'N' | 'O', aheadLat: nu
  */
 export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
   if (state.carrierId === null || state.tick % BRAIN_INTERVAL_TICKS !== 0) return;
-  const s = skaterById(state, state.carrierId);
+  const s = findSkater(state, state.carrierId);
   if (!s || !s.onIce || s.downT > 0) return;
   const busy = steeredByContest(state, s);
   const me = defs.get(s.id)!;

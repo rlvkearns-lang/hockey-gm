@@ -30,11 +30,14 @@ export type PlayerDef = {
   attrs: SkaterAttrs;
   goalie: GoalieAttrs | null;
   tendencies: Tendencies;
-  /** -1..1, default 0 */
+  /**
+   * -1..1, default 0. Not yet fully effective: it moves his contest ratings only (up to 4 rating points in hits, poke
+   * checks, battles, races and faceoffs), not his shooting, passing, skating, decisions or (for a goalie) saves.
+   */
   form: number;
-  /** -1..1, default 0 */
+  /** -1..1, default 0. Like `form`, it moves his contest ratings only (up to 4 rating points). */
   morale: number;
-  /** 0..1, default 0 */
+  /** 0..1, default 0. Not read yet: every skater starts a game with full energy (validated, kept for stage 2). */
   fatigue: number;
 };
 
@@ -285,8 +288,8 @@ export type GameState = {
    * (waved off). `y` is where the puck went in, for the faceoff dot.
    */
   delayedOffside: { side: Side; y: number } | null;
-  /** A puck released by `side` from its own half at (fromX, fromY) on `tick`, untouched since: icing if it crosses the far goal line. */
-  icingWatch: { side: Side; fromX: number; fromY: number; tick: number } | null;
+  /** A puck released by `side` from its own half at y = fromY, untouched since: icing if it crosses the far goal line. */
+  icingWatch: { side: Side; fromY: number } | null;
   /** Each team's line rotation (see bench.ts). */
   bench: Record<Side, BenchState>;
   /** The game's seed (GameSetup.seed). */

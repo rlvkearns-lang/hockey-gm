@@ -1,14 +1,14 @@
 import { blockPickup, recordTouch } from '../actions';
 import { stopPlay } from '../faceoff';
-import { DT } from '../constants';
 import { boardsNormal, distToBoards, FACEOFF_DOTS, resolveBoards, RINK } from '../rink';
 import { movementOf } from '../skating';
 import { TUNING } from '../tuning';
 import { heldSeconds, watchTurnover } from '../turnovers';
+import { PUCK_RADIUS } from '../util';
 import type { ContestStateOf, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
-  carrierNow, carrierOf, contestEvent, contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
+  carrierNow, contestEvent, contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx, type ContestResult, type Weights,
 } from './core';
 import type { ContestOutcome } from '../types';
@@ -181,7 +181,7 @@ function intoFeet(c: Battle, ctx: ContestCtx): void {
   c.spot.y = p.pos.y + p.vel.y * SLIDE_LEAD;
   scratchVel.x = 0;
   scratchVel.y = 0;
-  resolveBoards(c.spot, scratchVel, 0.05, 0);
+  resolveBoards(c.spot, scratchVel, PUCK_RADIUS, 0);
   p.vel.x = 0;
   p.vel.y = 0;
   c.data.holdsPuck = true;

@@ -8,12 +8,12 @@ import { FACEOFF_DOTS, RINK, resolveBoards } from './rink';
 import type { Rng } from './rng';
 import { wrapAngle } from './skating';
 import { TUNING } from './tuning';
-import type { GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, Side, SkaterState } from './types';
+import type { GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, Side } from './types';
 import { dist, hypot2, segDistXY, type Vec2 } from './vec';
 import { datan2, dcos, dexp, dsin, dtanh } from './dmath';
+import { clamp, findSkater, other, PUCK_RADIUS, SIDES } from './util';
 
 const GOAL = RINK.goalLineX;
-const SIDES = ['home', 'away'] as const;
 
 const G = TUNING.goalie;
 const BLOCK = TUNING.block;
@@ -35,10 +35,7 @@ const PAD_OFFSET = 0.35;
 const MISS_SPEED = 3;
 const SHOT_MAX_SECONDS = 3;
 
-const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
-const other = (s: Side): Side => (s === 'home' ? 'away' : 'home');
 const logistic = (x: number): number => 1 / (1 + dexp(-x));
-const wrap = wrapAngle;
 
 function goalieAttrs(defs: Map<string, PlayerDef>, id: string): GoalieAttrs {
   const a = defs.get(id)?.goalie;
@@ -49,11 +46,6 @@ function goalieAttrs(defs: Map<string, PlayerDef>, id: string): GoalieAttrs {
 
 /** The side whose net is at `end` (+1 or -1 along x). */
 const defenderOf = (state: GameState, end: 1 | -1): Side => (state.attackDir.home === end ? 'away' : 'home');
-
-function skaterById(state: GameState, id: string): SkaterState | null {
-  for (const s of state.skaters) if (s.id === id) return s;
-  return null;
-}
 
 export type SaveInput = {
   goalie: GoalieAttrs;
@@ -126,9 +118,9 @@ function moveGoalie(g: GoalieState, a: GoalieAttrs, p: Vec2, end: 1 | -1, dt: nu
   g.pos.x += dx * k;
   g.pos.y += dy * k;
   const want = datan2(p.y - g.pos.y, p.x - g.pos.x);
-  const turn = wrap(want - g.facing);
+  const turn = wrapAngle(want - g.facing);
   const maxTurn = (G.squareRate.base + a.positioning * G.squareRate.perPoint) * dt;
-  g.facing = wrap(g.facing + clamp(turn, -maxTurn, maxTurn));
+  g.facing = wrapAngle(g.facing + clamp(turn, -maxTurn, maxTurn));
 }
 
 /** The end-zone faceoff dot on `end` nearest to `p`. */
@@ -168,7 +160,7 @@ function tryCover(state: GameState, side: Side, g: GoalieState, end: 1 | -1, out
  * release point instead. Showing a save slows him; the pose returns to `stance` when poseT runs out. While play is live and nobody has the puck, a goalie covers a slow loose
  * puck in his crease when an opponent is near it (emits `freeze` into `out`, play stops for an end-zone faceoff).
  */
-export function goalieTick(state: GameState, defs: Map<string, PlayerDef>, _rng: Rng, dt: number, out: GameEvent[] = []): void {
+export function goalieTick(state: GameState, defs: Map<string, PlayerDef>, dt: number, out: GameEvent[] = []): void {
   for (const side of SIDES) {
     const g = state.goalies[side];
     const end = (-state.attackDir[side]) as 1 | -1;
@@ -193,7 +185,7 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   const shot = state.shotInFlight;
   const pk = state.puck;
   if (shot === null || pk.z >= BLOCK.maxZ) return false;
-  const shooter = skaterById(state, shot.shooterId);
+  const shooter = findSkater(state, shot.shooterId);
   const ax = pk.pos.x, ay = pk.pos.y, bx = ax + pk.vel.x * DT, by = ay + pk.vel.y * DT;
   for (const s of state.skaters) {
     if (!s.onIce || s.leaving || s.side === shot.side || s.downT > 0 || shot.blockTried.includes(s.id)) continue;
@@ -309,7 +301,7 @@ export function resolveOnNet(
   const lx = netX - fx, ly = ev.y - fy;
   const ll = hypot2(lx, ly) || 1;
   const offLine = Math.abs((g.pos.x - fx) * ly - (g.pos.y - fy) * lx) / ll;
-  const squareErr = Math.abs(wrap(datan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
+  const squareErr = Math.abs(wrapAngle(datan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
   const p = saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
     screened: state.screenedUntilTick[defSide] > state.tick, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
@@ -334,7 +326,7 @@ export function resolveOnNet(
     }
     // Rebound: off the reflected line of the shot, turned by the pose and spread by poor rebound control.
     const out0 = end === 1 ? Math.PI : 0;
-    let rel = wrap(datan2(ly / ll, (-lx / ll)) - out0);
+    let rel = wrapAngle(datan2(ly / ll, (-lx / ll)) - out0);
     if (pose === 'blocker') rel -= G.blockerTurn;
     else if (pose === 'pad') rel += (ev.y - g.pos.y) * -end >= 0 ? G.padTurn : -G.padTurn;
     rel = clamp(rel + rng.gauss() * (G.reboundSpread.base + G.reboundSpread.perPoint * (100 - rc)), -G.reboundMaxAngle, G.reboundMaxAngle);
@@ -347,7 +339,7 @@ export function resolveOnNet(
     pk.vel.y = dsin(angle) * speed;
     pk.z = 0;
     pk.vz = 0;
-    resolveBoards(pk.pos, pk.vel, 0.05, 0);
+    resolveBoards(pk.pos, pk.vel, PUCK_RADIUS, 0);
     state.carrierId = null;
     state.lastTouch = { id: g.id, side: defSide };
     state.icingWatch = null; // the goalie played it

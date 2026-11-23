@@ -22,6 +22,7 @@ import type {
 import { validateSetup } from './validate';
 import { dist, hypot2, segDistXY } from './vec';
 import { dcos, dsin } from './dmath';
+import { PUCK_RADIUS, SIDES } from './util';
 
 export type Game = {
   readonly state: GameState;
@@ -32,14 +33,12 @@ export type Game = {
   result(): GameResult;
 };
 
-const SIDES = ['home', 'away'] as const;
 const PERIOD_TICKS = Math.round(PERIOD_SECONDS / DT);
 const STOPPED_SECONDS = 1.5;
 const PICKUP_RADIUS = 0.9;
 const PICKUP_MAX_SPEED = 12;
 /** How far ahead of the carrier's centre, along his facing, the puck sits. */
 const CARRY_REACH = 0.6;
-const PUCK_RADIUS = 0.05;
 const EPS = 1e-9;
 /** Scratch velocity for clamping the carried puck (its velocity is the carrier's, not bounced). */
 const noVel = { x: 0, y: 0 };
@@ -272,14 +271,14 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     const prevPuckX = state.puck.pos.x;
     if (state.pickupBlock !== null && state.tick >= state.pickupBlock.untilTick) state.pickupBlock = null;
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
-    benchTick(state, setup, rng, DT, events);
+    benchTick(state, setup, DT, events);
     assignJobs(state, defs, tactics);
     brainTick(state, defs, rng, events);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
 
     const skaters = onIceSkaters();
     moveSkaters(skaters);
-    goalieTick(state, defs, rng, DT, events);
+    goalieTick(state, defs, DT, events);
 
     if (state.phase === 'live') {
       let carrier: SkaterState | null = null;
@@ -371,15 +370,15 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
         liveTick();
         break;
       case 'stopped':
-        benchTick(state, setup, rng, DT, events);
+        benchTick(state, setup, DT, events);
         moveSkaters(onIceSkaters());
-        goalieTick(state, defs, rng, DT, events);
+        goalieTick(state, defs, DT, events);
         if (state.phaseT >= STOPPED_SECONDS - EPS) setupFaceoff(state, state.faceoffSpot);
         break;
       case 'faceoffSetup':
-        benchTick(state, setup, rng, DT, events);
+        benchTick(state, setup, DT, events);
         moveSkaters(onIceSkaters());
-        goalieTick(state, defs, rng, DT, events);
+        goalieTick(state, defs, DT, events);
         if (state.phaseT >= FACEOFF_MIN_SECONDS - EPS && (state.phaseT >= FACEOFF_MAX_SECONDS - EPS || linedUp(state))) {
           finishChanges(state, setup); // at the 8 s cap a change may still be under way
           const e = dropPuck(state, defs, rng);

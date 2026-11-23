@@ -4,7 +4,7 @@ import { TUNING } from '../tuning';
 import type { ContestStateOf, GameState, PlayerDef, SkaterState } from '../types';
 import { hypot2 } from '../vec';
 import {
-  applyResult, carrierNow, carrierOf, contestChemistry, contestEvent, dropParticipant, effective, enterStage, isFree, onCooldown, setCooldown, skaterById,
+  applyResult, carrierNow, contestChemistry, contestEvent, dropParticipant, effective, enterStage, isFree, onCooldown, setCooldown, skaterById,
   STAGE_EPS, winProb, type Contest, type ContestCtx,
 } from './core';
 

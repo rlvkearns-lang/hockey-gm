@@ -2,13 +2,13 @@ import { PERIOD_SECONDS } from './constants';
 import { gameEvent } from './events';
 import { faceoffPosition } from './faceoff';
 import { zoneOf } from './rink';
-import type { Rng } from './rng';
 import { movementOf } from './skating';
 import { phaseFor } from './team-play';
 import { TUNING } from './tuning';
 import type { BenchState, BenchUnit, GameEvent, GameSetup, GameState, Position, Side, SkaterState } from './types';
 import { hypot2, type Vec2 } from './vec';
 import { dexp, dlog } from './dmath';
+import { SIDES, skaterById } from './util';
 
 export type Unit = 'forwards' | 'defence';
 
@@ -22,7 +22,6 @@ const DOOR_CLEAR = 0.9;
 const SHARES: Record<Unit, readonly number[]> = { forwards: [0.36, 0.3, 0.21, 0.13], defence: [0.41, 0.34, 0.25] };
 const SLOTS: Record<Unit, readonly Position[]> = { forwards: ['LW', 'C', 'RW'], defence: ['LD', 'RD'] };
 const UNITS: readonly Unit[] = ['forwards', 'defence'];
-const SIDES = ['home', 'away'] as const;
 
 /** Energy drain and recovery (see TUNING.fatigue). With the defaults a 45 s shift flat out takes a stamina-50 player from 1.0 to 0.55. */
 const F = TUNING.fatigue;
@@ -105,7 +104,7 @@ const headCount = [0, 0, 0, 0];
  *   takes no further part in play. Within 1.5 m of the door he comes off, so the player nearest the bench goes first,
  *   and his replacement steps on there in his slot as soon as nobody else is in the doorway (one per tick).
  */
-export function benchTick(state: GameState, setup: GameSetup, _rng: Rng, dt: number, out: GameEvent[] = []): void {
+export function benchTick(state: GameState, setup: GameSetup, dt: number, out: GameEvent[] = []): void {
   const skaters = state.skaters;
   const info = infoFor(setup, skaters);
   const live = state.phase === 'live';
@@ -216,7 +215,7 @@ function continueChange(state: GameState, setup: GameSetup, side: Side, unit: Un
     }
   }
   for (let i = 0; i < incoming.length; i++) {
-    const on = byId(state, incoming[i]!);
+    const on = skaterById(state, incoming[i]!);
     if (on.onIce) continue;
     const slot = SLOTS[unit][i]!;
     if (slotTaken(state, side, slot) || (!force && !doorClear(state, door))) { busy = true; continue; }
@@ -234,11 +233,6 @@ function slotTaken(state: GameState, side: Side, slot: Position): boolean {
 function doorClear(state: GameState, door: Vec2): boolean {
   for (const s of state.skaters) if (s.onIce && hypot2(s.pos.x - door.x, s.pos.y - door.y) < DOOR_CLEAR) return false;
   return true;
-}
-
-function byId(state: GameState, id: string): SkaterState {
-  for (const s of state.skaters) if (s.id === id) return s;
-  throw new Error(`no skater ${id}`);
 }
 
 /** `off` leaves the ice at the door and waits there, on the bench. */

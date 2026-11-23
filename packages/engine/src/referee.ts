@@ -4,24 +4,16 @@ import { FACEOFF_DOTS, RINK } from './rink';
 import { bodyRadius, movementOf } from './skating';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
 import type { Vec2 } from './vec';
+import { findSkater, PUCK_RADIUS, SIDES } from './util';
 
-const SIDES = ['home', 'away'] as const;
 const BLUE = RINK.blueLineX;
 const GOAL = RINK.goalLineX;
-/** The puck has fully crossed a line once its centre is this far (its radius, m) past it. */
-const PUCK_RADIUS = 0.05;
 /** Attack-relative x of the end-zone faceoff dots: the line the hybrid-icing race is to. */
 const DOT_LINE = Math.abs(FACEOFF_DOTS.end[0]!.x);
 /** A typical skater (every attribute 70, 85 kg), used when refereeTick is given no player definitions. */
 const TYPICAL = { radius: 0.38, topSpeed: 8.74, accel: 9.2 };
 
 type Racer = { topSpeed: number; accel: number };
-
-function skaterById(state: GameState, id: string | null): SkaterState | null {
-  if (id === null) return null;
-  for (const s of state.skaters) if (s.id === id) return s;
-  return null;
-}
 
 /** The dot of `dots` on the `end` side of centre (+1 or -1 along x) nearest to `y` across the ice. */
 function dotNear(dots: Vec2[], end: 1 | -1, y: number): Vec2 {
@@ -69,7 +61,7 @@ function timeToLine(s: SkaterState, line: number, dir: 1 | -1, m: Racer): number
 export function refereeTick(state: GameState, prevPuckX: number, defs?: Map<string, PlayerDef>): GameEvent | null {
   if (state.phase !== 'live') return null;
   const puck = state.puck.pos;
-  const carrier = skaterById(state, state.carrierId);
+  const carrier = findSkater(state, state.carrierId);
   const playedBy: Side | null = carrier ? carrier.side : state.lastTouch?.side ?? null;
 
   for (const side of SIDES) {

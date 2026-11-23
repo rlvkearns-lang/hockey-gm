@@ -10,7 +10,7 @@ import { RINK, resolveBoards } from '../src/rink';
 import { createRng, type Rng } from '../src/rng';
 import { OZONE_SPOTS, ozoneSpotPos, supportTarget } from '../src/team-play';
 import { canReceivePass, decideCarrier, type Decision } from '../src/brain';
-import { executeDump, executePass, recordTouch, releasePuck, tryIntercept } from '../src/actions';
+import { blockPickup, executeDump, executePass, recordTouch, tryIntercept } from '../src/actions';
 import { resolveBodies } from '../src/bodies';
 import { contestTick, startContest } from '../src/contests/core';
 import { hitContest } from '../src/contests/hit';
@@ -26,6 +26,25 @@ import { refereeTick } from '../src/referee';
 import type { Movement } from '../src/skating';
 import { availableParallelism } from 'node:os';
 import { MessageChannel, receiveMessageOnPort, Worker, type MessagePort } from 'node:worker_threads';
+
+/**
+ * Test scaffolding: skater `fromId` (the carrier) lets the puck go at (vx, vy, vz) m/s, with the same effects on the
+ * state as the engine's own release (actions.ts): his touch, an icing watch from his own half, nobody carrying, his
+ * team in possession, his release recorded, and a moment before he may take it back. No events.
+ */
+export function letGo(state: GameState, fromId: string, vx: number, vy: number, vz: number): void {
+  const from = state.skaters.find((s) => s.id === fromId)!;
+  const p = state.puck;
+  recordTouch(state, from.id, from.side);
+  state.icingWatch = p.pos.x * state.attackDir[from.side] < 0 ? { side: from.side, fromY: p.pos.y } : null;
+  p.vel = { x: vx, y: vy }; p.z = 0; p.vz = vz;
+  state.carrierId = null;
+  state.lastTouch = { id: from.id, side: from.side };
+  state.possession = from.side;
+  state.pendingPass = null;
+  state.lastRelease = { id: from.id, tick: state.tick };
+  blockPickup(state, [from.id]);
+}
 
 export const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 
@@ -453,7 +472,7 @@ export function shotFrom(x: number, o: { onNet?: boolean } = {}): GameState {
   const p = st.puck.pos;
   const tx = RINK.goalLineX, ty = o.onNet ? 0 : 6;
   const l = Math.hypot(tx - p.x, ty - p.y);
-  releasePuck(st, st.carrierId!, ((tx - p.x) / l) * 25, ((ty - p.y) / l) * 25, 0);
+  letGo(st, st.carrierId!, ((tx - p.x) / l) * 25, ((ty - p.y) / l) * 25, 0);
   return st;
 }
 
@@ -652,7 +671,7 @@ export function stepsUntilDone(c: ContestState): number {
 export function pokeReleased(): { contests: number; takeaways: number; contestIds: number } {
   const c = startPoke(), h = contestDuel.get(c)!;
   for (let i = 0; i < 3; i++) duelStep(h);
-  releasePuck(h.st, 'home-C', -15, 0, 0);
+  letGo(h.st, 'home-C', -15, 0, 0);
   for (let i = 0; i < 30; i++) duelStep(h);
   return {
     contests: h.st.contests.length,
@@ -1250,7 +1269,7 @@ export function netFrontEnded(seconds: number): { leader: string | null; battles
   const { h, c } = netFrontStart();
   for (let i = 0; i < Math.round(seconds / DT) && h.st.contests.includes(c); i++) harnessStep(h);
   const leader = c.leader;
-  releasePuck(h.st, h.st.carrierId!, 0, -5, 0);
+  letGo(h.st, h.st.carrierId!, 0, -5, 0);
   h.st.pendingPass = null;
   for (let i = 0; i < 3 && h.st.contests.includes(c); i++) harnessStep(h);
   return { leader, battles: h.events.filter((e) => e.type === 'battle') };
