@@ -148,7 +148,7 @@ export const TUNING = {
     carrierEdge: 12,
     /** A won poke check gives the checker the puck this often; otherwise it is knocked loose. */
     takeShare: 0.5,
-    /** A failed poke leaves the checker beaten (a step behind) when its roll is in this bottom share. */
+    /** A failed poke leaves the checker beaten (a step behind) with this chance at an even contest, scaled by 2 * (1 - his win chance). */
     beatenChance: 0.15,
     /** A knocked-loose puck leaves at this speed range (m/s), away from the checker, plus half the carrier's velocity. */
     looseSpeed: [3, 6] as [number, number],
@@ -169,8 +169,8 @@ export const TUNING = {
     decideSeconds: 2,
     /** Target speed (m/s) assumed for his side of the momentum term, and the term's scale in rating points. */
     braceSpeed: 2,
-    momentumScale: 12,
-    /** A failed hit bounces the hitter off (down for a moment) when its roll is in this bottom share. */
+    momentumScale: 30,
+    /** A failed hit bounces the hitter off (down for a moment) with this chance at an even contest, scaled by 2 * (1 - his chance of landing it). */
     bounceChance: 0.1,
     hitter: { bodyChecking: 0.5, strength: 0.3, balance: 0.2 } as SkaterWeights,
     brace: { balance: 0.45, strength: 0.35, poise: 0.2 } as SkaterWeights,
@@ -197,6 +197,10 @@ export const TUNING = {
     /** Afterwards nobody in it starts another board battle for this long (s), and the loser does not poke at once. */
     cooldownSeconds: 1.5,
     loserPokeCooldown: 1,
+    /** A carrier pulled into a battle shields the puck: his rating (protect) against the other man's (strip), plus this edge. */
+    protectEdge: -3,
+    protect: { strength: 0.35, puckHandling: 0.35, balance: 0.3 } as SkaterWeights,
+    strip: { stickChecking: 0.4, strength: 0.35, compete: 0.25 } as SkaterWeights,
     pin: { strength: 0.45, balance: 0.3, compete: 0.25 } as SkaterWeights,
     dig: { stickChecking: 0.35, puckHandling: 0.3, compete: 0.2, agility: 0.15 } as SkaterWeights,
   },
@@ -230,6 +234,9 @@ export const TUNING = {
     cooldownSeconds: 0.8,
     race: { compete: 0.4, agility: 0.3, balance: 0.3 } as SkaterWeights,
   },
+
+  /** Scoring (goalie.ts): a teammate's touch earns an assist only if he had the puck within this long (s) of the goal. */
+  scoring: { assistWindowSeconds: 10 },
 
   /** Fatigue and line changes (bench.ts). */
   fatigue: {

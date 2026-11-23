@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { simulateGame } from '../../src/game';
-import { hitAttemptChance, hitChance } from '../../src/contests/hit';
-import { def, hitsPer60, hitThatLands, runHit, setup, share, st as skaterState, target, targetsDuringHitClose } from '../helpers';
+import { bounceChance, hitAttemptChance, hitChance } from '../../src/contests/hit';
+import { def, hitOutcomes, hitsPer60, hitThatLands, runHit, setup, share, st as skaterState, target, targetsDuringHitClose } from '../helpers';
 
 /** Whole-game tests take about 1 s; this leaves room for a loaded machine. */
 const GAME_TIMEOUT = 20_000;
@@ -11,10 +11,23 @@ describe('hits', () => {
     const big = share(2000, () => runHit(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), def({ balance: 62, strength: 60, weightKg: 80 }), 6));
     const small = share(2000, () => runHit(def({ bodyChecking: 60, strength: 58, weightKg: 78 }), def({ balance: 88, strength: 90, weightKg: 104 }), 6));
     expect(big).toBeGreaterThan(small + 0.2); expect(small).toBeGreaterThanOrEqual(0.1);
-    // true rate is the 0.9 parity cap; 0.92 allows sampling noise over 2,000 trials
+    // true rate is about 0.83 (below the 0.9 parity cap); 0.92 allows sampling noise over 2,000 trials
     expect(big).toBeLessThanOrEqual(0.92);
-    // The rule itself, without noise: the chance the hit code computes for this matchup is exactly the cap, never above.
-    expect(hitChance(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), skaterState({}), def({ balance: 62, strength: 60, weightKg: 80 }), skaterState({}), 6)).toBe(0.9);
+    // The rule itself, without noise. Task 12 rescaled the momentum term (scale 12 -> 30, owner steer): this strong
+    // matchup at 6 m/s is about 0.83, no longer the 0.9 cap; only an extreme one at high speed nears the cap.
+    expect(hitChance(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), skaterState({}), def({ balance: 62, strength: 60, weightKg: 80 }), skaterState({}), 6)).toBeCloseTo(0.8341, 4);
+  });
+  it('an ordinary mismatch at ordinary speed is a clear edge, an extreme one at speed nears the cap', () => {
+    const ordinary = hitChance(def({ weightKg: 95, bodyChecking: 75 }), skaterState({}), def({ weightKg: 85 }), skaterState({}), 5);
+    expect(ordinary).toBeGreaterThan(0.6); expect(ordinary).toBeLessThan(0.8);
+    const extreme = hitChance(def({ weightKg: 104, bodyChecking: 85, strength: 85 }), skaterState({}), def({ weightKg: 75, balance: 60, strength: 60 }), skaterState({}), 9);
+    expect(extreme).toBeGreaterThan(0.85); expect(extreme).toBeLessThanOrEqual(0.9);
+  });
+  it('a failed hit does not always bounce the hitter off, even when he was the big favourite', () => {
+    const o = hitOutcomes(def({ weightKg: 104, bodyChecking: 95, strength: 95 }), def({ weightKg: 75, balance: 50, strength: 50 }), 8, 1500);
+    expect(o.absorbed! + o.bounced!).toBeGreaterThan(50);
+    expect(o.bounced! / (o.absorbed! + o.bounced!)).toBeLessThan(0.3);
+    expect(bounceChance(0.9)).toBeGreaterThanOrEqual(0.03); expect(bounceChance(0.1)).toBeLessThanOrEqual(0.97);
   });
   it('a landed hit puts the target down and frees the puck', () => { const st = hitThatLands(); expect(target(st).downT).toBeGreaterThan(0.5); expect(st.carrierId).toBeNull(); });
   it('the target keeps playing while the hitter closes: team play still moves his target', () => {

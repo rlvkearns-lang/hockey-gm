@@ -169,9 +169,10 @@ export type GameState = {
   reboundEdge: { id: string; untilTick: number } | null;
   /**
    * Skaters who had the puck since the last change of team or stoppage, oldest first, by `side`: the scorer's
-   * assists come from here. Pickups, releases, faceoff wins and blocks count; a goalie's save does not.
+   * assists come from here. Pickups, releases, faceoff wins and blocks count; a goalie's save does not. `ticks[i]` is
+   * the last tick `ids[i]` had the puck.
    */
-  touches: { side: Side | null; ids: string[] };
+  touches: { side: Side | null; ids: string[]; ticks: number[] };
   /** The last skater of each side to touch the puck since the last stoppage (credited with a goal the defenders put in). */
   lastAttackTouch: Record<Side, string | null>;
   /** The side that iced the puck: it may not change lines before the next faceoff drop (set by an icing, cleared by dropPuck). */

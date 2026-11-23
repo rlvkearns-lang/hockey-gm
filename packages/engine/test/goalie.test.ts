@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { saveChance } from '../src/goalie';
 import { simulateGame } from '../src/game';
 import type { GameResult } from '../src/types';
-import { blockAttempt, count, def, g, setup, share, simulateUntilFirstGoal, sum } from './helpers';
+import { assistsWhenTouched, blockAttempt, count, def, g, setup, share, simulateUntilFirstGoal, sum } from './helpers';
 
 /** Whole-game tests take about 1 s; this leaves room for a loaded machine. */
 const GAME_TIMEOUT = 20_000;
@@ -20,6 +20,10 @@ describe('goalies, saves, goals', () => {
     expect(goal.playerId).not.toBeNull(); expect(goal.assistIds.length).toBeLessThanOrEqual(2); expect(goal.assistIds).not.toContain(goal.playerId);
     expect(sum(r.players.map(p => p.plusMinus))).toBe(0); expect(r.players.find(p => p.id === goal.playerId)!.goals).toBe(1);
   }, GAME_TIMEOUT);
+  it('only touches within about 10 s of the goal earn an assist', () => {
+    expect(assistsWhenTouched(4)).toEqual(['home-LW']);
+    expect(assistsWhenTouched(12)).toEqual([]);
+  });
   it('shot blockers block more', () => { expect(share(3000, () => blockAttempt(def({ shotBlocking: 92 })))).toBeGreaterThan(share(3000, () => blockAttempt(def({ shotBlocking: 40 }))) + 0.15); });
   it('shots, saves and goals reconcile', () => { const r = simulateGame(setup(4)); expect(r.team.home.shots).toBe(count(r, 'save', 'away') + r.score.home); }, GAME_TIMEOUT);
   describe('every goal and shot is credited (seeds 1 to 8)', () => {

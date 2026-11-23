@@ -276,7 +276,8 @@ function onIceIds(state: GameState): { home: string[]; away: string[] } {
  * - Save: `save` (side and playerId the goalie's), a pose from where it crossed, then he holds it (`freeze`, play
  *   stops for the end-zone dot nearest the puck) or it rebounds loose in front of him, slower and straighter the
  *   better his reboundControl.
- * - Goal: `goal` for the shooter, with up to two previous distinct teammates in the touch chain as assists and the
+ * - Goal: `goal` for the shooter, with up to two previous distinct teammates in the touch chain as assists (only
+ *   touches within TUNING.scoring.assistWindowSeconds of the goal count) and the
  *   skaters on the ice (`onIce`); the score goes up and play stops for a centre-ice faceoff.
  * Events go into `out`.
  */
@@ -347,8 +348,10 @@ export function resolveOnNet(
   // Goal.
   const assists: string[] = [];
   if (t.side === attSide) {
+    const since = state.tick - Math.round(TUNING.scoring.assistWindowSeconds / DT);
     for (let i = t.ids.length - 1; i >= 0 && assists.length < 2; i--) {
       const id = t.ids[i]!;
+      if (t.ticks[i]! < since) break; // older touches are too long ago to have set up the goal
       if (id !== shooterId && !assists.includes(id)) assists.push(id);
     }
   }

@@ -81,14 +81,14 @@ function initialState(setup: GameSetup): GameState {
     carrierId: null, lastTouch: null, possession: null, skaters,
     goalies: { home: goalieAt(setup.home.lines.goalie, dir), away: goalieAt(setup.away.lines.goalie, dir === 1 ? -1 : 1) },
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
-    shotInFlight: null, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [] },
+    shotInFlight: null, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
     lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null,
     bench: initialBench(setup),
   };
 }
 
-/** Teams take their ends for `period` and skate to their line-up for the centre-ice draw. */
+/** Teams take their ends for `period`, every skater fully rested, and skate to their line-up for the centre-ice draw. */
 function startPeriod(state: GameState, period: number): void {
   const dir = homeDirFor(period);
   state.period = period;
@@ -99,6 +99,7 @@ function startPeriod(state: GameState, period: number): void {
   state.lastTouch = null;
   state.pickupBlock = null;
   state.pendingPass = null;
+  for (const s of state.skaters) s.energy = 1; // rested over the intermission
   restPuck(state);
   setupFaceoff(state, FACEOFF_DOTS.centre);
 }

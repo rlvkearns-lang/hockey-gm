@@ -14,4 +14,7 @@ describe('player brain', () => {
     expect(rate('pass', dumper, stateWith({ carrier: 'home', puckX: -2 })) + rate('carry', dumper, stateWith({ carrier: 'home', puckX: -2 }))).toBeGreaterThan(own * 3);
   });
   it('better passers put the puck closer to the target', () => { expect(meanMiss(def({ passing: 95 }))).toBeLessThan(meanMiss(def({ passing: 45 })) * 0.7); });
+  it('vision changes which lane he picks, not how often he passes', () => {
+    expect(rate('pass', def({ vision: 95 }), slotState)).toBe(rate('pass', def({ vision: 20 }), slotState));
+  });
 });

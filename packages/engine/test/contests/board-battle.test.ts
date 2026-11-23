@@ -3,7 +3,7 @@ import { simulateGame } from '../../src/game';
 import { FACEOFF_DOTS } from '../../src/rink';
 import {
   battleWithThirdMan, count, def, even, heldPuckInGame, runBattle, runBattleLogged, runBattleWon, setup, share, shareOf, stagesOf, totalSeconds,
-  trappedBattle,
+  trappedBattle, shieldAlongBoards, puckIntoFeet,
 } from '../helpers';
 
 /** Whole-game tests take about 1.5 s; this leaves room for a loaded machine. */
@@ -29,6 +29,19 @@ describe('board battles', () => {
     const clean = shareOf(r, (x) => x.puckTo !== 'loose');
     expect(clean).toBeGreaterThan(0.5); expect(clean).toBeLessThan(0.7);
     expect(r.filter((x) => x.winner === 'a' && x.puckTo !== 'loose').every((x) => x.puckTo === 'support')).toBe(true);
+  });
+  it('a carrier along the boards can shield the puck and skate out of it, the stronger one more often', () => {
+    const strong = def({ strength: 90, puckHandling: 88, balance: 85, weightKg: 100 });
+    const weak = def({ strength: 50, puckHandling: 55, balance: 55, weightKg: 78 });
+    const s = Array.from({ length: 600 }, () => shieldAlongBoards(strong, even)), w = Array.from({ length: 600 }, () => shieldAlongBoards(weak, even));
+    const kept = (r: string[]) => shareOf(r, (x) => x === 'kept');
+    expect(kept(s)).toBeGreaterThan(kept(w) + 0.15); expect(kept(s)).toBeLessThan(0.95); expect(kept(w)).toBeGreaterThan(0.05);
+    expect(shareOf(w, (x) => x === 'lost')).toBeGreaterThan(0.3);
+  });
+  it('a moving puck slides into their feet over a few ticks rather than stopping dead', () => {
+    const r = puckIntoFeet();
+    expect(r.steps[0]).toBeGreaterThan(0.02); expect(r.steps[1]).toBeGreaterThan(0.02);
+    expect(r.steps.slice(8).every((x) => x < 1e-9)).toBe(true); expect(r.offSpot).toBeLessThan(1e-9);
   });
   it('a full game has plenty of battles', () => { const r = simulateGame(setup(3)); expect(count(r, 'battle')).toBeGreaterThan(40); expect(count(r, 'battle')).toBeLessThan(220); }, GAME_TIMEOUT);
 

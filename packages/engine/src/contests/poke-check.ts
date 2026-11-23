@@ -97,12 +97,21 @@ export const pokeCheckContest: Contest = {
   },
 };
 
-/** The poke itself: one roll against winProb of the checker's edge. Returns the `data.outcome` code. */
+/**
+ * The poke itself: one roll against winProb of the checker's edge. A failed poke then leaves him beaten with its own
+ * chance, T.beatenChance at an even contest, more when he was the underdog, less when he was favoured (never certain
+ * either way). Returns the `data.outcome` code.
+ */
 function roll(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): number {
   const edge = contestRating(ctx, c, checker.id, T.stick) - contestRating(ctx, c, carrier.id, T.hands) - T.carrierEdge;
-  const u = ctx.rng.next();
-  if (u >= 1 - winProb(edge)) return ctx.rng.chance(T.takeShare) ? OUTCOME.take : OUTCOME.loose;
-  return u < T.beatenChance ? OUTCOME.beaten : OUTCOME.kept;
+  const p = winProb(edge);
+  if (ctx.rng.next() < p) return ctx.rng.chance(T.takeShare) ? OUTCOME.take : OUTCOME.loose;
+  return ctx.rng.chance(beatenChance(p)) ? OUTCOME.beaten : OUTCOME.kept;
+}
+
+/** Chance that a failed poke leaves the checker beaten, from his chance `p` of winning it: within [0.03, 0.97]. */
+export function beatenChance(p: number): number {
+  return Math.max(0.03, Math.min(0.97, T.beatenChance * 2 * (1 - p)));
 }
 
 function finish(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): ContestResult | null {

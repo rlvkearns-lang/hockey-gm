@@ -1,6 +1,7 @@
 import { blockPickup, recordTouch } from '../actions';
 import { stopPlay } from '../faceoff';
-import { boardsNormal, distToBoards, FACEOFF_DOTS, RINK } from '../rink';
+import { DT } from '../constants';
+import { boardsNormal, distToBoards, FACEOFF_DOTS, resolveBoards, RINK } from '../rink';
 import { movementOf } from '../skating';
 import { TUNING } from '../tuning';
 import type { ContestState, GameState, SkaterState } from '../types';
@@ -12,6 +13,12 @@ import {
 
 const KIND = 'boardBattle';
 const T = TUNING.boardBattle;
+/** `protect` (a carried puck) lasts this long (s); an opponent farther than PROTECT_REACH (m) from the carrier at its end has lost him. */
+const PROTECT_SECONDS = 0.5;
+const PROTECT_REACH = 3;
+/** A puck knocked into their feet slides on to the spot (where it would be in SLIDE_LEAD s) over SLIDE_TICKS ticks. */
+const SLIDE_LEAD = 0.12;
+const SLIDE_TICKS = 6;
 /** `arrive` lasts ARRIVE_SECONDS[0] to [1]; a man this close (m) to the spot has arrived. */
 const ARRIVE_SECONDS: [number, number] = [0.3, 0.8];
 const ARRIVE_REACH = 0.8;
@@ -39,8 +46,11 @@ const NONE = -1;
 
 /** `ContestState.data` of a board battle (participant indexes, or NONE). */
 type BattleData = {
-  /** 1: the puck stays still at `spot`, nobody may pick it up. */
+  /** 1: the puck is in their feet at `spot` (sliding there for `slide` more ticks), nobody may pick it up. */
   holdsPuck: number;
+  slide: number;
+  /** The carrier's participant index while he shields a carried puck (`protect`), else NONE. */
+  carrier: number;
   /** The first man in (+6), and 1 once that is settled. */
   first: number;
   firstSet: number;
@@ -63,7 +73,12 @@ type BattleData = {
 const dataOf = (c: ContestState): BattleData => c.data as BattleData;
 
 /**
- * Board battle (trigger above). Participants: the two men (index 0 and 1), then any supporting players. Stages:
+ * Board battle: the puck this close (T.triggerBoards m) to the boards, slower than T.triggerSpeed m/s, on the ice and
+ * not a shot, with a skater of each team within T.triggerRange m of it. A carried puck counts (the carrier is then one
+ * of the two). Participants: the two men (index 0 and 1), then any supporting players. Stages:
+ * - `protect` (a carried puck only, PROTECT_SECONDS): the carrier shields it and keeps skating while the other man
+ *   leans on him; then he either keeps it and skates out (a `battle` event, detail `protect`; the contest ends) or it
+ *   is knocked into their feet and the battle goes on (see protect()).
  * - `arrive` (0.3 to 0.8 s): both go to the puck; the first within reach (`data.first`) has +6 for the rest of it.
  *   `leader`: the first man, else the closer.
  * - `pin` (0.8 to 1.6 s): a shoving draw every 0.2 s (strength .45, balance .3, compete .25, plus mass difference / 4);
@@ -80,8 +95,8 @@ const dataOf = (c: ContestState): BattleData => c.data as BattleData;
  * (`data.supportA` / `data.supportB`, his participant index): +8 for his side. One `battle` event at the end: the dig
  * winner over the loser, detail `support` (his side had support and the other did not: the numbers won it), else
  * `pinned` (the winner had pinned him), `stick` (he dug it out while pinned) or `scramble` (nobody was pinned). From
- * the start the puck stays still at `spot` with nobody carrying it until then (`data.holdsPuck`); every participant is
- * steered by it.
+ * `arrive` on the puck is in their feet (`data.holdsPuck`): it slides on to `spot` over a few ticks and stays there
+ * with nobody carrying it until the end; every participant but a shielding carrier is steered by it.
  */
 export const boardBattleContest: Contest = {
   kind: KIND,
@@ -105,24 +120,28 @@ export const boardBattleContest: Contest = {
   start(ctx, participants) {
     const state = ctx.state;
     const p = state.puck;
-    state.pendingPass = null;
-    state.carrierId = null; // a carried puck is knocked into their feet
-    p.vel.x = 0;
-    p.vel.y = 0;
+    const carrierIdx = state.carrierId === null ? NONE : participants.indexOf(state.carrierId);
     const c: ContestState = {
-      id: -1, kind: KIND, stage: 'arrive', stageT: 0, participants: participants.slice(), leader: null,
-      spot: { x: p.pos.x, y: p.pos.y }, freeIds: [],
+      id: -1, kind: KIND, stage: carrierIdx === NONE ? 'arrive' : 'protect', stageT: 0, participants: participants.slice(), leader: null,
+      spot: { x: p.pos.x, y: p.pos.y }, freeIds: carrierIdx === NONE ? [] : [participants[carrierIdx]!],
       data: {
-        holdsPuck: 1, first: NONE, firstSet: 0, balance: 0, pinned: NONE, nextAt: PIN_ROUND, digLast: NONE, digRounds: 0,
-        winner: NONE, clean: 0, supportA: NONE, supportB: NONE,
+        holdsPuck: 0, slide: 0, carrier: carrierIdx, first: NONE, firstSet: 0, balance: 0, pinned: NONE, nextAt: PIN_ROUND,
+        digLast: NONE, digRounds: 0, winner: NONE, clean: 0, supportA: NONE, supportB: NONE,
       },
     };
+    if (carrierIdx === NONE) intoFeet(c, ctx);
+    else c.leader = participants[carrierIdx]!;
     steer(c, ctx);
     return c;
   },
 
   update(c, ctx) {
     const state = ctx.state;
+    if (c.stage === 'protect') {
+      const r = protect(c, ctx);
+      if (r === null) steer(c, ctx);
+      return r;
+    }
     holdPuck(state, c);
     if (c.stage !== 'arrive' && c.stage !== 'resolve') joinSupport(c, ctx);
     let r: ContestResult | null = null;
@@ -151,11 +170,40 @@ function nearestOpponent(state: GameState, s: SkaterState): string[] | null {
 const idOf = (c: ContestState, i: number): string => c.participants[i]!;
 const other = (i: number): number => 1 - i;
 
-/** The puck stays still where the battle is, in their feet. */
+const scratchVel: Vec2 = { x: 0, y: 0 };
+
+/**
+ * The puck goes into their feet: nobody carries it, and it slides on to the battle's spot (where it would be in
+ * SLIDE_LEAD s, inside the boards) over SLIDE_TICKS ticks, then stays there.
+ */
+function intoFeet(c: ContestState, ctx: ContestCtx): void {
+  const state = ctx.state;
+  const p = state.puck;
+  state.pendingPass = null;
+  state.carrierId = null;
+  c.spot.x = p.pos.x + p.vel.x * SLIDE_LEAD;
+  c.spot.y = p.pos.y + p.vel.y * SLIDE_LEAD;
+  scratchVel.x = 0;
+  scratchVel.y = 0;
+  resolveBoards(c.spot, scratchVel, 0.05, 0);
+  p.vel.x = 0;
+  p.vel.y = 0;
+  c.data.holdsPuck = 1;
+  c.data.slide = SLIDE_TICKS;
+}
+
+/** The puck in their feet: still at the spot, or still sliding there. */
 function holdPuck(state: GameState, c: ContestState): void {
   const p = state.puck;
-  p.pos.x = c.spot.x;
-  p.pos.y = c.spot.y;
+  const d = dataOf(c);
+  if (d.slide > 0) {
+    p.pos.x += (c.spot.x - p.pos.x) / d.slide;
+    p.pos.y += (c.spot.y - p.pos.y) / d.slide;
+    d.slide--;
+  } else {
+    p.pos.x = c.spot.x;
+    p.pos.y = c.spot.y;
+  }
   p.vel.x = 0;
   p.vel.y = 0;
   p.z = 0;
@@ -185,6 +233,44 @@ function sideEdge(c: ContestState, ctx: ContestCtx, weights: Weights): number {
   return contestRating(ctx, c, idOf(c, 0), weights) - contestRating(ctx, c, idOf(c, 1), weights)
     + (d.first === 0 ? T.firstEdge : d.first === 1 ? -T.firstEdge : 0)
     + (d.supportA !== NONE ? T.supportEdge : 0) - (d.supportB !== NONE ? T.supportEdge : 0);
+}
+
+/**
+ * A carrier shielding the puck along the boards while the other man leans in, for PROTECT_SECONDS. Then one roll
+ * (winProb of the carrier's strength, puck handling and balance against the other's stick, strength and compete, plus
+ * mass difference / massPerPoint and T.protectEdge): he keeps it and skates out of it (a `battle` event, detail
+ * `protect`), or it is knocked into their feet and the battle goes on to `arrive`. He letting the puck go, or the
+ * other man losing touch with him, ends it with no result.
+ */
+function protect(c: ContestState, ctx: ContestCtx): ContestResult | null {
+  const state = ctx.state;
+  const d = dataOf(c);
+  const ci = d.carrier, oi = other(ci);
+  const carrier = skaterById(state, idOf(c, ci)), opp = skaterById(state, idOf(c, oi));
+  c.spot.x = state.puck.pos.x;
+  c.spot.y = state.puck.pos.y;
+  if (state.carrierId !== carrier.id) return cooledOff(c, ctx, null);
+  if (c.stageT < PROTECT_SECONDS - STAGE_EPS) return null;
+  if (dist(carrier.pos, opp.pos) > PROTECT_REACH) return cooledOff(c, ctx, null);
+  const mc = movementOf(ctx.defs.get(carrier.id)!, 1).mass, mo = movementOf(ctx.defs.get(opp.id)!, 1).mass;
+  const edge = contestRating(ctx, c, carrier.id, T.protect) - contestRating(ctx, c, opp.id, T.strip) + (mc - mo) / T.massPerPoint + T.protectEdge;
+  if (ctx.rng.next() < winProb(edge)) {
+    ctx.emit(contestEvent(state, { type: 'battle', side: carrier.side, playerId: carrier.id, otherId: opp.id, assistIds: [], detail: 'protect' }));
+    setCooldown(state, opp.id, 'pokeCheck', T.loserPokeCooldown);
+    return cooledOff(c, ctx, carrier.id);
+  }
+  d.carrier = NONE;
+  c.freeIds.length = 0;
+  c.leader = null;
+  intoFeet(c, ctx);
+  enterStage(c, 'arrive');
+  return null;
+}
+
+/** Ends the battle with the puck left as it is (to `winnerId`, or nobody); nobody in it starts another for a while. */
+function cooledOff(c: ContestState, ctx: ContestCtx, winnerId: string | null): ContestResult {
+  for (const id of c.participants) setCooldown(ctx.state, id, KIND, T.cooldownSeconds);
+  return { winnerId, puck: 'unchanged' };
 }
 
 /** Who gets there first. */
@@ -319,7 +405,14 @@ function steer(c: ContestState, ctx: ContestCtx): void {
       continue;
     }
     const r = movementOf(ctx.defs.get(s.id)!, 1).radius;
-    if (c.stage === 'arrive') {
+    if (c.stage === 'protect') {
+      if (i === d.carrier) continue; // he keeps skating his own way, the puck on his stick
+      const o = skaterById(state, idOf(c, other(i)));
+      s.target.x = o.pos.x;
+      s.target.y = o.pos.y;
+      setFace(s, state.puck.pos.x, state.puck.pos.y);
+      s.speedCap = 1;
+    } else if (c.stage === 'arrive') {
       s.target.x = c.spot.x;
       s.target.y = c.spot.y;
       setFace(s, c.spot.x, c.spot.y);

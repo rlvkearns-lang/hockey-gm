@@ -26,6 +26,10 @@ describe('game loop', () => {
     expect(g.result()).toEqual(simulateGame(setup(5))); expect(seen).toBe(g.result().events.length);
   }, GAME_TIMEOUT * 2);
   it('teams switch ends in the second period', () => { const g = createGame(setup()); const d1 = g.state.attackDir.home; runToPeriod(g, 2); expect(g.state.attackDir.home).toBe(-d1); }, GAME_TIMEOUT);
+  it('every skater starts the next period rested', () => {
+    const g = createGame(setup()); runToPeriod(g, 2);
+    expect(g.state.period).toBe(2); expect(g.state.skaters.every((s) => s.energy === 1)).toBe(true);
+  }, GAME_TIMEOUT);
   it('five skaters and a goalie per side, all inside the boards, every tick', () => {
     const g = createGame(setup(3)); const violations: string[] = [];
     while (!g.done) { g.step(); for (const side of ['home', 'away'] as const) if (g.state.onIce[side].length > 5 + 3) violations.push(`tick ${g.state.tick}: ${side} has ${g.state.onIce[side].length} on ice`);   // up to 3 extra mid-change

@@ -23,15 +23,16 @@ export function pressureOn(state: GameState, s: SkaterState): number {
 /** Longest touch chain kept: the scorer, two assists, and room for repeats. */
 const MAX_TOUCHES = 6;
 
-/** `id` of `side` has the puck: a new team starts a new chain; a new player of the same team joins it. */
+/** `id` of `side` has the puck now: a new team starts a new chain; a new player of the same team joins it. */
 export function recordTouch(state: GameState, id: string, side: Side): void {
   state.icingWatch = null;
   const t = state.touches;
   state.lastAttackTouch[side] = id;
-  if (t.side !== side) { t.side = side; t.ids.length = 0; t.ids.push(id); return; }
-  if (t.ids[t.ids.length - 1] === id) return;
+  if (t.side !== side) { t.side = side; t.ids.length = 0; t.ticks.length = 0; t.ids.push(id); t.ticks.push(state.tick); return; }
+  if (t.ids[t.ids.length - 1] === id) { t.ticks[t.ticks.length - 1] = state.tick; return; }
   t.ids.push(id);
-  if (t.ids.length > MAX_TOUCHES) t.ids.shift();
+  t.ticks.push(state.tick);
+  if (t.ids.length > MAX_TOUCHES) { t.ids.shift(); t.ticks.shift(); }
 }
 
 /** The players `ids` may not pick the puck up for RELEASE_NO_PICKUP_SECONDS. */
@@ -50,6 +51,7 @@ function skaterById(state: GameState, id: string): SkaterState {
  */
 function release(state: GameState, from: SkaterState, vx: number, vy: number, vz: number): void {
   const p = state.puck;
+  recordTouch(state, from.id, from.side); // his touch lasts until he lets it go
   state.icingWatch = p.pos.x * state.attackDir[from.side] < 0
     ? { side: from.side, fromX: p.pos.x, fromY: p.pos.y, tick: state.tick } : null;
   p.vel.x = vx;

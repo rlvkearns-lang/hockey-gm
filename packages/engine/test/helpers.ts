@@ -10,7 +10,7 @@ import { RINK, resolveBoards } from '../src/rink';
 import { createRng, type Rng } from '../src/rng';
 import { OZONE_SPOTS, ozoneSpotPos, supportTarget } from '../src/team-play';
 import { canReceivePass, decideCarrier, type Decision } from '../src/brain';
-import { executeDump, executePass, releasePuck, tryIntercept } from '../src/actions';
+import { executeDump, executePass, recordTouch, releasePuck, tryIntercept } from '../src/actions';
 import { resolveBodies } from '../src/bodies';
 import { contestTick, startContest } from '../src/contests/core';
 import { hitContest } from '../src/contests/hit';
@@ -19,7 +19,7 @@ import { netFrontContest } from '../src/contests/net-front';
 import { looseRaceContest, timeToReach } from '../src/contests/loose-race';
 import { assignJobs } from '../src/team-play';
 import { createGame, type Game } from '../src/game';
-import { tryBlock } from '../src/goalie';
+import { resolveOnNet, tryBlock } from '../src/goalie';
 import { movementOf, stepSkater } from '../src/skating';
 import { refereeTick } from '../src/referee';
 import type { Movement } from '../src/skating';
@@ -208,7 +208,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 },
     onIce: { home: SKATER_SLOTS.map((s) => skaterId('home', s)), away: SKATER_SLOTS.map((s) => skaterId('away', s)) },
     pickupBlock: null, pendingPass: null, shotInFlight: null, screenedUntilTick: { home: 0, away: 0 },
-    touches: { side: null, ids: [] }, lastAttackTouch: { home: null, away: null },
+    touches: { side: null, ids: [], ticks: [] }, lastAttackTouch: { home: null, away: null },
     noChange: null, delayedOffside: null, icingWatch: null, lastRelease: null, contestCooldowns: [],
     tiedUpUntil: [], reboundEdge: null,
     bench: {
@@ -924,7 +924,8 @@ export function battleWithThirdMan(): { supportSpot: { x: number; y: number } | 
 }
 
 /**
- * A real game stepped tick by tick: over every tick a board battle holds the puck (before its resolve), how many such
+ * A real game stepped tick by tick: over every tick a board battle holds the puck still (after its arrive, before its
+ * resolve; not while a carrier shields it), how many such
  * ticks, on how many someone was carrying the puck, the largest move of the puck in one of them (m), and how many
  * battles had a supporting player join.
  */
@@ -935,7 +936,7 @@ export function heldPuckInGame(s: GameSetup): { ticks: number; carried: number; 
   let prev: { x: number; y: number } | null = null;
   while (!g.done) {
     g.step();
-    const b = g.state.contests.find((c) => c.kind === 'boardBattle' && c.stage !== 'resolve' && c.stage !== 'arrive');
+    const b = g.state.contests.find((c) => c.kind === 'boardBattle' && c.stage !== 'resolve' && c.stage !== 'arrive' && c.stage !== 'protect');
     if (!b || g.state.phase !== 'live') { prev = null; continue; }
     ticks++;
     if (g.state.carrierId !== null) carried++;
@@ -1057,6 +1058,111 @@ export function runRace(o: RaceOpts): RaceOutcome {
 
 /** A dead-heat race in which home C has just won the net-front battle. */
 export const raceWithRebound = (): RaceOutcome => runRace({ aLead: 0, reboundFor: 'a' });
+
+// ---- side outcomes, shielding along the boards, assists, offside over icing (Task 12) ----
+
+/** How `n` hits by `hitter` on the still carrier `tgt` at `closing` m/s ended: counts of the hit event's detail. */
+export function hitOutcomes(hitter: PlayerDef, tgt: PlayerDef, closing: number, n: number): Record<string, number> {
+  const out: Record<string, number> = { landed: 0, absorbed: 0, bounced: 0 };
+  for (let i = 0; i < n; i++) {
+    const e = hitDuel(hitter, tgt, closing).events.find((x) => x.type === 'hit');
+    if (e) out[e.detail] = (out[e.detail] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** How `n` poke checks by `defender` on the still carrier `carrier` (as in runPoke) ended: won, kept, or kept with the checker beaten. */
+export function pokeOutcomes(defender: PlayerDef, carrier: PlayerDef, n: number): { won: number; kept: number; beaten: number } {
+  const out = { won: 0, kept: 0, beaten: 0 };
+  for (let i = 0; i < n; i++) {
+    const h = duel(defender, carrier, 0.6, 0);
+    let c: ContestState | null = null;
+    for (let k = 0; k < 180 && (c === null || h.st.contests.includes(c)); k++) { duelStep(h); c ??= h.st.contests[0] ?? null; }
+    const o = c?.data.outcome;
+    if (o === 1 || o === 2) out.won++;
+    else if (o === 3) out.kept++;
+    else if (o === 4) out.beaten++;
+  }
+  return out;
+}
+
+/**
+ * Home C carrying the puck along the +y boards at BATTLE_SPOT, skating slowly up ice, with away C on his shoulder when
+ * the board battle starts on him (startContest, as its trigger would). 'kept': he shielded it and skated out; 'lost':
+ * it was knocked into their feet and the battle went on; 'none': it ended without either.
+ */
+export function shieldAlongBoards(carrier: PlayerDef, opp: PlayerDef): 'kept' | 'lost' | 'none' {
+  const h = harness(['home-C', 'away-C'], { 'home-C': carrier, 'away-C': opp }, { carrier: 'home', puckX: BATTLE_SPOT.x + 0.6, puckY: BATTLE_SPOT.y, carrierSlot: 'C' });
+  const st = h.st, S = BATTLE_SPOT;
+  place2(st, 'home-C', S.x, S.y - 0.1, 0);
+  const c0 = st.skaters.find((k) => k.id === 'home-C')!;
+  c0.vel = { x: 2, y: 0 }; c0.target = { x: S.x + 20, y: S.y - 0.1 }; c0.speedCap = 0.3;
+  place2(st, 'away-C', S.x + 0.3, S.y - 1, Math.PI / 2);
+  st.puck.pos = { x: S.x + 0.6, y: S.y - 0.1 };
+  const c = startContest(st, h.ds, h.rng, boardBattleContest, ['away-C', 'home-C'], h.events);
+  for (let i = 0; i < 60 && st.contests.includes(c) && c.stage === 'protect'; i++) harnessStep(h);
+  if (c.stage === 'arrive' || c.stage === 'pin') return 'lost';
+  return h.events.some((e) => e.type === 'battle' && e.detail === 'protect') ? 'kept' : 'none';
+}
+
+/**
+ * A loose puck sliding along the +y boards at 4 m/s when a board battle starts on it (both men 0.8 m away): how far it
+ * moves on each of the first 12 ticks, and how far from the battle's spot it is after them.
+ */
+export function puckIntoFeet(): { steps: number[]; offSpot: number } {
+  const h = harness(['home-C', 'away-C'], {});
+  const st = h.st, S = BATTLE_SPOT;
+  st.puck = { pos: { x: S.x, y: S.y }, z: 0, vel: { x: 4, y: 0 }, vz: 0 };
+  place2(st, 'home-C', S.x - 0.6, S.y - 0.5, 0); place2(st, 'away-C', S.x + 0.6, S.y - 0.5, Math.PI);
+  const c = startContest(st, h.ds, h.rng, boardBattleContest, ['home-C', 'away-C'], h.events);
+  const steps: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    const p0 = { ...st.puck.pos };
+    harnessStep(h);
+    steps.push(Math.hypot(st.puck.pos.x - p0.x, st.puck.pos.y - p0.y));
+  }
+  return { steps, offSpot: Math.hypot(st.puck.pos.x - c.spot.x, st.puck.pos.y - c.spot.y) };
+}
+
+/**
+ * Home LW touched the puck `lwSecondsAgo` s before home C scores from the slot (C's touch is fresh). The goal's
+ * assists, from the real resolveOnNet (seeds tried until the shot goes in).
+ */
+export function assistsWhenTouched(lwSecondsAgo: number): string[] {
+  for (let seed = 1; seed <= 500; seed++) {
+    const st = stateWith({ carrier: 'home', puckX: 20, puckY: 2, carrierSlot: 'C' });
+    st.tick = 3000;
+    st.carrierId = null;
+    st.touches = { side: null, ids: [], ticks: [] };
+    const now = st.tick;
+    st.tick = now - Math.round(lwSecondsAgo / DT);
+    recordTouch(st, 'home-LW', 'home');
+    st.tick = now - 15;
+    recordTouch(st, 'home-C', 'home');
+    st.tick = now;
+    st.shotInFlight = { shooterId: 'home-C', side: 'home', from: { x: 20, y: 2 }, fromDist: 6.4, tick: now - 6, blockTried: [] };
+    const ds = new Map(defs);
+    const gId = st.goalies.away.id;
+    ds.set(gId, { ...def({ id: gId, position: 'G' }), goalie: g(30) });
+    const events: GameEvent[] = [];
+    const r = resolveOnNet(st, { kind: 'onNet', end: 1, y: 0.8, z: 0.85, speed: 35 }, ds, createRng(seed), events);
+    if (r === 'goal') return events.find((e) => e.type === 'goal')!.assistIds;
+  }
+  throw new Error('no goal in 500 tries');
+}
+
+/**
+ * Home LD fires the puck down the ice from his own half (x -5) with home LW standing offside in the zone and away LD
+ * deep in his own zone (so he wins the icing race): the call.
+ */
+export function icedWithWingerOffside(): GameEvent | null {
+  const st = live({ carrier: 'home:LD', carrierX: -5 });
+  const w = offsideWinger();
+  place(st, w.ref, w.x, w.y);
+  place(st, 'away:LD', 21, 6);
+  shootDownIce(st);
+  return refereeUntilCall(st);
+}
 
 // ---- calibration (Task 12) ----
 

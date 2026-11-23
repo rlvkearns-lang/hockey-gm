@@ -180,7 +180,7 @@ function resolveImpact(c: ContestState, ctx: ContestCtx, h: SkaterState, t: Skat
   const state = ctx.state;
   const p = c.data.p!;
   const u = ctx.rng.next();
-  const won = u >= 1 - p;
+  const won = u < p;
   const dx = t.pos.x - h.pos.x, dy = t.pos.y - h.pos.y;
   const d = hypot2(dx, dy) || 1;
   const ux = dx / d, uy = dy / d;
@@ -188,7 +188,7 @@ function resolveImpact(c: ContestState, ctx: ContestCtx, h: SkaterState, t: Skat
   const push = Math.max(0, closingSpeed(h, t)) * (mh / (mh + mt));
   let detail: string;
   if (won) {
-    t.downT = DOWN_SECONDS[0] + (DOWN_SECONDS[1] - DOWN_SECONDS[0]) * ((u - (1 - p)) / p);
+    t.downT = DOWN_SECONDS[0] + (DOWN_SECONDS[1] - DOWN_SECONDS[0]) * (1 - u / p);
     knock(t, ux * push, uy * push);
     h.vel.x *= 0.4;
     h.vel.y *= 0.4;
@@ -199,7 +199,7 @@ function resolveImpact(c: ContestState, ctx: ContestCtx, h: SkaterState, t: Skat
     }
   } else {
     knock(t, ux * push * 0.3, uy * push * 0.3);
-    if (u < T.bounceChance) {
+    if (ctx.rng.chance(bounceChance(p))) {
       h.downT = BOUNCE_DOWN_SECONDS;
       h.vel.x = -ux;
       h.vel.y = -uy;
@@ -213,6 +213,11 @@ function resolveImpact(c: ContestState, ctx: ContestCtx, h: SkaterState, t: Skat
   ctx.emit(contestEvent(state, { type: 'hit', side: h.side, playerId: h.id, otherId: t.id, assistIds: [], detail }));
   c.leader = won ? h.id : t.id;
   toRecover(state, c, t.id, RECOVER_SECONDS);
+}
+
+/** Chance that a failed hit bounces the hitter off, from his chance `p` of landing it: within [0.03, 0.97]. */
+export function bounceChance(p: number): number {
+  return Math.max(0.03, Math.min(0.97, T.bounceChance * 2 * (1 - p)));
 }
 
 /** Adds (vx, vy) to `s`'s velocity, capped at MAX_KNOCKED_SPEED. */

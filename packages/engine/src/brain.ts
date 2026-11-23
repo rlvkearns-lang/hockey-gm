@@ -50,9 +50,10 @@ const laneIds: string[] = [];
 const laneValues: number[] = [];
 
 /**
- * What the carrier does next. Every option is scored from the situation, his skill for it and his tendency for it
- * (shoot, pass, carry, dump), then one is drawn in proportion to score. He sees only his best
- * 1 + floor(vision / 25) passing lanes, judged with an error that shrinks with IQ. Pressure lowers the score of
+ * What the carrier does next. Every kind of option is scored from the situation, his skill for it and his tendency for
+ * it (shoot, pass, carry, dump, protect), then one is drawn in proportion to score, no kind more than T.maxShare of the
+ * time. Passing is worth his best lane; when he passes, the lane is drawn in proportion to how good he sees each. He
+ * sees only his best 1 + floor(vision / 25) passing lanes, judged with an error that shrinks with IQ. Pressure lowers the score of
  * shooting, passing and carrying, less so for a poised player, and raises dumping and protecting.
  * With the puck outside the offensive zone he keeps it onside: no pass to a teammate wholly in the zone, and while one
  * is in there he holds up at the blue line instead of carrying in.
@@ -126,16 +127,25 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
     * (zone === 'N' ? 1 - spaceAhead : zone === 'D' ? 0.5 * pressure : 0);
   const protectW = T.weight.protect * (T.protectBase + pressure) * skill(composite(a, { puckHandling: 0.5, strength: 0.5 }));
 
-  let total = shootW + carryW + dumpW + protectW;
-  let top = Math.max(shootW, carryW, dumpW, protectW);
-  for (const v of laneValues) { total += v * passSkill; top = Math.max(top, v * passSkill); }
-  // Parity: no option is drawn more than T.maxShare of the time (protect always has some weight, so the rest is > 0).
-  const cap = (T.maxShare / (1 - T.maxShare)) * (total - top);
+  // Passing as a kind is worth his best lane: seeing more lanes changes which one he picks, not how often he passes.
+  let laneTotal = 0;
+  for (const v of laneValues) laneTotal += v;
+  const passW = laneValues.length > 0 ? laneValues[0]! * passSkill : 0;
+  const total0 = shootW + passW + carryW + dumpW + protectW;
+  const top = Math.max(shootW, passW, carryW, dumpW, protectW);
+  // Parity: no kind of option is drawn more than T.maxShare of the time (protect always has some weight, so the rest is > 0).
+  const cap = (T.maxShare / (1 - T.maxShare)) * (total0 - top);
   const w = (x: number): number => Math.min(x, cap);
-  if (top > cap) total += cap - top;
+  const total = top > cap ? total0 + cap - top : total0;
   let r = rng.next() * total;
   if ((r -= w(shootW)) < 0) return { kind: 'shoot' };
-  for (let i = 0; i < laneValues.length; i++) if ((r -= w(laneValues[i]! * passSkill)) < 0) return { kind: 'pass', toId: laneIds[i]! };
+  const pw = w(passW);
+  if (r < pw && laneTotal > 0) {
+    // The same draw picks the lane, in proportion to how good he sees each one.
+    let u = (r / pw) * laneTotal;
+    for (let i = 0; i < laneValues.length; i++) if ((u -= laneValues[i]!) < 0 || i === laneValues.length - 1) return { kind: 'pass', toId: laneIds[i]! };
+  }
+  r -= pw;
   if ((r -= w(dumpW)) < 0) return { kind: 'dump' };
   if ((r -= w(protectW)) < 0) return { kind: 'protect' };
   const to = carryTarget(rx, ly, zone, aheadLat, aheadD, dir);

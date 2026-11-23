@@ -85,7 +85,7 @@ const normalScratch: Vec2 = { x: 0, y: 0 };
  * `data.supportB` are the participant indexes of each side's supporting player (-1 for none yet).
  */
 function boardBattle(state: GameState): ContestState | null {
-  for (const c of state.contests) if (c.kind === 'boardBattle' && c.stage !== 'resolve') return c;
+  for (const c of state.contests) if (c.kind === 'boardBattle' && c.stage !== 'resolve' && c.stage !== 'protect') return c;
   return null;
 }
 

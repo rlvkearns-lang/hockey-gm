@@ -5,7 +5,7 @@ import { drawChance, dropPuck } from '../src/faceoff';
 import { createRng } from '../src/rng';
 import { RINK } from '../src/rink';
 import {
-  carryTo, count, def, defs, dumpedInWith, icingAfter, live, moveOut, offsideWinger, onIce, place, refereeUntilCall, setup,
+  carryTo, count, def, defs, dumpedInWith, icedWithWingerOffside, icingAfter, live, moveOut, offsideWinger, onIce, place, refereeUntilCall, setup,
   shootDownIce, shotFrom, skater, stateWith, tactics,
 } from './helpers';
 
@@ -25,6 +25,9 @@ describe('referee', () => {
   });
   it('not icing from past centre, or when it goes on net', () => { expect(icingAfter(shotFrom(2))).toBeNull(); expect(icingAfter(shotFrom(-5, { onNet: true }))).toBeNull(); });
   it('not icing when the attacker wins the race', () => { expect(icingAfter(shotFrom(-5), { attackerAhead: true })).toBeNull(); });
+  it('a puck iced while a delayed offside against the same team is on is called offside', () => {
+    expect(icedWithWingerOffside()).toMatchObject({ type: 'offside', side: 'home' });
+  });
   it('a full game has a believable number of whistles', () => { const r = simulateGame(setup(8)); expect(count(r, 'offside')).toBeLessThan(20); expect(count(r, 'icing')).toBeLessThan(25); expect(count(r, 'faceoff')).toBeGreaterThan(20); }, GAME_TIMEOUT);
 
   // Beyond the brief: the pieces behind those calls.

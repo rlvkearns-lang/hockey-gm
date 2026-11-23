@@ -60,7 +60,8 @@ function timeToLine(s: SkaterState, line: number, dir: 1 | -1, m: Racer): number
  * - Hybrid icing: a puck released from a team's own half (`state.icingWatch`) that fully crosses the far goal line
  *   untouched (a puck on net stops on the line instead) is icing when a defending skater, not the goalie, would reach
  *   the end-zone dot line no later than any of that team's skaters; otherwise it is waved off. Faceoff at the
- *   offending team's end dot nearest the release, and that team may not change (`state.noChange`).
+ *   offending team's end dot nearest the release, and that team may not change (`state.noChange`). With a delayed
+ *   offside against the same team still on, the offside is called instead (it happened first).
  *
  * `defs` gives body radii and skating for the race; without it every skater is a typical one.
  */
@@ -112,8 +113,8 @@ function firstInZone(state: GameState, side: Side, except: SkaterState | null, d
 }
 
 /**
- * The race for a puck iced by `side` (attacking toward `dir`, released at y = fromY): the icing call, or null when one
- * of its skaters would get to the dot line first.
+ * The race for a puck iced by `side` (attacking toward `dir`, released at y = fromY): the icing call (the offside call
+ * when a delayed offside against `side` is on), or null when one of its skaters would get to the dot line first.
  */
 function hybridIcing(state: GameState, side: Side, dir: 1 | -1, fromY: number, defs: Map<string, PlayerDef> | undefined): GameEvent | null {
   const racer = (s: SkaterState): Racer => (defs ? movementOf(defs.get(s.id)!, s.energy) : TYPICAL);
@@ -126,9 +127,18 @@ function hybridIcing(state: GameState, side: Side, dir: 1 | -1, fromY: number, d
     else if (t < defT) { defT = t; defender = s.id; }
   }
   if (defender === null || defT > attT) return null;
-  const spot = dotNear(FACEOFF_DOTS.end, (-dir) as 1 | -1, fromY);
   // Untouched since the release, so the last touch is the releaser's.
   const shooter = state.lastTouch !== null && state.lastTouch.side === side ? state.lastTouch.id : null;
+  const off = state.delayedOffside;
+  if (off !== null && off.side === side) {
+    // It went in offside first: the offside is the call.
+    const offender = firstInZone(state, side, null, defs);
+    const spot = dotNear(FACEOFF_DOTS.neutral, dir, off.y);
+    const e = event(state, 'offside', side, shooter, offender?.id ?? null, `${spot.x},${spot.y}`);
+    stopPlay(state, spot);
+    return e;
+  }
+  const spot = dotNear(FACEOFF_DOTS.end, (-dir) as 1 | -1, fromY);
   const e = event(state, 'icing', side, shooter, defender, `${spot.x},${spot.y}`);
   stopPlay(state, spot);
   state.noChange = side;
