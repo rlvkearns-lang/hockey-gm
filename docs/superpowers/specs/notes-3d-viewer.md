@@ -81,3 +81,14 @@ Proposed shape **[my call]**:
 - Intermissions: a quick summary that can be skipped.
 - After: a proper post-game (three stars, final box score, injuries, goal replays to rewatch **[contents my call]**).
 - The post-game can lead into a media scrum for players or coaches when there is drama or something important; otherwise it is skipped. (The scrum itself belongs to the people stage; the viewer only needs a place for it after the post-game.)
+
+## Skating test verdict (owner, 2026-11-23)
+
+- The owner looked at the skating test (https://claude.ai/artifact/J4J9gS8J8iVN4HtpKu7tGm): "Looks great honestly", "it looks really good so far". The skating approach (generated poses on a jointed figure) is approved; the rest of the 3D viewer can be built on it.
+- Wanted: sprinting should look different from ordinary striding: head down, power.
+- Wanted: the puck on the stick blade when a player carries it, rather than underneath him.
+
+Proposed shape **[my call]**:
+
+- Sprint: when a skater is at high effort and near top speed, a deeper forward lean, head down, longer and harder pushes, bigger arm drive, with the stick carried in one hand when he does not have the puck.
+- Puck on the stick: the engine keeps the carried puck at a point close to the carrier. The viewer draws a carried puck on the blade, out in front and to his forehand side, moving with his stickhandling, and brings it back to the engine's exact position as it is released (pass, shot, loss), so nothing about the game changes. If the engine's own carry point proves too close to the body for battles and poke checks to look right, moving it is an engine change for round 2.
