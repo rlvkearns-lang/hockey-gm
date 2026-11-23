@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { PlayerDef } from '@hockey/engine';
 import { bodyDims, type BodyDims } from './body';
-import { hipJoint, shoulderJoint, solveLeg, torsoRotate, type Motion, type Pose, type Vec3 } from './gait';
+import { hipJoint, shoulderJoint, solveLeg, torsoRotate, type Pose, type Vec3 } from './gait';
 import { twoBone } from './goalie-pose';
 
 /**
@@ -12,14 +12,13 @@ import { twoBone } from './goalie-pose';
  * world Y, so with engine facing f his forward is world (cos f, 0, sin f) and his right is world (-sin f, 0, cos f).
  * That is a turn of -f about world Y (three.js turns +x toward -z for a positive angle).
  *
- * Poses are worked out for a left shot. For a right shot the motion going into the gait is mirrored (handedMotion) and
- * the pose coming out is mirrored back (z, yaws and roll negated, left and right swapped), so he moves the same way
+ * Poses are worked out for a left shot. For a right shot the motion going into the gait is mirrored (anim-context.ts
+ * motionOfSample) and the pose coming out is mirrored back (z, yaws and roll negated, left and right swapped), so he moves the same way
  * but holds the stick on his right with his left hand on top.
  *
  * Geometries and materials come from a RigKit: a scene with many figures passes one kit to all of them, so every
  * figure shares one set of geometries (built for a reference body and scaled to his size) and one set of materials per
- * team; his back (surname over number) is the only texture of his own. Without a kit a figure makes a private one,
- * with a shadow under each skate as well as the body, and frees it with itself.
+ * team; his back (surname over number) is the only texture of his own.
  */
 
 export type RigColors = { jersey: number; trim: number; pants: number };
@@ -40,11 +39,6 @@ const add = (a: Vec3, b: Vec3): Vec3 => v3(a.x + b.x, a.y + b.y, a.z + b.z);
 const mul = (a: Vec3, k: number): Vec3 => v3(a.x * k, a.y * k, a.z * k);
 /** Turn a body-frame vector by heading h about the vertical (x toward +z), as gait.ts does. */
 const turn = (v: Vec3, h: number): Vec3 => { const c = Math.cos(h), s = Math.sin(h); return v3(v.x * c - v.z * s, v.y, v.x * s + v.z * c); };
-
-/** The motion his gait should be stepped with: mirrored for a right shot (see the file comment). */
-export function handedMotion(def: Pick<PlayerDef, 'shoots'>, m: Motion): Motion {
-  return def.shoots === 'R' ? { ...m, lateral: -m.lateral, turnRate: -m.turnRate, facing: -m.facing } : m;
-}
 
 /**
  * Mirror a pose across his centre plane (z to -z): left and right swap, so the top hand on the stick is arms[0]. Every
@@ -68,25 +62,7 @@ export function mirrorPose(p: Pose): Pose {
 // Textures drawn on a canvas (only where there is a DOM: the unit tests build the figure without one).
 
 const hasDom = (): boolean => typeof document !== 'undefined';
-let blobTexture: THREE.Texture | null = null;
 let minBlobTexture: THREE.Texture | null = null;
-
-/** A soft round shadow (dark in the middle, fading to nothing at the rim). */
-function shadowTexture(): THREE.Texture | null {
-  if (!hasDom()) return null;
-  if (blobTexture) return blobTexture;
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d')!;
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, 'rgba(0,0,0,0.55)');
-  grad.addColorStop(0.5, 'rgba(0,0,0,0.3)');
-  grad.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  blobTexture = new THREE.CanvasTexture(c);
-  return blobTexture;
-}
 
 /** The same shadow as a grey level on white, for a blob drawn with "darkest wins" blending (see sharedShadowMaterial). */
 function minShadowTexture(): THREE.Texture | null {
@@ -109,7 +85,7 @@ function minShadowTexture(): THREE.Texture | null {
 }
 
 /** True for the textures every figure shares (never freed by one figure). */
-export const isSharedTexture = (t: THREE.Texture | null | undefined): boolean => t != null && (t === blobTexture || t === minBlobTexture);
+export const isSharedTexture = (t: THREE.Texture | null | undefined): boolean => t != null && t === minBlobTexture;
 
 const css = (hex: number): string => `#${hex.toString(16).padStart(6, '0')}`;
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
@@ -155,18 +131,6 @@ export function numberTexture(n: number, colors: RigColors, name?: string): THRE
   return t;
 }
 
-/** A shadow blob lying on the ice (radius 1; scale it), with a material of its own. */
-export function createShadowBlob(): THREE.Mesh {
-  const map = shadowTexture();
-  const mat = map
-    ? new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, opacity: 1 })
-    : new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthWrite: false, opacity: 0.25 });
-  const m = new THREE.Mesh(new THREE.CircleGeometry(1, 24).rotateX(-Math.PI / 2), mat);
-  m.position.y = 0.004;
-  m.renderOrder = 1;
-  return m;
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // The kit: geometries and materials shared by every figure built with it
 
@@ -183,12 +147,10 @@ export type RigKit = {
   /** His back (surname and number); shared while in use, freed when the last figure with it lets go. */
   backTexture(name: string, n: number, colors: RigColors): THREE.Texture | null;
   releaseTexture(t: THREE.Texture | null): void;
-  /** A shadow blob (radius 1). In a shared kit all blobs share one material that never darkens a spot twice. */
+  /** A shadow blob (radius 1). All blobs share one material that never darkens a spot twice. */
   shadow(): THREE.Mesh;
-  /** Draw a shadow under each skate too (the single-figure page); a scene of many figures keeps one blob each. */
-  readonly footShadows: boolean;
   /**
-   * How finely the figures are tessellated: `full` (smooth; the single-figure page and a GPU) or `lite` (about a
+   * How finely the figures are tessellated: `full` (smooth; a GPU) or `lite` (about a
    * quarter of the triangles, for a dozen figures in a software renderer, where triangles cost more than anything).
    */
   readonly detail: 'full' | 'lite';
@@ -210,7 +172,7 @@ function sharedShadowMaterial(): THREE.MeshBasicMaterial {
   return m;
 }
 
-export function createRigKit(opts: { footShadows?: boolean; detail?: 'full' | 'lite' } = {}): RigKit {
+export function createRigKit(opts: { detail?: 'full' | 'lite' } = {}): RigKit {
   const lambert = (color: number): THREE.MeshLambertMaterial => new THREE.MeshLambertMaterial({ color });
   const teams = new Map<string, TeamMaterials>();
   const geos = new Map<string, THREE.BufferGeometry>();
@@ -223,12 +185,10 @@ export function createRigKit(opts: { footShadows?: boolean; detail?: 'full' | 'l
     steel: new THREE.MeshLambertMaterial({ color: STEEL, emissive: 0x2a2f36 }),
     pad: lambert(PAD), cage: lambert(CAGE),
   };
-  const footShadows = opts.footShadows ?? false;
   const blobGeo = new THREE.CircleGeometry(1, 12).rotateX(-Math.PI / 2);
-  const blobMat = footShadows ? null : sharedShadowMaterial();
+  const blobMat = sharedShadowMaterial();
   return {
     common,
-    footShadows,
     detail: opts.detail ?? 'full',
     team(colors) {
       const key = `${colors.jersey}|${colors.trim}|${colors.pants}`;
@@ -253,7 +213,6 @@ export function createRigKit(opts: { footShadows?: boolean; detail?: 'full' | 'l
       for (const [key, e] of textures) if (e.t === t && --e.refs <= 0) { t.dispose(); textures.delete(key); }
     },
     shadow() {
-      if (!blobMat) return createShadowBlob();
       const m = new THREE.Mesh(blobGeo, blobMat);
       m.position.y = 0.004;
       m.renderOrder = 1;
@@ -266,7 +225,7 @@ export function createRigKit(opts: { footShadows?: boolean; detail?: 'full' | 'l
       for (const g of geos.values()) g.dispose();
       for (const e of textures.values()) e.t?.dispose();
       blobGeo.dispose();
-      blobMat?.dispose();
+      blobMat.dispose();
       teams.clear(); geos.clear(); textures.clear();
     },
   };
@@ -358,8 +317,7 @@ function painted(pieces: Piece[]): THREE.BufferGeometry {
   return out;
 }
 
-export function createSkaterRig(def: PlayerDef, colors: RigColors, sharedKit?: RigKit): SkaterRig {
-  const kit = sharedKit ?? createRigKit({ footShadows: true });
+export function createSkaterRig(def: PlayerDef, colors: RigColors, kit: RigKit): SkaterRig {
   const P = partSizes(def), R = REF;
   const d: BodyDims = P.d, k = P.k;
   const right = def.shoots === 'R';
@@ -492,12 +450,10 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors, sharedKit?: R
   const blade = mesh(kit.geo('sk.blade', () => painted([{ geo: new THREE.BoxGeometry(bladeLen, bladeH, 0.014), color: BLADE, at: [bladeLen / 2 - 0.03, bladeH / 2, 0] }])), 'stickBlade');
   root.add(shaft, blade);
 
-  // Shadows on the ice: one under the body (and, on the single-figure page, one under each skate fading as it lifts).
+  // A shadow on the ice under the body.
   const bodyShadow = kit.shadow();
   bodyShadow.name = 'shadow';
-  const footShadows = kit.footShadows ? [kit.shadow(), kit.shadow()] : [];
-  for (const s of footShadows) s.name = 'footShadow';
-  root.add(bodyShadow, ...footShadows);
+  root.add(bodyShadow);
 
   const scratch = new THREE.Euler();
   const neckLocal = v3(0.04 * k, d.torso + d.headRadius * 1.25 + 0.07 * k, 0);
@@ -535,18 +491,10 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors, sharedKit?: R
       const sk = skates[i]!;
       sk.position.set(ankle.x, Math.max(0, ankle.y - d.skate), ankle.z);
       sk.rotation.set(0, -leg.footYaw, 0);
-      const fs = footShadows[i];
-      if (fs) {
-        const lift = Math.max(0, ankle.y - d.skate);
-        fs.position.set(ankle.x + Math.cos(leg.footYaw) * bootL * 0.25, 0.005, ankle.z + Math.sin(leg.footYaw) * bootL * 0.25);
-        fs.scale.set(0.24 * k * (1 + lift * 2), 1, 0.13 * k * (1 + lift * 2));
-        fs.rotation.set(0, -leg.footYaw, 0);
-        (fs.material as THREE.MeshBasicMaterial).opacity = Math.max(0.15, 1 - lift * 5);
-      }
       fx += ankle.x; fz += ankle.z;
     }
     bodyShadow.position.set((fx / 2) * 0.6, 0.003, (fz / 2) * 0.6);
-    bodyShadow.scale.setScalar(Math.max(P.torsoW, d.shoulderWidth) * (footShadows.length ? 1.1 : 1.35));
+    bodyShadow.scale.setScalar(Math.max(P.torsoW, d.shoulderWidth) * 1.35);
 
     // Arms: elbows out to the side and back.
     for (const i of [0, 1] as const) {
@@ -587,50 +535,7 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors, sharedKit?: R
   function dispose(): void {
     kit.releaseTexture(backMap);
     backMat.dispose();
-    if (!sharedKit) {
-      for (const s of [bodyShadow, ...footShadows]) { s.geometry.dispose(); (s.material as THREE.Material).dispose(); }
-      kit.dispose();
-    }
   }
 
   return { root, apply, dispose };
-}
-
-/**
- * A marker for every other skater: a low, puck-like disc in his team colour with a pointed notch along +x (his facing)
- * and his number on top (read from behind him). Flat, so it reads as a token on the ice, not an obstacle.
- */
-export function createMarker(color: number, radius: number, number?: number, numberColor = 0xffffff): THREE.Object3D {
-  const g = new THREE.Group();
-  const h = 0.07;
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, h, 28).translate(0, h / 2 + 0.005, 0), new THREE.MeshLambertMaterial({ color }));
-  body.name = 'marker';
-  // Notch: a flat wedge pointing out of the disc along +x.
-  const wedge = new THREE.Shape([new THREE.Vector2(radius * 0.85, -radius * 0.32), new THREE.Vector2(radius * 1.45, 0), new THREE.Vector2(radius * 0.85, radius * 0.32)]);
-  const notchGeo = new THREE.ExtrudeGeometry(wedge, { depth: h * 0.8, bevelEnabled: false }).rotateX(-Math.PI / 2).translate(0, 0.005, 0);
-  const notch = new THREE.Mesh(notchGeo, new THREE.MeshLambertMaterial({ color }));
-  notch.name = 'notch';
-  g.add(body, notch);
-  if (number !== undefined && hasDom()) {
-    const c = document.createElement('canvas');
-    c.width = c.height = 128;
-    const x = c.getContext('2d')!;
-    x.font = `bold ${number >= 10 ? 76 : 92}px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
-    x.textAlign = 'center';
-    x.textBaseline = 'middle';
-    x.fillStyle = css(numberColor);
-    x.fillText(String(number), 64, 70);
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = THREE.SRGBColorSpace;
-    const label = new THREE.Mesh(new THREE.PlaneGeometry(radius * 1.5, radius * 1.5), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false }));
-    // Lying on top of the disc, upright when seen from behind him (text up = his forward, +x).
-    label.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);
-    label.position.y = h + 0.008;
-    label.name = 'markerNumber';
-    g.add(label);
-  }
-  const shadow = createShadowBlob();
-  shadow.scale.setScalar(radius * 1.25);
-  g.add(shadow);
-  return g;
 }

@@ -5,7 +5,7 @@ import { bodyDims } from './body';
 import { initialGait, poseOf, type Motion } from './gait';
 import { goaliePoseOf, initialGoalieGait } from './goalie-pose';
 import { createGoalieRig } from './goalie-rig';
-import { createSkaterRig } from './rig';
+import { createRigKit, createSkaterRig } from './rig';
 
 const team = generateTeam(5, 'Test', 'TST');
 const goalieBase = team.players.find((p) => p.position === 'G')!;
@@ -25,7 +25,7 @@ describe('goalie rig', () => {
   it('the goalie figure rests on the ice and is clearly wider than a skater of the same size', () => {
     const g = createGoalieRig(goalieDef(188, 88), colors); g.apply(goaliePoseOf(initialGoalieGait(), bodyDims(188, 88), 'L'), 0, 0, 0); g.root.updateMatrixWorld(true);
     const gb = new THREE.Box3().setFromObject(g.root);
-    const s = createSkaterRig(skaterDef(188, 88), colors); s.apply(poseOf(initialGait(), standing, bodyDims(188, 88)), 0, 0, 0); s.root.updateMatrixWorld(true);
+    const s = createSkaterRig(skaterDef(188, 88), colors, createRigKit()); s.apply(poseOf(initialGait(), standing, bodyDims(188, 88)), 0, 0, 0); s.root.updateMatrixWorld(true);
     const sb = new THREE.Box3().setFromObject(s.root);
     expect(gb.min.y).toBeGreaterThan(-0.02); expect(gb.min.y).toBeLessThan(0.05);
     expect(gb.max.z - gb.min.z).toBeGreaterThan((sb.max.z - sb.min.z) * 1.15);

@@ -90,7 +90,7 @@ const NET = { fromGoalLine: 3.05, height: 6, farRise: 5, farLift: 0.08, minOut: 
  * the puck stays between `minDist` and `maxDist` from it, so it cuts between spots now and then rather than sliding.
  */
 const ICE = { inset: 2.2, height: 1.8, spots: [-19, -6.5, 6.5, 19], minDist: 8, ideal: 12, maxDist: 25, halfView: 5 };
-/** Follow: behind and above him along his travel, as in the skating test, a little higher to see the play round him. */
+/** Follow: behind and above him along his travel, a little higher to see the play round him. */
 const FOLLOW = { back: 6, height: 3.1, ahead: 2.5, lookY: 0.8, fov: 50, turnSpeed: 1.2 };
 
 function broadcast(input: CameraInput): CameraPose {

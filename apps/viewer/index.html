@@ -29,7 +29,6 @@ main { max-width: 1180px; margin: 0 auto; }
 header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 16px; margin-bottom: 10px; }
 h1 { font-size: 20px; margin: 0; font-weight: 650; }
 h1 .home { color: var(--home-ink); } h1 .away { color: var(--away-ink); } h1 .vs { color: var(--muted); font-weight: 400; font-size: 16px; }
-header a { color: var(--muted); font-size: 14px; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* The picture, with the score bug and small notes over it. */
@@ -109,7 +108,6 @@ kbd { font: inherit; font-size: 12px; border: 1px solid var(--line); border-bott
 <main>
   <header>
     <h1 id="title">Hockey Game Viewer</h1>
-    <a id="skatingLink" hidden>Skating test</a>
   </header>
   <div class="stage" id="stage">
     <div class="bug" id="bug" aria-label="Score">

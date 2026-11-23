@@ -22,11 +22,6 @@ import { seekScene } from './scene';
  * and starts nothing.
  */
 
-/** Set by the Vite configs: the link to the skating test works on the dev server, not inside a single-file build. */
-declare const __SKATING_LINK__: boolean;
-
-if (__SKATING_LINK__) { const a = $<HTMLAnchorElement>('skatingLink'); a.href = 'skating.html'; a.hidden = false; }
-
 /** Below this many frames a second for SLOW_SECONDS in a row on High, suggest Low. */
 const SLOW_FPS = 20, SLOW_SECONDS = 3;
 /** Below this picture width (CSS px) the broadcast camera frames the play tighter: 29 degrees / 1.7, about 17. */

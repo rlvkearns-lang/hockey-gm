@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { generateTeam, type PlayerDef } from '@hockey/engine';
 import { bodyDims } from './body';
+import { motionOfSample } from './anim-context';
 import { initialGait, poseOf, stepGait, type Motion } from './gait';
-import { createMarker, createRigKit, createSkaterRig, handedMotion, mirrorPose } from './rig';
+import { createRigKit, createSkaterRig, mirrorPose } from './rig';
+import { sample } from './test/anim';
 import { createGoalieRig } from './goalie-rig';
 
 const base = generateTeam(5, 'Test', 'TST').players.find((p) => p.position === 'LD')!;
 const defWith = (heightCm: number, weightKg: number, shoots: 'L' | 'R' = 'L'): PlayerDef => ({ ...base, heightCm, weightKg, shoots });
 const standing: Motion = { speed: 0, forward: 0, lateral: 0, accelAlong: 0, turnRate: 0, facing: 0, down: false };
 const colors = { jersey: 0xb3202e, trim: 0xffffff, pants: 0x1a1a1a };
+/** A kit for figures made one at a time (the scene shares one between all its figures). */
+const kit = createRigKit();
 
 /** World (x, z) of a named part's centre. */
 function centreOf(root: THREE.Object3D, name: string): THREE.Vector3 {
@@ -21,7 +25,7 @@ function centreOf(root: THREE.Object3D, name: string): THREE.Vector3 {
 describe('skater rig', () => {
   it('builds a figure whose skates rest on the ice for small and large players', () => {
     for (const [h, w] of [[165, 70], [185, 90], [200, 110]] as const) {
-      const rig = createSkaterRig(defWith(h, w), { jersey: 0xb3202e, trim: 0xffffff, pants: 0x1a1a1a });
+      const rig = createSkaterRig(defWith(h, w), { jersey: 0xb3202e, trim: 0xffffff, pants: 0x1a1a1a }, kit);
       rig.apply(poseOf(initialGait(), standing, bodyDims(h, w)), 0, 0, 0);
       rig.root.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(rig.root);
@@ -31,14 +35,14 @@ describe('skater rig', () => {
   });
 
   it('a heavier player of the same height is wider', () => {
-    const width = (w: number) => { const r = createSkaterRig(defWith(185, w), colors); r.apply(poseOf(initialGait(), standing, bodyDims(185, w)), 0, 0, 0); r.root.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(r.root); return b.max.z - b.min.z; };
+    const width = (w: number) => { const r = createSkaterRig(defWith(185, w), colors, kit); r.apply(poseOf(initialGait(), standing, bodyDims(185, w)), 0, 0, 0); r.root.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(r.root); return b.max.z - b.min.z; };
     expect(width(105)).toBeGreaterThan(width(75));
   });
 
   it('faces along the engine facing, with the stick on his shooting side, wherever he is', () => {
     for (const shoots of ['L', 'R'] as const) {
       for (const f of [0, 0.7, 2.2, -1.9]) {
-        const rig = createSkaterRig(defWith(185, 90, shoots), colors);
+        const rig = createSkaterRig(defWith(185, 90, shoots), colors, kit);
         rig.apply(poseOf(initialGait(), standing, bodyDims(185, 90)), 4, -3, f);
         rig.root.updateMatrixWorld(true);
         const fwd = new THREE.Vector2(Math.cos(f), Math.sin(f));
@@ -57,15 +61,17 @@ describe('skater rig', () => {
 
   it('a right shot crosses over the same way as a left shot (motion mirrored in, pose mirrored out)', () => {
     // Sideways travel toward his right (+z): the outside (left) skate crosses over in front toward +z for both.
-    const motion: Motion = { speed: 4, forward: 0.5, lateral: 4, accelAlong: 0, turnRate: 0, facing: 0, down: false };
     const travel = new Map<string, number>();
     for (const shoots of ['L', 'R'] as const) {
       const def = defWith(185, 90, shoots), d = bodyDims(185, 90);
       let g = initialGait();
-      const m = handedMotion(def, motion);
+      // His motion as the animator gives it (mirrored for a right shot): 0.5 m/s forward and 4 m/s toward his right.
+      const s = sample({ right: shoots === 'R' });
+      s.vel.x = 0.5; s.vel.y = 4;
+      const m = motionOfSample(s);
       for (let i = 0; i < 40; i++) g = stepGait(g, m, 1 / 30);
       expect(g.style).toBe('crossover');
-      const rig = createSkaterRig(def, colors);
+      const rig = createSkaterRig(def, colors, kit);
       // Average the skate positions over a cycle: they sit toward the side he travels to... and the hips open that way.
       let zSum = 0;
       for (let i = 0; i < 30; i++) {
@@ -92,7 +98,7 @@ describe('skater rig', () => {
     const d = bodyDims(185, 90);
     const sprint = { ...standing, speed: 9, forward: 9, accelAlong: 2 };
     for (const shoots of ['L', 'R'] as const) {
-      const rig = createSkaterRig(defWith(185, 90, shoots), colors);
+      const rig = createSkaterRig(defWith(185, 90, shoots), colors, kit);
       const up = poseOf({ ...initialGait(), style: 'sprint', styleT: 1, phase: 0.3 }, sprint, d);
       expect(up.blade.y).toBeGreaterThan(0.1);
       rig.apply(up, 0, 0, 0); rig.root.updateMatrixWorld(true);
@@ -113,7 +119,7 @@ describe('skater rig', () => {
 
   it('tilts the head down by lookDown', () => {
     const d = bodyDims(185, 90);
-    const rig = createSkaterRig(defWith(185, 90), colors);
+    const rig = createSkaterRig(defWith(185, 90), colors, kit);
     const p = poseOf(initialGait(), standing, d);
     const visorY = (lookDown: number): number => { rig.apply({ ...p, lookDown }, 0, 0, 0); rig.root.updateMatrixWorld(true); return centreOf(rig.root, 'face').y; };
     expect(visorY(0.5)).toBeLessThan(visorY(0) - 0.02);
@@ -158,13 +164,4 @@ describe('skater rig', () => {
     kit.dispose();
   });
 
-  it('a marker shows its facing with a notch', () => {
-    const mk = createMarker(0x1b64d6, 0.4);
-    mk.position.set(2, 0, 1);
-    mk.rotation.y = -Math.PI / 2; // facing +PI/2 in the engine: toward world +Z
-    mk.updateMatrixWorld(true);
-    const notch = centreOf(mk, 'notch');
-    expect(notch.z - 1).toBeGreaterThan(0.2);
-    expect(Math.abs(notch.x - 2)).toBeLessThan(0.05);
-  });
 });
