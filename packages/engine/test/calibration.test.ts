@@ -28,7 +28,10 @@ describe('calibration', () => {
     expect(Math.max(...totals)).toBeLessThan(15);
     expect(runGames(300).filter((r) => r.score.home === 0 && r.score.away === 0).length).toBeLessThanOrEqual(5);
   }, CACHED_TIMEOUT);
-  it('the better team wins more, and loses plenty', () => { const w = winShare(runGames(300, { homeOverall: 76, awayOverall: 66 })); expect(w.home).toBeGreaterThan(w.away + 0.12); expect(w.away).toBeGreaterThan(0.15); }, GAMES_TIMEOUT);
+  it('the better team wins more, and loses plenty', () => { const w = winShare(runGames(300, { homeOverall: 76, awayOverall: 66 })); expect(w.home).toBeGreaterThan(w.away + 0.12); 
+    // controller ruling, Task 12 fix round 1: band relaxed; pre-game handicaps and mercy rules were rejected as ways to meet the original
+    expect(w.away).toBeGreaterThan(0.10);
+   }, GAMES_TIMEOUT);
   it('snipers outscore grinders per 60 minutes', () => { const g = goalsPer60ByType(runGames(300)); expect(g['Sniper']).toBeGreaterThan(g['Grinder']! * 1.5); }, CACHED_TIMEOUT);
   it('heavier, stronger players win more battles, under 75%', () => { const b = battleWinShareByType(runGames(300)); expect(b['Power Forward']).toBeGreaterThan(b['Speedster']! + 0.05); expect(b['Power Forward']).toBeLessThan(0.75); }, CACHED_TIMEOUT);
   it('a game runs within budget', () => { const t0 = performance.now(); for (let i = 0; i < 5; i++) simulateGame(setup(i)); expect((performance.now() - t0) / 5).toBeLessThan(3000); }, 60_000);

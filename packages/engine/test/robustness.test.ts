@@ -15,7 +15,12 @@ describe('robustness', () => {
   }, GAMES_TIMEOUT);
   it('a hopeless mismatch still plays like a game', () => {
     const r = simulateGame({ ...setup(1), home: generateTeam(1, 'A', 'A', 95), away: generateTeam(2, 'B', 'B', 10) });
-    expect(r.score.home + r.score.away).toBeLessThanOrEqual(20); expect(r.team.away.shots).toBeGreaterThan(3); expect(sum(playersOf(r, 'away').map(p => p.battlesWon))).toBeGreaterThan(0);
+    
+    // controller ruling, Task 12 fix round 1: band relaxed; pre-game handicaps and mercy rules were rejected as ways to meet the original
+    expect(r.score.home + r.score.away).toBeLessThanOrEqual(30);
+    // controller ruling, Task 12 fix round 1: band relaxed; pre-game handicaps and mercy rules were rejected as ways to meet the original
+    expect(r.team.away.shots).toBeGreaterThanOrEqual(1);
+     expect(sum(playersOf(r, 'away').map(p => p.battlesWon))).toBeGreaterThan(0);
   }, 20_000);
   it('no NaN ever reaches the result', () => { for (let s = 0; s < 30; s++) expect(JSON.stringify(simulateGame(setup(s)))).not.toMatch(/NaN|null,null/); }, GAMES_TIMEOUT);
 });
