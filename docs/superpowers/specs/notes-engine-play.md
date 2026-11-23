@@ -16,3 +16,5 @@ Proposed shape **[my call]**:
 - Point shots: defencemen at the blue line shoot through traffic; forwards go to the net front for them.
 - Tips: a net-front forward can deflect a point shot (hand-eye from existing attributes), which changes its path and is harder to save; screens already exist.
 - Known from the build: defencemen rarely skate backwards facing the puck; to be fixed.
+
+Order (owner agreed, 2026-11-23): the 3D viewer is built first, on the engine's current style of play. Tactics, cycling, dump and chase, point shots and tips go into the next round of engine work with penalties and power plays, and the totals are re-tuned once after that.
