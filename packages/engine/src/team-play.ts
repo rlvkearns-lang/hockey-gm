@@ -336,7 +336,9 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   const homeSupport = battle ? supportTarget(state, 'home') : null;
   const awaySupport = battle ? supportTarget(state, 'away') : null;
   // Score effects: a team well ahead sits back (a passive forecheck, a slower presser).
-  const tactic = (side: Side): Tactics => (sitBack(state, side) < 1 ? { ...tactics[side], forecheck: 'passive' } : tactics[side]);
+  const homeBack = sitBack(state, 'home'), awayBack = sitBack(state, 'away');
+  const homeTactic: Tactics = homeBack < 1 ? { ...tactics.home, forecheck: 'passive' } : tactics.home;
+  const awayTactic: Tactics = awayBack < 1 ? { ...tactics.away, forecheck: 'passive' } : tactics.away;
   const homePhase = phaseOf(shapeSide, puck.x, 'home', state.attackDir.home);
   const awayPhase = phaseOf(shapeSide, puck.x, 'away', state.attackDir.away);
 
@@ -348,9 +350,10 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
     const phase = s.side === 'home' ? homePhase : awayPhase;
     const chasing = s === homeChaser || s === awayChaser;
     const support = chasing && battle ? (s.side === 'home' ? homeSupport : awaySupport) : null;
+    const tactic = s.side === 'home' ? homeTactic : awayTactic;
     if (s === presser) {
-      press(state, s, d, carrier!, phase, tactic(s.side));
-      s.speedCap *= sitBack(state, s.side);
+      press(state, s, d, carrier!, phase, tactic);
+      s.speedCap *= s.side === 'home' ? homeBack : awayBack;
     }
     else if (support) {
       s.target.x = support.x;
@@ -358,7 +361,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
       facePuck(s, puck);
       s.speedCap = 1;
     } else if (chasing && !battle) chase(state, s);
-    else shape(state, s, d, phase, tactic(s.side), dir);
+    else shape(state, s, d, phase, tactic, dir);
     keepLegal(state, s, dir, chasing, s.side === tagUp);
   }
 }

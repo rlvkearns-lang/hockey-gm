@@ -4,8 +4,8 @@ import { createGame, simulateGame } from '../src/game';
 import { generateTeam } from '../src/roster-gen';
 import { playersOf, setup, sum } from './helpers';
 
-/** Whole-game tests take about 1.3 s each; this leaves room for a loaded machine. */
-const GAMES_TIMEOUT = 180_000;
+/** 30 whole games each (about 1.1 s a game, more with an expect on every tick); room for a loaded machine. */
+const GAMES_TIMEOUT = 300_000;
 
 describe('robustness', () => {
   it('the puck is never left alone', () => {

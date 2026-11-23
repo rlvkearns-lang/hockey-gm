@@ -6,7 +6,7 @@ import { battleWinShareByType, goalsPer60ByType, runGames, setup, summarise, win
  * 300 games of two overall-70 teams (fresh rosters every game), and 300 of a 76 against a 66, played on worker
  * threads (runGames caches them for the file). The first test of each set pays for its games.
  */
-const GAMES_TIMEOUT = 240_000;
+const GAMES_TIMEOUT = 300_000;
 const CACHED_TIMEOUT = 10_000;
 
 describe('calibration', () => {

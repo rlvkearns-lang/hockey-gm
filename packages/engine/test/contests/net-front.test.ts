@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { attackerId, canReceive, isScreened, netFrontWonByAttacker, netFrontWonByDefender, netFrontRounds } from '../helpers';
+import { attackerId, canReceive, isScreened, netFrontEnded, netFrontWonByAttacker, netFrontWonByDefender, netFrontRounds } from '../helpers';
 
 describe('net-front battles', () => {
   it('a net-front winner screens the goalie', () => { const st = netFrontWonByAttacker(); expect(isScreened(st)).toBe(true); });
@@ -19,5 +19,11 @@ describe('net-front battles', () => {
     expect(tied).toBeDefined();
     expect(tied!.attackerTarget).toBeGreaterThan(1.4);
     expect(tied!.attackerTarget).toBeLessThan(1.6);
+  });
+  it('a net-front battle that has had a round credits its last winner with a battle', () => {
+    const r = netFrontEnded(3);
+    expect(r.leader).not.toBeNull();
+    expect(r.battles).toHaveLength(1);
+    expect(r.battles[0]).toMatchObject({ playerId: r.leader, detail: 'netFront' });
   });
 });

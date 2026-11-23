@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { def, meanMiss, playmaker, rate, slotState, sniper, stateWith } from './helpers';
+import { def, heldFor, shootIns, meanMiss, playmaker, rate, slotState, sniper, stateWith, withScore } from './helpers';
 
 describe('player brain', () => {
   it('a sniper in the slot shoots more than a playmaker does', () => {
@@ -14,6 +14,21 @@ describe('player brain', () => {
     expect(rate('pass', dumper, stateWith({ carrier: 'home', puckX: -2 })) + rate('carry', dumper, stateWith({ carrier: 'home', puckX: -2 }))).toBeGreaterThan(own * 3);
   });
   it('better passers put the puck closer to the target', () => { expect(meanMiss(def({ passing: 95 }))).toBeLessThan(meanMiss(def({ passing: 45 })) * 0.7); });
+  it('score effects: well behind he shoots more, well ahead less', () => {
+    const level = rate('shoot', sniper, slotState);
+    expect(rate('shoot', sniper, withScore(slotState, 0, 5))).toBeGreaterThan(level + 0.05);
+    expect(rate('shoot', sniper, withScore(slotState, 5, 0))).toBeLessThan(level * 0.6);
+  });
+  it('the longer he has had the puck, the more he moves it on', () => {
+    expect(rate('pass', playmaker, heldFor(slotState, 10))).toBeGreaterThan(rate('pass', playmaker, heldFor(slotState, 0)) + 0.1);
+    expect(rate('carry', playmaker, heldFor(slotState, 10))).toBeLessThan(rate('carry', playmaker, heldFor(slotState, 0)));
+  });
+  it('well behind, some dumps from the neutral zone go at the net; level, none do', () => {
+    const dumper = def({ tendencies: { ...def().tendencies, dump: 1 } });
+    const st = stateWith({ carrier: 'home', puckX: 3 });
+    expect(shootIns(dumper, withScore(st, 0, 5))).toBeGreaterThan(0.2);
+    expect(shootIns(dumper, st)).toBe(0);
+  });
   it('vision changes which lane he picks, not how often he passes', () => {
     expect(rate('pass', def({ vision: 95 }), slotState)).toBe(rate('pass', def({ vision: 20 }), slotState));
   });

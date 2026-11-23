@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { saveChance } from '../src/goalie';
-import { simulateGame } from '../src/game';
+import { createGame, simulateGame } from '../src/game';
 import type { GameResult } from '../src/types';
 import { assistsWhenTouched, blockAttempt, count, def, g, setup, share, simulateUntilFirstGoal, sum } from './helpers';
 
@@ -23,6 +23,13 @@ describe('goalies, saves, goals', () => {
   it('only touches within about 10 s of the goal earn an assist', () => {
     expect(assistsWhenTouched(4)).toEqual(['home-LW']);
     expect(assistsWhenTouched(12)).toEqual([]);
+  });
+  it('a goalie\'s night moves his save chance, and each game draws its own', () => {
+    expect(saveChance({ ...base, distance: 6, night: 0.5 })).toBeGreaterThan(saveChance({ ...base, distance: 6 }));
+    expect(saveChance({ ...base, distance: 6, night: -0.5 })).toBeLessThan(saveChance({ ...base, distance: 6 }));
+    const nights = [1, 2, 3].map((s) => createGame(setup(s)).state.goalieNight);
+    expect(new Set(nights.map((n) => n.home)).size).toBe(3);
+    expect(createGame(setup(1)).state.goalieNight).toEqual(nights[0]);
   });
   it('shot blockers block more', () => { expect(share(3000, () => blockAttempt(def({ shotBlocking: 92 })))).toBeGreaterThan(share(3000, () => blockAttempt(def({ shotBlocking: 40 }))) + 0.15); });
   it('shots, saves and goals reconcile', () => { const r = simulateGame(setup(4)); expect(r.team.home.shots).toBe(count(r, 'save', 'away') + r.score.home); }, GAME_TIMEOUT);

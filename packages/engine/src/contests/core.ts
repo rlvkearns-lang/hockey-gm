@@ -44,6 +44,8 @@ export type ContestResult = { winnerId: string | null; puck: 'toWinner' | 'loose
  */
 export interface Contest {
   readonly kind: string;
+  /** Optional: false when the trigger cannot fire for anyone now (checked once per round of triggers, before asking each skater). */
+  gate?(ctx: ContestCtx): boolean;
   trigger(ctx: ContestCtx, s: SkaterState): string[] | null;
   start(ctx: ContestCtx, participants: string[]): ContestState;
   update(c: ContestState, ctx: ContestCtx, dt: number): ContestResult | null;
@@ -239,15 +241,27 @@ export function contestTick(
 
   ctx.memo.clear();
   const kinds = contestKinds();
+  const open = openKinds(ctx, kinds);
   for (const s of state.skaters) {
     if (!isFree(s)) continue;
-    for (const k of kinds) {
+    for (let i = 0; i < kinds.length; i++) {
+      if (!open[i]) continue;
+      const k = kinds[i]!;
       const ps = k.trigger(ctx, s);
       if (ps === null) continue;
       begin(ctx, k, ps);
+      openKinds(ctx, kinds); // a start can change what is possible (e.g. a puck knocked loose)
       break;
     }
   }
+}
+
+/** Per kind, whether its trigger could fire for anyone this round (`gate`, or true without one); refilled in place. */
+const openScratch: boolean[] = [];
+function openKinds(ctx: ContestCtx, kinds: readonly Contest[]): boolean[] {
+  openScratch.length = kinds.length;
+  for (let i = 0; i < kinds.length; i++) { const g = kinds[i]!.gate; openScratch[i] = g === undefined || g(ctx); }
+  return openScratch;
 }
 
 /** One of `c`'s players has left the ice or is heading off. */

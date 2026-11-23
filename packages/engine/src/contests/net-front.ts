@@ -45,6 +45,11 @@ const netOf = (state: GameState, s: SkaterState): Vec2 => ({ x: state.attackDir[
 export const netFrontContest: Contest = {
   kind: KIND,
 
+  gate(ctx) {
+    const carrier = carrierNow(ctx);
+    return carrier !== null && zoneOf(ctx.state.puck.pos.x, ctx.state.attackDir[carrier.side]) === 'O';
+  },
+
   trigger(ctx, s) {
     const state = ctx.state;
     const carrier = carrierNow(ctx);

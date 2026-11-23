@@ -1,7 +1,7 @@
 import { blockPickup } from '../actions';
 import { DT } from '../constants';
 import { distToBoards } from '../rink';
-import { movementOf, type Movement } from '../skating';
+import { movementOf, wrapAngle, type Movement } from '../skating';
 import { isTiedUp, steeredByContest } from '../team-play';
 import { TUNING } from '../tuning';
 import type { ContestState, GameState, PlayerDef, SkaterState } from '../types';
@@ -34,7 +34,7 @@ export function timeToReach(s: SkaterState, m: Movement, p: Vec2): number {
   const l = hypot2(dx, dy);
   const d = l - REACH;
   if (d <= 0) return 0;
-  const turn = Math.abs(Math.atan2(Math.sin(Math.atan2(dy, dx) - s.facing), Math.cos(Math.atan2(dy, dx) - s.facing))) / m.turnRate;
+  const turn = Math.abs(wrapAngle(Math.atan2(dy, dx) - s.facing)) / m.turnRate;
   const top = m.topSpeed, a = m.accel;
   const v0 = Math.max(-top, Math.min(top, (s.vel.x * dx + s.vel.y * dy) / l));
   const dAccel = (top * top - v0 * v0) / (2 * a);
@@ -124,6 +124,8 @@ function firstMen(ctx: ContestCtx): FirstMen {
  */
 export const looseRaceContest: Contest = {
   kind: KIND,
+
+  gate: (ctx) => raceableNow(ctx),
 
   trigger(ctx, s) {
     const state = ctx.state;

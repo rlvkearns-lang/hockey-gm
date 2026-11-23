@@ -101,6 +101,8 @@ const dataOf = (c: ContestState): BattleData => c.data as BattleData;
 export const boardBattleContest: Contest = {
   kind: KIND,
 
+  gate: (ctx) => puckBattleable(ctx),
+
   trigger(ctx, s) {
     const state = ctx.state;
     if (!puckBattleable(ctx) || dist(s.pos, state.puck.pos) > T.triggerRange || onCooldown(state, s.id, KIND)) return null;

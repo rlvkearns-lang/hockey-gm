@@ -110,6 +110,11 @@ function steerHitter(h: SkaterState, t: SkaterState): void {
 export const hitContest: Contest = {
   kind: KIND,
 
+  gate(ctx) {
+    const { carrier, released } = hittable(ctx);
+    return carrier !== null || released !== null;
+  },
+
   trigger(ctx, h) {
     const state = ctx.state;
     if (onCooldown(state, h.id, KIND)) return null;

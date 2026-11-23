@@ -45,6 +45,11 @@ function steerReach(ctx: ContestCtx, checker: SkaterState): void {
 export const pokeCheckContest: Contest = {
   kind: KIND,
 
+  gate(ctx) {
+    const carrier = carrierNow(ctx);
+    return carrier !== null && isFree(carrier) && ctx.state.puck.z <= 0;
+  },
+
   trigger(ctx, s) {
     const state = ctx.state;
     const carrier = carrierNow(ctx);

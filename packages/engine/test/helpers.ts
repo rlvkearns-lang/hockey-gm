@@ -272,6 +272,24 @@ export function rate(kind: Decision['kind'], d: PlayerDef, state: GameState): nu
   return n / 2000;
 }
 
+/** Of 2,000 decideCarrier draws (seeds 1..2000) with `d` as the carrier in `state` that are dumps, the share aimed at the net. */
+export function shootIns(d: PlayerDef, state: GameState): number {
+  const id = state.carrierId!;
+  const carrier = state.skaters.find((s) => s.id === id)!;
+  const me = { ...d, id, position: carrier.slot ?? d.position };
+  const ds = new Map(defs);
+  ds.set(id, me);
+  let dumps = 0, onNet = 0;
+  for (let seed = 1; seed <= 2000; seed++) {
+    const x = decideCarrier(state, me, ds, createRng(seed));
+    if (x.kind !== 'dump') continue;
+    dumps++;
+    if (x.onNet === true) onNet++;
+  }
+  if (dumps === 0) throw new Error('no dumps drawn');
+  return onNet / dumps;
+}
+
 /**
  * Mean lateral miss (m) at the receiver of 400 passes (seeds 1..400) by `d` to a still teammate 15 m away,
  * with no opponent near either of them.
@@ -1193,6 +1211,33 @@ export function wingerAheadOnRush(): number {
     worst = Math.max(worst, lw.pos.x - RINK.blueLineX - harnessMoves.get(lw.id)!.radius);
   }
   return worst;
+}
+
+/** A copy of `state` with the score set (home, away). */
+export function withScore(state: GameState, home: number, away: number): GameState {
+  const st = structuredClone(state);
+  st.score = { home, away };
+  return st;
+}
+
+/** A copy of `state` in which its carrier has had the puck for `seconds` (his touch in the chain is that old). */
+export function heldFor(state: GameState, seconds: number): GameState {
+  const st = structuredClone(state);
+  const c = st.skaters.find((k) => k.id === st.carrierId)!;
+  st.tick = 3000;
+  st.touches = { side: c.side, ids: [c.id], ticks: [st.tick - Math.round(seconds / DT)] };
+  return st;
+}
+
+/** A net-front battle run for `seconds`, then ended by the puck coming loose: its last leader and the events it emitted. */
+export function netFrontEnded(seconds: number): { leader: string | null; battles: GameEvent[] } {
+  const { h, c } = netFrontStart();
+  for (let i = 0; i < Math.round(seconds / DT) && h.st.contests.includes(c); i++) harnessStep(h);
+  const leader = c.leader;
+  releasePuck(h.st, h.st.carrierId!, 0, -5, 0);
+  h.st.pendingPass = null;
+  for (let i = 0; i < 3 && h.st.contests.includes(c); i++) harnessStep(h);
+  return { leader, battles: h.events.filter((e) => e.type === 'battle') };
 }
 
 // ---- calibration (Task 12) ----

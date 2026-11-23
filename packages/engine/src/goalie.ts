@@ -184,8 +184,9 @@ export function goalieTick(state: GameState, defs: Map<string, PlayerDef>, _rng:
 }
 
 /**
- * While a shot is in flight below 1.1 m: each defending skater within 0.5 m of the puck's path this tick, and more
- * than 1.5 m from the shooter, gets one chance per shot to block it, `clamp(0.12 + shotBlocking * 0.004, 0.03, 0.97)`.
+ * While a shot is in flight below BLOCK.maxZ: each defending skater within BLOCK.path m of the puck's path this tick,
+ * and more than BLOCK.clearOfShooter m from the shooter, gets one chance per shot to block it,
+ * `clamp(BLOCK.base + shotBlocking * BLOCK.perPoint, 0.03, 0.97)` (TUNING.block).
  * A block emits `block` into `out`, ends the shot and leaves the puck loose, slowed and turned back.
  */
 export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): boolean {

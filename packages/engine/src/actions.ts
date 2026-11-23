@@ -75,7 +75,7 @@ const event = (state: GameState, e: Omit<GameEvent, 'tick' | 'period' | 'clock'>
   ({ tick: state.tick, period: state.period, clock: state.clock, ...e });
 
 /**
- * Pass along the ice to `toId`, led to where he will be. Speed 13 + passing * 0.09 m/s; the direction is off by a
+ * Pass along the ice to `toId`, led to where he will be. Speed TUNING.pass.speed (base + per point of passing); off by a
  * normal error that shrinks with passing and grows with pressure.
  */
 export function executePass(state: GameState, fromId: string, toId: string, defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
@@ -109,7 +109,7 @@ export function goalieShade(state: GameState, attackingSide: Side): number {
 
 /**
  * Shoot at the attacked net: aim at a spot inside it (more often on the side the goalie leaves open), missed by a
- * normal spread from shootingAccuracy, distance and pressure. Speed 22 + shootingPower * 0.2 m/s, lifted so it
+ * normal spread from shootingAccuracy, distance and pressure. Speed TUNING.shot.speed (base + per point of power), lifted so it
  * arrives at the aimed height. No event yet: the release is recorded in `state.shotInFlight`, and what happens to the
  * puck decides whether it is a shot on goal, a miss, a post or a block.
  */
@@ -159,7 +159,8 @@ export function executeDump(state: GameState, fromId: string, defs: Map<string, 
 
 /**
  * Chance that `d` intercepts a pass going `speed` m/s that comes within reach:
- * clamp(0.08 + stickChecking * 0.003 + defensivePositioning * 0.002, 0.03, 0.97), scaled down for fast passes.
+ * clamp(base + stickChecking * perStick + defensivePositioning * perPositioning, 0.03, 0.97) (TUNING.pass.intercept),
+ * scaled down for fast passes.
  */
 export function interceptChance(d: PlayerDef, speed: number): number {
   const base = clamp(PASS.intercept.base + d.attrs.stickChecking * PASS.intercept.perStick + d.attrs.defensivePositioning * PASS.intercept.perPositioning, 0.03, 0.97);
