@@ -55,3 +55,14 @@ Proposed shape **[my call, not yet agreed]**:
 - The old sub-types become traits: small specific habits a player may have a few of (one-timer, net-front presence, agitator, shot blocker, penalty killer, breakaway threat, puck-mover, stay-at-home). Traits change particular decisions, not the overall blend.
 - Goalies get their own styles (butterfly, hybrid, stand-up or athletic, positional) and traits (puck handler, rebound control, big-game) when goalie play is deepened.
 - Belongs with engine round 2, where tactics and habits are being reworked anyway.
+
+- Owner agreed (2026-11-23) to primary + secondary + traits. Add a shutdown forward type if it is different enough from two-way (Claude's call: yes, see below).
+- Owner wants traits shown as badges on the player. His examples: shot blocker, heavy slapshot, one-timer, a speed one, "and more". He specifically wants an agitator badge that is independent of the enforcer type: a skilled player who gets under the other team's skin.
+
+Proposed shape **[my call]**:
+
+- New forward style, Shutdown Forward: defence first, sent out against the other team's best line, wins his matchup rather than the scoresheet. Different from Two-Way (good at both ends) and Grinder (energy and forecheck).
+- Badges are traits the player has earned by being clearly good at one specific thing; most players have none to three, stars a few more. Each has a real, small effect in the engine and an icon on the card.
+- Starting list. Shooting: Heavy Slapshot, One-Timer, Quick Release, Net-Front Finisher. Skating: Burner (straight-line speed), Elusive (edges and agility), Tireless. Puck: Playmaker's Vision, Stickhandler, Breakout Passer. Defending: Shot Blocker, Stick Checker, Big Hitter, Shutdown. Battles: Board Battler, Net-Front Presence, Faceoff Specialist. Mental: Clutch, Cool Head, Leader. Edge: Agitator, Fighter. Goalies: Puck Handler, Rebound Control, Glove Hand, Big-Game.
+- Agitator: any type can have it. He provokes: opponents near him are more likely to take a retaliation penalty or lose focus, by their own discipline and poise; he draws penalties and sometimes takes one himself. Opposing players and fans dislike him, his own room and fans tend to love him (people layer). Needs penalties, so it arrives with engine round 2.
+- Badges can be gained and lost over a career (a Burner slows down; a young player earns Shot Blocker), and a scout may see a badge coming in a prospect.
