@@ -60,3 +60,17 @@ Proposed shape **[my call, not yet agreed]**:
 - Proposed **[my call]**: generated players get this look by rendering their own 3D head (lit, in team jersey, studio-style background) and shrinking it to about 100 pixels wide. The portrait then matches the player on the ice exactly and ages with the head model. Real photos from a face pack get the same pixelation, so real and generated players look like one set. Consequence: the 3D head needs more facial detail than a simple stylised head, since it is also the portrait source. The mockup page has a third section sketching the idea, but it is built from flat shapes and falls well short of the target; the real test is a rendered 3D head, to be shown early in the viewer work.
 - Owner saw a first rendered example (seed-built 3D head, lit, shrunk to 100 px: https://claude.ai/artifact/BBiwKQaq1wTqp24DUD96F7): "more in the right direction", but wants it more realistic (2026-11-23).
 - Routes to more realism **[my call]**: (a) start from a properly sculpted human head model with blend shapes for variety and age, plus realistic skin textures and modelled hair (open-licensed base models exist, for example MakeHuman's, which is CC0); the same head is used on the ice. (b) AI-generated portrait images: most photographic, but hard to keep one face consistent as he ages and to match the 3D head, and needs an image service. Recommended: (a) as the base; (b) at most as an optional extra later. To be proven with a test early in the viewer work.
+
+## Portraits on hold; the player card shows the 3D model (owner, 2026-11-23)
+
+- Realistic face portraits are on hold for now.
+- Lists (draft class, prospects, rosters) show no faces. A player's look appears only when his card is opened.
+- The card does not need a face either: it can show his 3D model in an action pose, turning around.
+- This supersedes, for now, the earlier notes on drawn portraits and the pixelated-portrait target. The face pack for real players stays a possible later extra.
+
+Proposed shape **[my call]**:
+
+- The card shows the same model used on the ice: his height and build, team jersey with name and number, handedness, in a pose that suits his type (a sniper mid-shot, a goalie in his stance, a defenceman skating backwards), slowly turning, with drag to rotate.
+- In gear, with helmet and visor, most of the face is covered, so a simple head with the right skin tone, hair showing at the back and any beard is enough. That removes the hardest art problem from the project for now.
+- Prospects and unsigned players wear a neutral or junior-team jersey; ageing shows in build rather than face.
+- Reuses the viewer's skater model and poses, so it costs little beyond the 3D viewer work itself.
