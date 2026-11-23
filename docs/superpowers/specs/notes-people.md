@@ -15,3 +15,15 @@ Whether he grew up in the team's town, whether his friends are on the team, ice 
 - The GM can make promises (ice time, bringing in help, not trading him); keeping or breaking them matters.
 - He lets the club know by stages: quiet, then to the coach, then his agent calls, then a private trade request, then public, then refusing to play.
 - It reaches the ice through the engine's form and morale inputs, which already exist.
+
+## How the GM learns what a player feels (owner, 2026-11-23)
+
+- Feelings are read through people (coach, assistant GM, agent, the player himself), not shown as plain numbers. Same off switch as the estimated ratings: a setting that shows everything plainly.
+- The owner does not want to talk to each player every time. Checking in must be something that can run by itself.
+- Each player has a card that records what has been learned, so nothing needs asking twice.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Automatic check-ins: the coach and assistant GM make the rounds on a schedule, and report what they hear. How much they catch depends on their ability and on how open the player is. This uses the same delegation rules as the inbox.
+- The card ("what we know") lists each thing learned, who it came from, when, and how sure it is. Old items are marked as out of date rather than removed.
+- The GM is only told when something on a card changes or is serious. Talking to a player in person stays available and gets more than a second-hand report does, but is never required.
