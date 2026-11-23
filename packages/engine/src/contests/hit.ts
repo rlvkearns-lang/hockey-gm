@@ -83,6 +83,25 @@ function inReach(state: GameState, h: SkaterState, t: SkaterState | null): t is 
     && hypot2(t.pos.x - h.pos.x, t.pos.y - h.pos.y) <= TRIGGER_RANGE && closingSpeed(h, t) > MIN_CLOSING;
 }
 
+type Hittable = { carrier: SkaterState | null; released: SkaterState | null };
+const HITTABLE = 'hit.hittable';
+
+/**
+ * Who could be hit now: the carrier, and the skater who let the puck go within RELEASE_WINDOW_SECONDS (if he is not the
+ * carrier). Worked out once per round of triggers (kept in `ctx.memo`, emptied whenever a contest starts).
+ */
+function hittable(ctx: ContestCtx): Hittable {
+  const memo = ctx.memo.get(HITTABLE) as Hittable | undefined;
+  if (memo !== undefined) return memo;
+  const state = ctx.state;
+  const carrier = carrierOf(state);
+  const r = state.lastRelease;
+  const released = r !== null && r.id !== state.carrierId && state.tick - r.tick <= Math.round(RELEASE_WINDOW_SECONDS / DT) ? skaterById(state, r.id) : null;
+  const out: Hittable = { carrier, released };
+  ctx.memo.set(HITTABLE, out);
+  return out;
+}
+
 /** The hitter drives through the target, facing him. */
 function steerHitter(h: SkaterState, t: SkaterState): void {
   const dx = t.pos.x - h.pos.x, dy = t.pos.y - h.pos.y;
@@ -105,8 +124,8 @@ export const hitContest: Contest = {
   trigger(ctx, h) {
     const state = ctx.state;
     if (onCooldown(state, h.id, KIND)) return null;
-    const carrier = carrierOf(state);
-    const released = state.lastRelease !== null && state.lastRelease.id !== state.carrierId ? skaterById(state, state.lastRelease.id) : null;
+    const { carrier, released } = hittable(ctx);
+    if (carrier === null && released === null) return null;
     const t = inReach(state, h, carrier) ? carrier : inReach(state, h, released) ? released : null;
     if (t === null) return null;
     setCooldown(state, h.id, KIND, DECIDE_SECONDS);

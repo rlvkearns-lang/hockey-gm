@@ -20,6 +20,12 @@ export type ContestCtx = {
   emit(e: GameEvent): void;
   /** The game's chemistry pairs (GameSetup.chemistry). */
   chemistry: Chemistry;
+  /**
+   * Working values triggers may share while contestTick asks them in turn on one tick (e.g. each side's first man to a
+   * loose puck). Emptied before the triggers are asked and whenever a contest starts, so it never outlives the state
+   * it was worked out from. Derived data only: nothing in it carries over from one tick to the next.
+   */
+  memo: Map<string, unknown>;
 };
 
 /**
@@ -201,14 +207,13 @@ export function contestTick(
   state: GameState, defs: Map<string, PlayerDef>, rng: Rng, dt: number, out: GameEvent[] = [], chemistry: Chemistry = [],
 ): void {
   if (state.phase !== 'live') return;
-  const ctx: ContestCtx = { state, defs, rng, emit: (e) => { out.push(e); }, chemistry };
-  if (state.contestCooldowns.some((c) => state.tick >= c.untilTick)) state.contestCooldowns = state.contestCooldowns.filter((c) => state.tick < c.untilTick);
-  if (state.tiedUpUntil.some((t) => state.tick >= t.tick)) state.tiedUpUntil = state.tiedUpUntil.filter((t) => state.tick < t.tick);
+  const ctx: ContestCtx = { state, defs, rng, emit: (e) => { out.push(e); }, chemistry, memo: new Map() };
+  dropExpired(state);
 
   for (let i = 0; i < state.contests.length;) {
     const c = state.contests[i]!;
     let r: ContestResult | null;
-    if (c.participants.some((id) => { const s = skaterById(state, id); return !s.onIce || s.leaving; })) r = { winnerId: null, puck: 'unchanged' };
+    if (anyGone(state, c)) r = { winnerId: null, puck: 'unchanged' };
     else {
       c.stageT += dt;
       r = kindOf(c.kind).update(c, ctx, dt);
@@ -220,6 +225,7 @@ export function contestTick(
   }
   if (state.phase !== 'live') return; // a trapped puck was whistled dead
 
+  ctx.memo.clear();
   for (const s of state.skaters) {
     if (!isFree(s)) continue;
     for (const k of contestKinds()) {
@@ -231,11 +237,31 @@ export function contestTick(
   }
 }
 
+/** One of `c`'s players has left the ice or is heading off. */
+function anyGone(state: GameState, c: ContestState): boolean {
+  for (const id of c.participants) { const s = skaterById(state, id); if (!s.onIce || s.leaving) return true; }
+  return false;
+}
+
+/** Drops expired contest cooldowns and net-front tie-ups (in place, keeping order). */
+function dropExpired(state: GameState): void {
+  const tick = state.tick;
+  const cd = state.contestCooldowns;
+  let n = 0;
+  for (let i = 0; i < cd.length; i++) if (tick < cd[i]!.untilTick) cd[n++] = cd[i]!;
+  cd.length = n;
+  const tu = state.tiedUpUntil;
+  n = 0;
+  for (let i = 0; i < tu.length; i++) if (tick < tu[i]!.tick) tu[n++] = tu[i]!;
+  tu.length = n;
+}
+
 /** Starts a contest of kind `k` with `participants`: gives it the next id of this tick and marks its players. */
 function begin(ctx: ContestCtx, k: Contest, participants: string[]): ContestState {
   const state = ctx.state;
   let n = 0;
   for (const c of state.contests) if (Math.floor(c.id / ID_STRIDE) === state.tick) n++;
+  ctx.memo.clear();
   const c = k.start(ctx, participants);
   c.id = state.tick * ID_STRIDE + n;
   for (const id of c.participants) skaterById(state, id).contestId = c.id;
@@ -250,7 +276,7 @@ function begin(ctx: ContestCtx, k: Contest, participants: string[]): ContestStat
 export function startContest(
   state: GameState, defs: Map<string, PlayerDef>, rng: Rng, k: Contest, participants: string[], out: GameEvent[] = [], chemistry: Chemistry = [],
 ): ContestState {
-  return begin({ state, defs, rng, emit: (e) => { out.push(e); }, chemistry }, k, participants);
+  return begin({ state, defs, rng, emit: (e) => { out.push(e); }, chemistry, memo: new Map() }, k, participants);
 }
 
 /** Every contest ends at once with no result and its players are free (whistles, period ends). */

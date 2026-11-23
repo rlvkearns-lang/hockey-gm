@@ -94,18 +94,24 @@ function takeTime(ctx: ContestCtx, s: SkaterState): number {
 /** `s` can race now: in no other contest, not tied up, and has not just raced. */
 const eligible = (state: GameState, s: SkaterState): boolean => isFree(s) && !isTiedUp(state, s.id) && !onCooldown(state, s.id, KIND);
 
+type FirstMen = [{ id: string | null; eta: number }, { id: string | null; eta: number }];
+const FIRST_MEN = 'looseRace.firstMen';
+
 /**
- * Each side's first man to the puck (by takeTime) right now: [home, away]. Recomputed on every trigger call, so it
- * always reflects who is free at that moment.
+ * Each side's first man to the puck (by takeTime) right now: [home, away]. Worked out once per round of triggers and
+ * kept in `ctx.memo`, which is emptied whenever a contest starts, so it always reflects who is free at that moment.
  */
-function firstMen(ctx: ContestCtx): [{ id: string | null; eta: number }, { id: string | null; eta: number }] {
-  const out: [{ id: string | null; eta: number }, { id: string | null; eta: number }] = [{ id: null, eta: Infinity }, { id: null, eta: Infinity }];
+function firstMen(ctx: ContestCtx): FirstMen {
+  const memo = ctx.memo.get(FIRST_MEN) as FirstMen | undefined;
+  if (memo !== undefined) return memo;
+  const out: FirstMen = [{ id: null, eta: Infinity }, { id: null, eta: Infinity }];
   for (const s of ctx.state.skaters) {
     if (!s.onIce) continue;
     const t = takeTime(ctx, s);
     const f = out[s.side === 'home' ? 0 : 1];
     if (t < f.eta) { f.eta = t; f.id = s.id; }
   }
+  ctx.memo.set(FIRST_MEN, out);
   return out;
 }
 
