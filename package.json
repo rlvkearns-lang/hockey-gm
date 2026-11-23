@@ -7,12 +7,13 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "npm -w packages/engine run test && npm -w apps/debug run test",
+    "test": "npm -w packages/engine run test && npm -w apps/debug run test && npm -w apps/viewer run test",
     "test:calibration": "npm -w packages/engine run test:calibration",
     "bench": "tsx packages/engine/scripts/bench.ts",
-    "typecheck": "tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.test.json && npm -w apps/debug run typecheck",
+    "typecheck": "tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.test.json && npm -w apps/debug run typecheck && npm -w apps/viewer run typecheck",
     "calibrate": "tsx packages/engine/scripts/calibrate.ts",
     "debug": "npm -w apps/debug run dev",
+    "viewer": "npm -w apps/viewer run dev",
     "test:browser": "npm -w packages/engine run test:browser",
     "golden:update": "npm -w packages/engine run golden:update"
   },
