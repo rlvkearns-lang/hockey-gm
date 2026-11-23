@@ -135,6 +135,14 @@ Targets per team per game at 5-on-5 **[my call, from recent NHL seasons scaled t
 
 New measures added to the calibration so "looks like hockey" can be checked: share of time each skater spends near-stationary while play is live; share of passes completed and of point passes kept in; rebounds per game; share of board battles where the winner comes away with it; zone time and shots per offensive-zone possession.
 
+### NHL scorecard
+
+The owner (2026-11-24): "I just want it to simulate the real NHL as close as possible... I want to compare what we have to the NHL."
+
+- The calibration run prints one scorecard: each measure with our value beside the NHL's, and whether it is inside the target band. Totals (goals, shots, attempts, save percentage, hits, blocks, takeaways, giveaways, faceoffs, how often the better team wins) and the "looks like hockey" measures above.
+- **[my call]** The NHL column is checked against published league statistics when the scorecard is built, with the source and season written beside each number; where the NHL publishes nothing (time standing still, lanes covered) the target is stated as ours, with the reasoning.
+- The scorecard is shown to the owner after each part of the round, and kept as a file so later rounds can be compared with it.
+
 ## Part B: penalties and special teams
 
 - **Penalties.** Minors (tripping, hooking, slashing, holding, interference, high-sticking, roughing, boarding, delay of game for the puck over the glass), double minors and majors where they fit. A penalty comes out of a real action going wrong: a poke that trips, a reach that hooks when beaten, a late or high hit, a hold in a battle. The chance depends on the action, the player's discipline and how badly he was beaten. Referees miss some. No fighting majors yet.
