@@ -41,3 +41,17 @@ Proposed shape **[my call, not yet agreed]**:
 - Kept small on purpose: it shades the odds of attempting a block or going into a corner, never removes them, and stays within the parity rule.
 - Longer term, the same idea covers a player coming back from a real injury who is tentative at first (already implied by the injury note).
 - Owner agreed to the stinger shape above, kept small (2026-11-23).
+
+## Player types that combine (owner, 2026-11-23)
+
+- The owner wants types to combine, as in his original examples. His example: a heavy hitter who is also an elite shooter is a "sniping power forward".
+- Current engine list (starting point, owner has seen it): forwards Sniper, Playmaker, Power Forward, Two-Way Forward, Speedster, Grinder, Enforcer; defencemen Offensive, Defensive, Two-Way; one Goalie type. Sub-types are currently labels only.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Every skater has a primary style and an optional secondary style from the same list for his position group. He is named secondary-then-primary: "Sniping Power Forward", "Playmaking Speedster", "Two-Way Sniper", "Physical Offensive Defenceman". No secondary means a pure type.
+- The primary is what he is first; the secondary is a real lean. His habits (shoot, pass, carry, dump, hit, forecheck, go to the net, join the rush) are a blend weighted toward the primary, roughly two thirds to one third, and a generated player's attributes are nudged by both.
+- The label describes the player rather than dictating him: it is worked out from his attributes and habits. It can therefore change over a career (a speedster who loses a step becomes a playmaker; a young grinder who develops a shot becomes a sniping grinder), and real players get theirs from their ratings, with a manual override.
+- The old sub-types become traits: small specific habits a player may have a few of (one-timer, net-front presence, agitator, shot blocker, penalty killer, breakaway threat, puck-mover, stay-at-home). Traits change particular decisions, not the overall blend.
+- Goalies get their own styles (butterfly, hybrid, stand-up or athletic, positional) and traits (puck handler, rebound control, big-game) when goalie play is deepened.
+- Belongs with engine round 2, where tactics and habits are being reworked anyway.
