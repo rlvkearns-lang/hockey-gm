@@ -54,3 +54,10 @@ Proposed shape for arbitration **[my call]**: eligible restricted free agents ca
 - Tested by running the league with no human for 20 or more seasons and checking its health: every team cap-legal, dynasties rise and fall, bad teams recover through the draft, contracts and trade volumes look like the real league, no team hoards one position; plus scripted attempts at known exploits from other management games.
 - Build order: the value model, then team direction, then each kind of decision, starting with re-signing and free agency, then the draft, then trades.
 - Owner agreed (2026-11-23): rival GMs are competent but human by default (a sharp player builds a contender in a few seasons, not one), with a harder setting available. The approach above is accepted as the starting point.
+
+## Free agency (owner agreed, 2026-11-23)
+
+- A free agent weighs the whole picture using the five feelings, not just the highest offer: money (and term), role (line-up spot and promises), winning (contender or not), people (friends, former teammates, the coach, the GM's reputation among players), place (hometown, family, the city). Personality sets the weights (ring-chaser, hometown discount, mercenary).
+- Opening day is a rush: top players sign within hours.
+- His agent tells the GM roughly where he stands ("in the mix, but he wants a fifth year"; "leaning elsewhere").
+- The GM can lose a player despite the best offer, and is told why.
