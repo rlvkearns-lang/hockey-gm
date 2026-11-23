@@ -27,3 +27,13 @@ Proposed shape **[my call]**:
 - The GM can choose how much to reveal (that there is an offer, roughly what it is, which team), or bluff an offer that does not exist. A bluff that is called or found out costs trust with that GM, and word can get around.
 - The team whose offer is being shopped may find out and pull it, or set a deadline ("I need an answer by tonight").
 - Rival GMs do the same to the player: "I have another offer for him; can you do better?" may be true or not.
+
+## Contract negotiations (owner, 2026-11-23)
+
+- A real negotiation, not a single accept/reject: a back-and-forth with an agent who has his own personality and represents several players.
+- Things to trade with: years, salary and how it is spread, signing bonuses, no-trade and no-move clauses (full or partial), promises (role, power-play time, not being sent down), and timing (sign early or risk free agency).
+- What the player wants comes from his five feelings in the people layer.
+- The assistant GM can handle routine deals under limits the GM sets **[my call, same hand-off rules as elsewhere]**.
+- Wanted from the real NHL rules: offer sheets, arbitration, buyouts. (Burying contracts in the minors was offered and not picked up; leave out unless asked.)
+
+Proposed shape for arbitration **[my call]**: eligible restricted free agents can file; both sides submit a number; most cases settle before the hearing; if it goes to a hearing the team argues against its own player, which he may hold against the GM by personality; the award is short-term, and above a threshold the team may walk away and lose him. Exact eligibility and thresholds to be checked against the current agreement when this stage is designed.
