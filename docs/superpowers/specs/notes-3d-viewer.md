@@ -33,3 +33,9 @@ Mockup of the watch screen layout: https://claude.ai/artifact/8zAg7iarbD54vTWYPK
 - [my call] Every generated player gets a face built from a seed stored with him, so it is the same face for his whole career. Age drives how it is drawn: an 18-year-old looks 18 (no heavy beard, full hairline), and the same face matures year by year (facial hair options open up, hairline, grey, lines). Drawn portraits, not photo-real. The 3D head in the viewer takes its skin tone, hair and beard from the same face so the two match.
 - Owner (2026-11-23): with real NHL rosters, real players can simply use a photo of their face.
 - [my call] Photos come from a "face pack" folder the owner supplies, matched to players by id; the game shows a player's photo when one is there and the generated portrait otherwise. Photos are not stored in the code repository (they are other people's copyrighted images; fine on the owner's own machine for personal use, not something to publish). A setting switches between "photos where available" and "drawn portraits for everyone" for a consistent look.
+
+## Arena (owner, 2026-11-23)
+
+- First version: a simple arena. Stands with a still crowd shown as coloured blocks, a scoreboard, team colours on the boards, the home team's generated crest at centre ice.
+- Later upgrade, on higher graphics settings: a living arena. The crowd reacts to goals and to how the game is going; attendance reflects how the team is doing (ties into fan reaction and relocation).
+- Reason: early animation effort goes to the players.
