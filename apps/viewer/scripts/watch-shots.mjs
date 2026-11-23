@@ -6,7 +6,8 @@
 // contact sheet per sequence; then the page at laptop and phone widths in light and dark, the frame rate at both
 // qualities, and log.json (per frame: is the puck in the picture, how tall the nearest players are drawn; console
 // errors; network requests; the score bug against the event log). ONLY=actions saves the stick-action sequences;
-// ONLY=saves the saves, blocks and goal reactions; ONLY=contact poke checks, hits and falls.
+// ONLY=saves the saves, blocks and goal reactions; ONLY=contact poke checks, hits and falls; ONLY=battles board battles,
+// net-front battles and loose-puck races.
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -489,6 +490,113 @@ if (only && only.includes('contact')) {
   await kctx.close();
 }
 
+// ---- Battles (ONLY=battles): 10-frame sequences of whole board battles (one of each result the log has: pinned,
+// stick, support, scramble, protect), a net-front battle ending in a shot and a loose-puck race, each from ice level on
+// the open-ice side (window.__watch.aimAt: for a board battle 7.5 m out from the boards square to them and 2.4 m up,
+// looking at the spot), the follow camera and the broadcast camera, plus a contact sheet per sequence. Sheets are labelled with the frame
+// and its time only (no names), for reading the battle from the picture. `BATTLE_IDS` (name=contestId,...) takes those
+// contests; `BATTLE_SKIP` (e.g. pinned=1) a later one of a kind; `BATTLE_VIEWS` limits the cameras.
+if (only && only.includes('battles')) {
+  const { ctx: bctx, p: bp } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light', deviceScaleFactor: 2 });
+  await bp.evaluate(() => window.__watch.setManual(true));
+  const kv = (s) => Object.fromEntries((s ?? '').split(',').filter(Boolean).map((x) => x.split('=')).map(([k, v]) => [k, Number(v)]));
+  const ids = kv(process.env.BATTLE_IDS), skip = kv(process.env.BATTLE_SKIP);
+  const found = await bp.evaluate(({ ids, skip }) => {
+    const w = window.__watch, ev = w.events(), out = {}, n = {};
+    const starts = new Map(ev.filter((e) => e.type === 'contestStart').map((e) => [e.detail.contestId, e]));
+    const R = 8.53, HL = 30.48, HW = 12.955;
+    // The boards' outward normal at a point (engine x, y), as the viewer's boardsGap.
+    const normal = (x, y) => {
+      const ax = Math.abs(x), ay = Math.abs(y), sx = Math.sign(x) || 1, sy = Math.sign(y) || 1, cx = HL - R, cy = HW - R;
+      if (ax > cx && ay > cy) { const dx = ax - cx, dy = ay - cy, d = Math.hypot(dx, dy) || 1; return { x: sx * dx / d, y: sy * dy / d }; }
+      return HL - ax < HW - ay ? { x: sx, y: 0 } : { x: 0, y: sy };
+    };
+    const entry = (end) => {
+      const st = starts.get(end.detail.contestId);
+      if (!st) return null;
+      return { kind: end.detail.kind, cid: end.detail.contestId, start: st.tick, end: end.tick, spot: st.pos, endSpot: end.pos, ids: st.detail.participants, n: normal(end.pos.x, end.pos.y), result: end.detail.result };
+    };
+    const take = (k, v) => { if (!v || out[k]) return; n[k] = (n[k] ?? 0) + 1; if (n[k] > (skip[k] ?? 0)) out[k] = v; };
+    if (Object.keys(ids).length) {
+      for (const [k, cid] of Object.entries(ids)) { const e = ev.find((x) => x.type === 'contestEnd' && x.detail.contestId === cid); if (e) out[k] = entry(e); }
+      return out;
+    }
+    for (const e of ev) {
+      if (e.type !== 'contestEnd' || e.tick < 300) continue;
+      if (e.detail.kind === 'boardBattle') {
+        const r = e.detail.result, k = r === 'protected' ? 'protect' : r;
+        if (['pinned', 'stick', 'support', 'scramble', 'protect'].includes(k)) take(k, entry(e));
+      } else if (e.detail.kind === 'netFront' && e.detail.result !== 'whistle' && e.detail.result !== 'abandoned') {
+        const st = starts.get(e.detail.contestId);
+        if (st && e.tick - st.tick > 40 && ev.some((s) => s.type === 'shot' && s.tick > e.tick - 10 && s.tick < e.tick + 30)) take('netFront', entry(e));
+      } else if (e.detail.kind === 'looseRace' && e.detail.result === 'won') {
+        const st = starts.get(e.detail.contestId);
+        if (st && e.tick - st.tick > 20) take('race', entry(e));
+      }
+    }
+    return out;
+  }, { ids, skip });
+  console.log('battles', JSON.stringify(found));
+  log.battles = found;
+  for (const [k, v] of Object.entries(found)) {
+    const span = v.end - v.start, o = [];
+    for (let i = 0; i < 10; i++) o.push(Math.round(-6 + (span + 30) * i / 9));
+    for (const view of (process.env.BATTLE_VIEWS ?? 'side,follow,broadcast').split(',')) {
+      const r = await bp.evaluate(({ v, o, view }) => {
+        const w = window.__watch;
+        w.setSpeed(1);
+        w.seekPlain(v.start);
+        const s = w.state();
+        const ps = v.ids.map((id) => s.skaters.find((x) => x.id === id)).filter(Boolean);
+        const mx = v.kind === 'boardBattle' ? v.endSpot.x : ps.reduce((a, p) => a + p.pos.x, 0) / ps.length;
+        const mz = v.kind === 'boardBattle' ? v.endSpot.y : ps.reduce((a, p) => a + p.pos.y, 0) / ps.length;
+        let nx, nz;
+        if (v.kind === 'boardBattle') {
+          // Out from the boards on the open-ice side, turned 40 degrees along them so a supporting player (2 m straight
+          // out from the scrum) stands beside it in the picture rather than in front of it.
+          const c = Math.cos(0.7), sn = Math.sin(0.7);
+          nx = -v.n.x * c + v.n.y * sn; nz = -v.n.y * c - v.n.x * sn;
+        }
+        else {
+          const dx = ps[1].pos.x - ps[0].pos.x, dz = ps[1].pos.y - ps[0].pos.y, l = Math.hypot(dx, dz) || 1;
+          nx = -dz / l; nz = dx / l;
+          if ((mx + nx) ** 2 / 900 + (mz + nz) ** 2 / 169 > (mx - nx) ** 2 / 900 + (mz - nz) ** 2 / 169) { nx = -nx; nz = -nz; }
+        }
+        // A little above the players' heads, so a supporting player between the camera and the scrum does not hide it.
+        const pose = { pos: { x: mx + nx * 7.5, y: 2.4, z: mz + nz * 7.5 }, look: { x: mx, y: 0.55, z: mz }, fov: 40 };
+        if (view === 'side') w.aimAt(pose); else { w.aimAt(null); w.setFollow(v.ids[0]); w.setCamera(view); }
+        const start = v.start + o[0];
+        w.seek(start - 18);
+        w.step(18 / 30);
+        const sheet = document.createElement('canvas'), c0 = document.querySelector('.stage canvas');
+        const fw = 480, fh = 360;
+        sheet.width = fw * 5; sheet.height = fh * 2;
+        const g = sheet.getContext('2d');
+        g.fillStyle = '#000'; g.fillRect(0, 0, sheet.width, sheet.height);
+        const shots = [];
+        let at = start;
+        for (let i = 0; i < o.length; i++) {
+          const t = v.start + o[i];
+          if (t > at) { w.step((t - at) / 30); at = t; }
+          const url = w.grab();
+          const sw = c0.width * (view === 'side' ? 0.62 : 0.8), sh = sw * 0.75;
+          g.drawImage(c0, (c0.width - sw) / 2, (c0.height - sh) / 2, sw, sh, (i % 5) * fw, Math.floor(i / 5) * fh, fw, fh);
+          const sec = ((t - v.start) / 30).toFixed(1);
+          g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect((i % 5) * fw, Math.floor(i / 5) * fh, 96, 22);
+          g.fillStyle = '#fff'; g.font = '16px sans-serif'; g.fillText(`${i + 1}  ${sec} s`, (i % 5) * fw + 4, Math.floor(i / 5) * fh + 16);
+          shots.push({ url, tick: w.info().tick });
+        }
+        w.aimAt(null);
+        return { shots, sheet: sheet.toDataURL('image/jpeg', 0.9) };
+      }, { v, o, view });
+      save(`bt-${k}-${view}-sheet.jpg`, r.sheet);
+      r.shots.forEach((s, i) => save(`bt-${k}-${view}-${i + 1}.png`, s.url));
+      console.log('battle seq', k, v.kind, v.cid, view, 'frames', r.shots.map((s) => s.tick).join(' '));
+    }
+  }
+  await bctx.close();
+}
+
 // ---- Puck in frame through two minutes of play, per camera (every 0.25 s).
 if (want('coverage')) {
   log.coverage = await p.evaluate((camsIn) => {
@@ -578,7 +686,8 @@ if (want('fps')) {
   for (const q of ['low', 'high']) {
     const { ctx, p } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light' });
     const size = await p.evaluate(async (q) => { await window.__watch.setQuality(q); const c = document.querySelector('.stage canvas'); return `${c.width}x${c.height}`; }, q);
-    await p.evaluate((t) => { window.__watch.seek(t); }, moments.rush?.tick ?? 3000);
+    // FPS_TICK: start there instead (e.g. just before a board battle, to measure with one on screen).
+    await p.evaluate((t) => { window.__watch.seek(t); }, Number(process.env.FPS_TICK) || (moments.rush?.tick ?? 3000));
     await p.click('#play');
     await p.waitForTimeout(9000);
     const fps = await p.evaluate(() => window.__watch.fps());

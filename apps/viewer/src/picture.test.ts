@@ -36,9 +36,11 @@ import { sharedPlayback } from './test/game';
 // rebuilt from the same facts however reached, the body pass's offsets eased in at most 4.5 m/s): 5: 1a1e930df3a85d3a
 // and 42: bebcaef406426b2b before (f2afce8). With CONTACT_OVERLAYS out of OVERLAYS and BODY_PASS the identity this code
 // still gives Task 3's 97e20551b0cad32b and eba1ba61baa6f591.
+// Re-pinned by Task 5 (board battles, net-front battles and loose-puck races, overlays/battles.ts): 5: 59c71060018936d9
+// and 42: 2f707429f246afd7 before (473e45b), which this code still gives with BATTLE_OVERLAYS taken out of OVERLAYS.
 const PICTURE_HASH: Record<number, string> = {
-  5: '59c71060018936d9',
-  42: '2f707429f246afd7',
+  5: '1dc7b8be0de90acb',
+  42: 'c4115d5c8b595eef',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */
