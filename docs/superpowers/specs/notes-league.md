@@ -115,3 +115,16 @@ Proposed shape **[my call]**:
 - Whether he stays, and as what, comes from his personality (a student of the game coaches; a well-connected talker becomes an agent; some want nothing more to do with hockey).
 - The GM decides whose number to retire, with fans and the owner having expectations about the obvious ones; snubbing a legend or honouring a marginal player is noticed. A retired number is unavailable from then on, with a banner in the arena.
 - Record books, award history and a hall of fame per team and league keep the long save's history.
+
+## Draft gems (owner, 2026-11-23)
+
+- A "gem" feature: in the draft, a scout flags a player he thinks is a steal in a later round, or who will develop early, and similar.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Scouts "pound the table" for a few players each: a short tag plus a line in his own voice. Tags: steal or sleeper (better than where he is ranked), ready early, late bloomer (needs patience), boom or bust, safe pick, and warnings (overrated, character or injury concern).
+- Each scout only gets a handful per draft, so a flag means something.
+- Underneath, prospects really do differ in hidden ways: how fast they develop, how sure their ceiling is, how they respond to coaching. A good scout's flag usually points at something real; a weaker scout's flags are noisier, and he can be confidently wrong.
+- Flags depend on what the scout actually watched (his region and how many viewings), so sending scouts to the right places finds gems others miss.
+- After a few years the GM sees each scout's record: gems that hit, busts he called, and misses. That becomes a reason to keep, promote or replace a scout.
+- Rival teams have scouts too: a player your scout loves may go earlier than his ranking because someone else's scout loved him as well.
