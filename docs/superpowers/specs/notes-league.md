@@ -28,3 +28,7 @@ Working notes from conversation with the owner on 2026-11-23, to be folded into 
 - The GM sees his staff's estimate of a player's ratings, not the truth: sharper for players watched a lot, vaguer for a junior seen twice; better scouts narrow it faster and are wrong less often. An option turns this off to show true ratings.
 - Written scouting reports: the GM sends scouts to watch a prospect and they come back with a report in a scout's voice. Owner's example: "He's got a good motor, but lacks some size, he should continue to grow... but his compete level is next to none, we need to get this guy..."
 - [my call] A report is built from structured findings (what the scout saw, how sure he is, his recommendation), coloured by that scout's own tendencies and blind spots. The findings drive the game; the wording never changes an outcome.
+
+## Written text: reports, agents, GMs, rumours (owner chose C, 2026-11-23)
+- Templates always work (offline, free). If the owner adds an AI key, an AI model writes the text from the same structured findings, and can carry real back-and-forth conversations with agents and rival GMs. Needs internet and has a small running cost. The game stays fully playable without it.
+- Each scout is a person with tendencies and blind spots; two scouts can disagree about the same player.
