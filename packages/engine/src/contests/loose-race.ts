@@ -19,8 +19,8 @@ const RACE_WINDOW = 0.4;
 const RACE_HORIZON = 1.5;
 /** A man this close (m) to the puck has reached it (the pickup radius). */
 const REACH = 0.9;
-/** Rating points per second of arrival-time difference: 40 per tenth of a second. */
-const EDGE_PER_SECOND = 400;
+/** Rating points per second of arrival-time difference (a 0.3 s lead is 39 points, about 0.83 before attributes). */
+const EDGE_PER_SECOND = 130;
 /** A roll this close to the threshold is a 50/50 bounce: nobody gets it. */
 const BOUNCE_BAND = 0.08;
 /** The man who won the last net-front round has this edge for the rebound. */
@@ -94,29 +94,25 @@ function takeTime(ctx: ContestCtx, s: SkaterState): number {
 /** `s` can race now: in no other contest, not tied up, and has not just raced. */
 const eligible = (state: GameState, s: SkaterState): boolean => isFree(s) && !isTiedUp(state, s.id) && !onCooldown(state, s.id, KIND);
 
-// Each side's first man to the puck (takeTime), worked out once per tick (the trigger is asked for every free skater).
-// A race needs both first men to be able to race.
-let cacheState: GameState | null = null;
-let cacheTick = -1;
-const first: { id: string | null; eta: number }[] = [{ id: null, eta: Infinity }, { id: null, eta: Infinity }];
-
-function firstMen(ctx: ContestCtx): void {
-  const state = ctx.state;
-  if (cacheState === state && cacheTick === state.tick) return;
-  cacheState = state;
-  cacheTick = state.tick;
-  for (const f of first) { f.id = null; f.eta = Infinity; }
-  for (const s of state.skaters) {
+/**
+ * Each side's first man to the puck (by takeTime) right now: [home, away]. Recomputed on every trigger call, so it
+ * always reflects who is free at that moment.
+ */
+function firstMen(ctx: ContestCtx): [{ id: string | null; eta: number }, { id: string | null; eta: number }] {
+  const out: [{ id: string | null; eta: number }, { id: string | null; eta: number }] = [{ id: null, eta: Infinity }, { id: null, eta: Infinity }];
+  for (const s of ctx.state.skaters) {
+    if (!s.onIce) continue;
     const t = takeTime(ctx, s);
-    const f = first[s.side === 'home' ? 0 : 1]!;
+    const f = out[s.side === 'home' ? 0 : 1];
     if (t < f.eta) { f.eta = t; f.id = s.id; }
   }
+  return out;
 }
 
 /**
  * Loose-puck race. Participants: one man of each team, both steered at the puck. `race` until one is within reach of
  * it (`leader`: the one who would get there first), then `resolve` (0.1 s; `leader`: the winner, null for a bounce).
- * The draw: winProb of the arrival-time difference times 40 per tenth of a second, plus compete .4, agility .3,
+ * The draw: winProb of the arrival-time difference times 130 per second, plus compete .4, agility .3,
  * balance .3, plus 10 for the man who just won the net-front battle. The winner takes it; a roll within 0.08 of the
  * threshold is a bounce that stays loose. Someone else getting to it, a pass, or the puck speeding up or reaching the
  * boards ends it with no result.
@@ -127,8 +123,8 @@ export const looseRaceContest: Contest = {
   trigger(ctx, s) {
     const state = ctx.state;
     if (!raceable(state) || !eligible(state, s)) return null;
-    firstMen(ctx);
-    const mine = first[s.side === 'home' ? 0 : 1]!, theirs = first[s.side === 'home' ? 1 : 0]!;
+    const first = firstMen(ctx);
+    const mine = first[s.side === 'home' ? 0 : 1], theirs = first[s.side === 'home' ? 1 : 0];
     if (mine.id !== s.id || theirs.id === null) return null;
     if (Math.max(mine.eta, theirs.eta) > RACE_HORIZON || Math.abs(mine.eta - theirs.eta) > RACE_WINDOW) return null;
     const o = skaterById(state, theirs.id);

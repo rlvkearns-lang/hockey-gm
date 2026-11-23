@@ -24,6 +24,12 @@ describe('board battles', () => {
   it('support swings it and gets the puck', () => { const withHelp = share(3000, () => runBattle(twoWay, pf, { supportFor: 'a' }).winner === 'a'); expect(withHelp).toBeGreaterThan(share(3000, () => runBattle(twoWay, pf).winner === 'a') + 0.08); expect(runBattleWon(twoWay, pf, { supportFor: 'a' }).puckTo).toBe('support'); });
   it('first man in has an edge', () => { expect(share(3000, () => runBattle(even, even, { firstIn: 'a' }).winner === 'a')).toBeGreaterThan(0.53); });
   it('a stalemate is whistled dead', () => { expect(Array.from({ length: 3000 }, () => runBattle(even, even)).some(x => x.winner === null && x.detail === 'trapped')).toBe(true); });
+  it('support decides who gets a clean puck, not whether it comes out clean', () => {
+    const r = Array.from({ length: 2000 }, () => runBattle(even, even, { supportFor: 'a' })).filter((x) => x.winner !== null);
+    const clean = shareOf(r, (x) => x.puckTo !== 'loose');
+    expect(clean).toBeGreaterThan(0.5); expect(clean).toBeLessThan(0.7);
+    expect(r.filter((x) => x.winner === 'a' && x.puckTo !== 'loose').every((x) => x.puckTo === 'support')).toBe(true);
+  });
   it('a full game has plenty of battles', () => { const r = simulateGame(setup(3)); expect(count(r, 'battle')).toBeGreaterThan(40); expect(count(r, 'battle')).toBeLessThan(220); }, GAME_TIMEOUT);
 
   it('every tick shows the stage, its time, and who is pinned once someone is', () => {

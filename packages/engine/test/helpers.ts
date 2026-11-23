@@ -864,9 +864,9 @@ function battle(a: PlayerDef, b: PlayerDef, o: BattleOpts = {}): BattleOutcome {
 /** One board battle (see battle()): its winner, the event's detail and where the puck went. */
 export const runBattle = (a: PlayerDef, b: PlayerDef, o: BattleOpts = {}): BattleOutcome => battle(a, b, o);
 
-/** The first of up to 200 board battles that `a` wins. */
+/** The first of up to 200 board battles that `a` wins and his side comes away with clean (the puck not squirting loose). */
 export function runBattleWon(a: PlayerDef, b: PlayerDef, o: BattleOpts = {}): BattleOutcome {
-  for (let i = 0; i < 200; i++) { const r = battle(a, b, o); if (r.winner === 'a') return r; }
+  for (let i = 0; i < 200; i++) { const r = battle(a, b, o); if (r.winner === 'a' && r.puckTo !== 'loose') return r; }
   throw new Error('a never won in 200 battles');
 }
 

@@ -96,8 +96,8 @@ const dataOf = (c: ContestState): BattleData => c.data as BattleData;
  *   rounds in a row to dig it out. With nobody pinned either side needs two in a row, and four rounds without that
  *   trap the puck: `freeze` (detail `trapped`) and a faceoff at the nearest end-zone dot inside a blue line, else the
  *   nearest neutral-zone dot. `leader`: whoever is ahead in the dig.
- * - `resolve` (0.3 s): `leader` is the winner. Then he has it (`toWinner`) 60% of the time, else it squirts loose along
- *   the boards; a side with a supporting player always gets the puck to him.
+ * - `resolve` (0.3 s): `leader` is the winner. Then 60% of the time his side comes away with it clean (`toWinner`: to
+ *   his supporting player if he has one, else to him), else it squirts loose along the boards.
  * Any time after `arrive`, the first free teammate of either side within 2.5 m joins as that side's support
  * (`data.supportA` / `data.supportB`, his participant index): +8 for his side. One `battle` event at the end: the dig
  * winner over the loser, detail `support` (his side had support and the other did not: the numbers won it), else
@@ -266,8 +266,7 @@ function dig(c: ContestState, ctx: ContestCtx): ContestResult | null {
     : d.pinned !== NONE ? (d.digLast === d.pinned ? d.pinned : other(d.pinned)) : d.digLast;
   c.leader = ahead === NONE ? null : idOf(c, ahead);
   if (d.winner !== NONE && c.stageT >= DIG_MIN - STAGE_EPS) {
-    const supported = (d.winner === 0 ? d.supportA : d.supportB) !== NONE;
-    d.clean = supported || ctx.rng.chance(CLEAN_SHARE) ? 1 : 0;
+    d.clean = ctx.rng.chance(CLEAN_SHARE) ? 1 : 0;
     enterStage(c, 'resolve');
   }
   return null;
