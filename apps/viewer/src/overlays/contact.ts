@@ -1,8 +1,8 @@
 import { DT, RINK, type ContestStateOf, type GameEventOf } from '@hockey/engine';
 import { motionOfSample, slotOf, toBodyFrame, type AnimContext, type BodyPass, type DrawnBody, type Overlay, type SkaterAnim, type SkaterSample } from '../anim-context';
 import type { BodyDims } from '../body';
-import { rawPose, styleShare } from '../gait';
-import { addRawDelta, armReach, bladeAt, fitBody, lerp3, mixRaw, shoulderJoint, type RawPose, type Vec3 } from '../pose-mix';
+import { GAIT, rawPose, styleShare } from '../gait';
+import { addRawDelta, armReach, bladeAt, fitBody, lerp3, mixRaw, mixRawParts, shoulderJoint, type RawPose, type Vec3 } from '../pose-mix';
 
 /**
  * Contact (pure: no three.js, no DOM): poke checks, body checks, falls and getting up, and the body pass that keeps
@@ -35,7 +35,8 @@ import { addRawDelta, armReach, bladeAt, fitBody, lerp3, mixRaw, shoulderJoint, 
  * - contactBodyPass: pairs of drawn figures (skaters and goalies) closer than their two body radii are pushed apart
  *   along the line between them, the lighter more, a carrier or a goalie only when the other cannot take it all,
  *   each at most MAX_OFFSET from his engine place (overlays' offsets included); figures are kept inside the boards.
- *   Its push follows a growing overlap at once and eases away over PUSH_OUT. Allocation-free per frame.
+ *   The two men of a hit may come as near as CONTACT_GAP through the impact. A drawn offset moves at most
+ *   OFFSET_SPEED. Allocation-free per frame.
  */
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
@@ -97,12 +98,19 @@ export type HitTrack = {
   /** Impact start and the hit's tick (state ticks; -1 not yet), the contest last seen (-1: under way). */
   I: number; T: number; end: number;
   result: HitResult;
-  /** World direction (unit, engine x, y) from the hitter to the target at contact. */
+  /**
+   * World direction (unit, engine x, y) from the hitter to the target: from the engine's own state at the impact's
+   * first tick, held from then on (before it, the line between them as drawn).
+   */
   ux: number; uy: number;
-  /** How hard it looks (0..1), from the engine's own push (closing speed times the hitter's mass share). */
-  sev: number;
-  /** For the hitter's recoil: the target's mass share of that closing speed. */
-  sevBack: number;
+  /** The contact point (the contest's spot from contact on; engine x, y). */
+  px: number; py: number;
+  /**
+   * The hitter's mass over the target's (engine masses), and the hit's power (0..1): mass ratio times closing speed
+   * at the impact's first tick, mapped over the engine's range (POWER_LO..POWER_HI); POWER_DEFAULT, and `seen` false,
+   * until that tick has been seen (a seek's pre-roll that starts after it: every effect of power is over by then).
+   */
+  ratio: number; power: number; seen: boolean;
   /**
    * How far the hitter has lowered into it, or the target braced for it (0..1), as he closes (held from contact on),
    * and the tick the result became known (the impact's start with the timeline, the hit's tick without one).
@@ -112,11 +120,10 @@ export type HitTrack = {
 export type FallTrack = {
   /** The tick of the hit that put him down (-1: not falling), and the tick downT reaches 0. */
   T: number; endT: number;
-  /** The way he goes down, in his body frame (left-shot frame), unit. */
-  dx: number; dz: number;
-  sev: number;
-  /** The world direction he is knocked (unit), for the drawn offset. */
-  wx: number; wy: number;
+  /** The contact point (the hit event's place): he goes down the way he is from it, as the engine has him now. */
+  px: number; py: number;
+  /** He is the hit's target (else the bounced hitter); the hitter's mass over the target's; the hit's power. */
+  target: boolean; ratio: number; power: number;
 };
 /** `pokePrev`: the poke check before the current one, while it may still be fading (a checker poked straight back). */
 export type ContactSlot = { poke: PokeTrack; pokePrev: PokeTrack; hit: HitTrack; fall: FallTrack };
@@ -125,21 +132,34 @@ export const CONTACT_ID = 'contact';
 export const contactSlotOf = (anim: SkaterAnim): ContactSlot | undefined => slotOf<ContactSlot>(anim, CONTACT_ID);
 
 const newPoke = (): PokeTrack => ({ cid: -1, role: null, other: '', stage: 'reach', outcome: 'undecided', reachAt: -1, resolveAt: -1, beatenAt: -1, end: -1, bx: 1, bz: 0, left: -1, lead: 0, reachK: 0, tx: 0, tz: 0, tt: -1 });
-const newHit = (): HitTrack => ({ cid: -1, role: null, other: '', I: -1, T: -1, end: -1, result: 'pending', ux: 1, uy: 0, sev: 0.5, sevBack: 0.5, close: 0, known: -1 });
-const newFall = (): FallTrack => ({ T: -1, endT: -1, dx: -1, dz: 0, sev: 0.5, wx: 1, wy: 0 });
+const newHit = (): HitTrack => ({
+  cid: -1, role: null, other: '', I: -1, T: -1, end: -1, result: 'pending', ux: 1, uy: 0, px: 0, py: 0, ratio: 1, power: POWER_DEFAULT, seen: false, close: 0, known: -1,
+});
+const newFall = (): FallTrack => ({ T: -1, endT: -1, px: 0, py: 0, target: true, ratio: 1, power: POWER_DEFAULT });
 
 /** The tick (state ticks) a contest's current stage began. */
 const stageStart = (ctx: AnimContext, stageT: number): number => ctx.state.tick - Math.round(stageT / DT);
 
 /** How long after the end a contest's trace is kept (ticks): every overlay has faded by then. */
 const KEEP_TICKS = TICK(1.2);
-/** The gait blends out of its down pose over GAIT.blendDown (0.65 s): a fall is kept a little longer than that. */
-const GAIT_DOWN_BLEND = 0.7;
+/**
+ * A fall is over when the gait has blended out of its down pose: GAIT.blendDown after downT reaches 0 (the fall
+ * overlay takes the gait's down share out until then), and two ticks for the frame the gait sees it.
+ */
+export const GET_UP_TAIL_SECONDS = GAIT.blendDown + 2 * DT;
 /** The engine's impact lasts this many ticks (contests/hit.ts IMPACT_SECONDS 0.15, stepped per tick). */
 const IMPACT_TICKS = 5;
 
-/** The hit's severity (0..1) from the engine's push: closing speed (m/s) times a mass share. */
-const sevOf = (closing: number, share: number): number => clamp((Math.max(0, closing) * share - 0.4) / 3.2, 0.15, 1);
+/**
+ * A hit's power: mass ratio (hitter over target) times closing speed (m/s) at the impact's first tick, mapped from
+ * POWER_LO to POWER_HI. Over the 94 hits of seeds 5 and 42 that product's 10th, 50th and 90th percentiles are 0.1,
+ * 6.7 and 10.4 (closing speed 0.1, 6.3 and 10.1 m/s; mass ratio 0.92, 1.07 and 1.18, range 0.76 to 1.33).
+ */
+export const POWER_LO = 0.5, POWER_HI = 10.5, POWER_DEFAULT = 0.5;
+export const powerOf = (ratio: number, closing: number): number => clamp01((Math.max(0, closing) * ratio - POWER_LO) / (POWER_HI - POWER_LO));
+/** How much the hitter is the lighter, or the heavier, man (0..1), from the mass ratio (10th, 90th percentiles 0.92, 1.18). */
+export const lighterHitter = (ratio: number): number => clamp01((1.02 - ratio) / 0.12);
+export const heavierHitter = (ratio: number): number => clamp01((ratio - 0.98) / 0.18);
 
 /** Start tracking poke check `cid` (keeping the one before while it fades). */
 function startPoke(p: PokeTrack, prev: PokeTrack, ctx: AnimContext, cid: number, checker: string, carrier: string, me: string): void {
@@ -232,6 +252,13 @@ function vecToBody(s: SkaterSample, vx: number, vy: number, out: { x: number; z:
   return out;
 }
 
+/** A skater's engine state in the frame's later tick (allocation-free lookup). */
+function engineSkater(ctx: AnimContext, id: string): Readonly<{ pos: { x: number; y: number }; vel: { x: number; y: number } }> | undefined {
+  for (const k of ctx.state.skaters) if (k.id === id) return k;
+  return undefined;
+}
+const massOfDims = (d: BodyDims): number => massOfWeight(weightOfDims(d));
+
 function trackHit(h: HitTrack, s: SkaterSample, ctx: AnimContext, dt: number): void {
   let c: ContestStateOf<'hit'> | null = null;
   for (const k of ctx.contests) if (k.kind === 'hit' && (k.roles.hitter === s.id || k.roles.target === s.id)) { c = k; break; }
@@ -245,15 +272,22 @@ function trackHit(h: HitTrack, s: SkaterSample, ctx: AnimContext, dt: number): v
       if (h.I < 0 && h.result !== 'missed') h.I = at - IMPACT_TICKS;
       if (h.known < 0) h.known = at;
     }
-    // Until contact: the line between them now. From contact on it is held.
+    if (c.stage !== 'close') { h.px = c.spot.x; h.py = c.spot.y; }
     const hitter = ctx.skaters.get(c.roles.hitter), target = ctx.skaters.get(c.roles.target);
-    if (hitter && target && (h.I < 0 || h.I >= ctx.state.tick - 1)) {
+    if (hitter && target) h.ratio = massOfDims(hitter.dims) / massOfDims(target.dims);
+    if (c.stage === 'impact' && ctx.state.tick === at) {
+      // The impact's first tick, as the frame's later tick: the contact line and the closing speed from the engine's
+      // own state, the same whether play or a seek's pre-roll reaches it.
+      const eh = engineSkater(ctx, c.roles.hitter), et = engineSkater(ctx, c.roles.target);
+      if (eh && et) {
+        const dx = et.pos.x - eh.pos.x, dy = et.pos.y - eh.pos.y, l = Math.hypot(dx, dy);
+        if (l > 1e-6) { h.ux = dx / l; h.uy = dy / l; }
+        h.power = powerOf(h.ratio, (eh.vel.x - et.vel.x) * h.ux + (eh.vel.y - et.vel.y) * h.uy);
+        h.seen = true;
+      }
+    } else if (h.I < 0 && hitter && target) {
       const dx = target.pos.x - hitter.pos.x, dy = target.pos.y - hitter.pos.y, l = Math.hypot(dx, dy);
       if (l > 1e-6) { h.ux = dx / l; h.uy = dy / l; }
-      const closing = (hitter.vel.x - target.vel.x) * h.ux + (hitter.vel.y - target.vel.y) * h.uy;
-      const mh = massOfWeight(weightOfDims(hitter.dims)), mt = massOfWeight(weightOfDims(target.dims));
-      h.sev = sevOf(closing, mh / (mh + mt));
-      h.sevBack = sevOf(closing, mt / (mh + mt));
     }
     // As he closes: the hitter lowers into it, the target braces when he can see it coming.
     if (h.I < 0 && hitter && target) {
@@ -288,56 +322,46 @@ function hitThatDowned(s: SkaterSample, ctx: AnimContext, within: number): GameE
   return undefined;
 }
 
-function trackFall(f: FallTrack, h: HitTrack, s: SkaterSample, ctx: AnimContext, fresh: boolean): void {
+/**
+ * His fall, from facts that are the same however the moment is reached: the hit event (its tick and place) from the
+ * timeline (else, with no timeline, the hit contest he is in), downT, and the two men's weights. The hit's power is
+ * taken from the hit he is in when its first impact tick was seen; it only sets how fast he goes down, which is over
+ * long before a seek could start after that tick.
+ */
+function trackFall(f: FallTrack, h: HitTrack, s: SkaterSample, ctx: AnimContext): void {
   const down = s.state.downT;
   if (down > 0) {
     const endT = ctx.state.tick + Math.ceil(down / DT - 1e-6);
-    if (f.T >= 0 && endT <= f.endT + 1) { f.endT = endT; return; }
-    // A new fall: from the hit he is in, else the timeline's hit event.
-    let T = -1, wx = 0, wy = 0, sev = 0.5;
-    const mine = h.cid >= 0 && ((h.role === 'target' && h.result === 'landed') || (h.role === 'hitter' && h.result === 'bounced'));
-    if (mine) {
-      T = h.T >= 0 ? h.T : ctx.state.tick;
-      const k = h.role === 'target' ? 1 : -1;
-      wx = k * h.ux; wy = k * h.uy; sev = h.role === 'target' ? h.sev : h.sevBack;
+    let T = -1, px = 0, py = 0, target = true, other = '';
+    const e = hitThatDowned(s, ctx, Math.round(TICK(1.6)));
+    if (e) {
+      T = e.tick; px = e.pos.x; py = e.pos.y; target = e.otherId === s.id; other = (target ? e.playerId : e.otherId) ?? '';
+    } else if (h.cid >= 0 && h.I >= 0 && ((h.role === 'target' && h.result === 'landed') || (h.role === 'hitter' && h.result === 'bounced'))) {
+      T = h.T >= 0 ? h.T : ctx.state.tick; px = h.px; py = h.py; target = h.role === 'target'; other = h.other;
     } else {
-      const e = hitThatDowned(s, ctx, Math.round(TICK(1.6)));
-      if (!e) { f.T = -1; return; } // not a contact fall: the gait's plain down pose
-      T = e.tick;
-      // The way he was knocked: from the contact point to where he is now (he slides on along it), else from the
-      // other man to him.
-      const other = ctx.skaters.get((e.playerId === s.id ? e.otherId : e.playerId) ?? '');
-      let dx = s.pos.x - e.pos.x, dy = s.pos.y - e.pos.y;
-      if (Math.hypot(dx, dy) < 0.2 && other) { dx = s.pos.x - other.pos.x; dy = s.pos.y - other.pos.y; }
-      const l = Math.hypot(dx, dy) || 1;
-      wx = dx / l; wy = dy / l;
-      if (other) {
-        const me = massOfWeight(weightOfDims(s.dims)), them = massOfWeight(weightOfDims(other.dims));
-        sev = sevOf(4, them / (me + them));
-      }
+      if (f.T >= 0) f.endT = endT; // not a hit of his we know of: the gait's plain down pose, or the fall under way
+      return;
     }
-    if (!fresh && f.T >= 0 && T <= f.T) T = f.T;
-    const b = vecToBody(s, wx, wy, { x: 0, z: 0 });
-    const l = Math.hypot(b.x, b.z) || 1;
-    Object.assign(f, { T, endT, dx: b.x / l, dz: b.z / l, sev, wx, wy });
+    const hitSeen = h.cid >= 0 && h.seen && h.T === T;
+    if (f.T === T) { f.endT = endT; if (hitSeen) f.power = h.power; return; }
+    const o = ctx.skaters.get(other), mMe = massOfDims(s.dims), mO = o ? massOfDims(o.dims) : mMe;
+    Object.assign(f, { T, endT, px, py, target, ratio: target ? mO / mMe : mMe / mO, power: hitSeen ? h.power : POWER_DEFAULT });
     return;
   }
   if (f.T < 0) return;
   // Up again: kept until the gait has blended out of its down pose (fallOverlay takes that out until then).
-  if (ctx.tick > f.endT + 2 + TICK(GAIT_DOWN_BLEND)) Object.assign(f, newFall());
+  if (ctx.tick > f.endT + TICK(GET_UP_TAIL_SECONDS)) Object.assign(f, newFall());
 }
-
 
 export const contactTrack: Overlay<ContactSlot> = {
   id: CONTACT_ID,
   step(slot, sample, ctx, dt) {
-    const fresh = slot === undefined;
     const sl = slot ?? { poke: newPoke(), pokePrev: newPoke(), hit: newHit(), fall: newFall() };
     if (!sample.onIce) return sl;
     trackPoke(sl.poke, sl.pokePrev, sample, ctx, dt);
     trackHit(sl.hit, sample, ctx, dt);
     // A fresh start mid-fall rebuilds it from downT and the timeline (or the hit still under way).
-    trackFall(sl.fall, sl.hit, sample, ctx, fresh);
+    trackFall(sl.fall, sl.hit, sample, ctx);
     return sl;
   },
   weight: () => 0,
@@ -501,36 +525,51 @@ const HIT_FROM = 2.6, HIT_FULL = 1.1;
 const CLOSE_EASE = 0.2;
 /** The target braces from this far (m) when he can see it coming (the hitter no further behind square than BRACE_SEE). */
 const BRACE_FROM = 2.0, BRACE_FULL = 1.0, BRACE_SEE = -0.3;
-/** Ticks the hit poses take to fade after the hit: a jolt, the hitter's follow-through, a landed target into his fall. */
-/** Ticks over which a hit's result comes through. */
-const SPAN = 6;
-const JOLT_FADE = 10, DRIVE_HOLD = 3, DRIVE_FADE = 10, LANDED_HOLD = 6, LANDED_FADE = 8;
+/**
+ * Drawn bodies meet at about this distance (m) between centres (shoulder against chest or shoulder): the engine keeps
+ * them their two radii apart (about 0.8 m), so through the impact each is drawn toward the other by up to half the
+ * difference, and the body pass lets a pair in a hit come this near (pairMin).
+ */
+export const CONTACT_GAP = 0.5;
+/** Ticks over which a hit's result comes through, from two ticks before the hit's tick. */
+const SPAN = 4;
+/** Every effect of a hit's power and contact line is over by this many ticks after the hit's tick. */
+export const HIT_EFFECT_TICKS = 18;
 
-type HitAmounts = { close: number; drive: number; knock: number; recoil: number };
-const hitAmt: HitAmounts = { close: 0, drive: 0, knock: 0, recoil: 0 };
+type HitAmounts = { close: number; drive: number; knock: number; recoil: number; meet: number };
+const hitAmt: HitAmounts = { close: 0, drive: 0, knock: 0, recoil: 0, meet: 0 };
 
-/** How far into each part of the hit he is at display time `now` (ticks), into `o`. */
+/**
+ * How far into each part of the hit he is at display time `now` (ticks), into `o`. `close`: lowered or braced as
+ * they close; `meet`: the bodies drawn together, from just before the impact to the hit's tick; `drive`: the hitter
+ * driving his shoulder through (held longer by a heavy man at speed); `knock`: the target's reaction (1 landed, a
+ * jolt for absorbed, a little the other way for bounced); `recoil`: the hitter thrown back (bounced; absorbed; a
+ * lighter man who lands it), with a stagger. All of it is over by HIT_EFFECT_TICKS after the hit.
+ */
 function hitAmounts(h: HitTrack, now: number, o: HitAmounts): HitAmounts {
-  o.close = 0; o.drive = 0; o.knock = 0; o.recoil = 0;
+  o.close = 0; o.drive = 0; o.knock = 0; o.recoil = 0; o.meet = 0;
   if (h.cid < 0 || h.role === null) return o;
   const fade = h.end >= 0 ? 1 - smooth((now - h.end) / 6) : 1;
   if (h.I < 0 || h.result === 'missed') { o.close = h.close * fade; return o; }
   const T = h.T >= 0 ? h.T : h.I + IMPACT_TICKS;
-  // The result shows from the impact's start when the timeline knows it, else from the hit's tick, over SPAN ticks.
-  const from = Math.max(h.I, h.known >= 0 ? h.known : T) - 1;
+  const from = Math.max(T - 2, (h.known >= 0 ? h.known : T) - 1);
   const span = h.result === 'pending' ? 0 : smooth((now - from) / SPAN);
+  const p = h.power, light = lighterHitter(h.ratio), heavy = heavierHitter(h.ratio);
+  o.meet = smooth((now - (h.I - 2)) / 3) * (1 - smooth((now - (T - 2)) / 3));
   if (h.role === 'hitter') {
-    o.close = h.close * (1 - smooth((now - T) / DRIVE_FADE));
+    o.close = h.close * (1 - smooth((now - T) / 10));
     const into = smooth((now - (h.I - 1)) / 4);
-    o.drive = h.result === 'bounced' ? into * (1 - span) : into * (1 - smooth((now - T - DRIVE_HOLD) / DRIVE_FADE));
-    if (h.result === 'bounced') o.recoil = span * (1 - smooth((now - T - 4) / 10));
+    const back = h.result === 'bounced' ? 1 : h.result === 'absorbed' ? 0.45 + 0.3 * p : h.result === 'landed' ? light * (0.6 + 0.4 * p) : 0;
+    if (h.result === 'bounced') o.drive = into * (1 - span);
+    else o.drive = into * (1 - smooth((now - T - 3 - 6 * heavy * p) / 8));
+    o.recoil = back * smooth((now - (T - 1)) / 6) * (1 - smooth((now - T - 6) / 12));
   } else {
     o.close = h.close * (1 - smooth((now - (h.I - 1)) / 6));
-    if (h.result === 'landed') o.knock = span * (1 - smooth((now - T - LANDED_HOLD) / LANDED_FADE));
-    else if (h.result === 'absorbed') o.knock = 0.5 * span * (1 - smooth((now - T) / JOLT_FADE));
-    else if (h.result === 'bounced') o.knock = -0.15 * span * (1 - smooth((now - T) / JOLT_FADE));
+    if (h.result === 'landed') o.knock = span * (1 - smooth((now - T - 6) / 10));
+    else if (h.result === 'absorbed') o.knock = 0.6 * span * (1 - smooth((now - T - 2) / 12));
+    else if (h.result === 'bounced') o.knock = -0.2 * span * (1 - smooth((now - T - 2) / 10));
   }
-  o.close *= fade; o.drive *= fade; o.knock *= fade; o.recoil *= fade;
+  o.close *= fade; o.drive *= fade; o.knock *= fade; o.recoil *= fade; o.meet *= fade;
   return o;
 }
 
@@ -543,41 +582,48 @@ function hitApply(raw: RawPose, anim: SkaterAnim, sample: SkaterSample, ctx: Ani
   const other = ctx.skaters.get(h.other);
   // The other man in his body frame: live while closing, along the contact line from contact on.
   let ox: number, oz: number;
-  if (h.I < 0 && other) { const p = toBodyFrame(sample, other.pos); const l = Math.hypot(p.x, p.z) || 1; ox = p.x / l; oz = p.z / l; }
+  if (h.I < 0 && other) { const q = toBodyFrame(sample, other.pos); const l = Math.hypot(q.x, q.z) || 1; ox = q.x / l; oz = q.z / l; }
   else { const k = h.role === 'hitter' ? 1 : -1; vecToBody(sample, k * h.ux, k * h.uy, hb2); ox = hb2.x; oz = hb2.z; }
   const ahead = smooth((ox + 0.6) / 0.6); // turning toward him only while he is not behind
   const toward = Math.atan2(oz, ox) * ahead;
   const lead = clamp(oz / 0.35, -1, 1); // the shoulder nearer him
-  const sz = dims.hipHeight;
+  const sz = dims.hipHeight, p = h.power;
   if (h.role === 'hitter') {
-    const sev = 0.6 + 0.4 * h.sev, c = a.close, d = a.drive, r = a.recoil * (0.5 + 0.5 * h.sevBack), fh = Math.max(0.6 * c, d);
+    const heavy = heavierHitter(h.ratio);
+    const c = a.close, d = a.drive * (0.75 + 0.25 * heavy) * (0.7 + 0.3 * p), r = a.recoil, fh = Math.max(0.6 * c, a.drive);
+    const legs: RawPose['legs'] = r > 0
+      // The stagger: his skate on the side away from the hit goes back under him.
+      ? [raw.legs[0], { foot: v3(raw.legs[1].foot.x - 0.28 * r, raw.legs[1].foot.y, raw.legs[1].foot.z + 0.08 * r), footYaw: raw.legs[1].footYaw }]
+      : raw.legs;
     return {
-      ...raw,
-      hipY: raw.hipY - (0.07 * c + 0.06 * d) * sz,
-      pitch: raw.pitch + (0.18 * c + 0.4 * d) * sev * ahead - 0.55 * r,
-      roll: raw.roll + lead * (0.08 * c + 0.3 * d) * sev,
+      ...raw, legs,
+      hipY: raw.hipY - (0.07 * c + 0.07 * d) * sz + 0.03 * r * sz,
+      pitch: raw.pitch + (0.18 * c + 0.45 * d) * ahead - 0.6 * r,
+      roll: raw.roll + lead * (0.08 * c + 0.32 * d) - lead * 0.15 * r,
       twist: raw.twist + clamp(toward, -0.8, 0.8) * 0.4 * c - lead * (0.4 * c + 0.5 * d) * ahead,
       look: raw.look + clamp(toward, -1, 1) * 0.5 * c,
-      lookDown: (raw.lookDown ?? 0) - 0.1 * c - 0.3 * r,
-      twoHands: Math.min(raw.twoHands, 1 - 0.6 * d - r),
-      // Elbows in: the top hand tucked to the hip, the free one up across the chest for the drive (thrown up on a recoil).
-      top: v3(lerp(raw.top.x, 0.12, 0.5 * c), lerp(raw.top.y, -0.02, 0.5 * c), lerp(raw.top.z, 0.2, 0.5 * c)),
-      freeRel: v3(lerp(raw.freeRel.x, 0.3, fh) - 0.25 * r, lerp(raw.freeRel.y, 0.05, fh) + 0.35 * r, lerp(raw.freeRel.z, 0.15, fh) - 0.25 * r),
+      lookDown: (raw.lookDown ?? 0) - 0.1 * c - 0.35 * r,
+      twoHands: Math.min(raw.twoHands, 1 - 0.6 * a.drive, 1 - r),
+      // Elbows in: the top hand tucked to the hip, the free forearm across the chest for the drive; both thrown up
+      // and out on a recoil.
+      top: v3(lerp(raw.top.x, 0.12, 0.5 * c) - 0.1 * r, lerp(raw.top.y, -0.02, 0.5 * c) + 0.15 * r, lerp(raw.top.z, 0.2, 0.5 * c) + 0.1 * r),
+      freeRel: v3(lerp(raw.freeRel.x, 0.35, fh) - 0.3 * r, lerp(raw.freeRel.y, -0.12, fh) + 0.45 * r, lerp(raw.freeRel.z, 0.18, fh) - 0.3 * r),
     };
   }
-  // Target: braced toward him, or thrown away from him.
-  const b = a.close, kn = a.knock;
-  const away = (0.4 + 0.5 * h.sev) * kn; // radians of lean away from the hitter
+  // Target: braced toward him, or thrown away from him (harder the harder the hit).
+  const b = a.close, kn = a.knock, out = Math.max(0, kn);
+  const away = (h.result === 'landed' ? 0.3 + 0.8 * p : 0.35 + 0.35 * p) * kn; // radians of lean away from the hitter
   return {
     ...raw,
-    hipY: raw.hipY - 0.05 * b * sz - 0.05 * Math.abs(kn) * sz,
+    hipY: raw.hipY - 0.05 * b * sz - 0.06 * Math.abs(kn) * sz,
     pitch: raw.pitch + 0.14 * b * ox - away * ox,
     roll: raw.roll + 0.14 * b * oz - away * oz,
-    twist: raw.twist - lead * 0.22 * b + clamp(-toward, -0.6, 0.6) * 0.3 * Math.abs(kn),
-    look: raw.look + clamp(toward, -1, 1) * 0.4 * b - 0.6 * lead * kn,
-    lookDown: (raw.lookDown ?? 0) - 0.35 * kn,
-    twoHands: Math.min(raw.twoHands, 1 - Math.max(0, kn)),
-    freeRel: v3(raw.freeRel.x - 0.15 * Math.max(0, kn), raw.freeRel.y + 0.4 * Math.max(0, kn), raw.freeRel.z - 0.25 * Math.max(0, kn)),
+    twist: raw.twist - lead * 0.22 * b + clamp(-toward, -0.6, 0.6) * 0.35 * out,
+    look: raw.look + clamp(toward, -1, 1) * 0.4 * b - 0.8 * lead * kn,
+    lookDown: (raw.lookDown ?? 0) - 0.45 * kn,
+    twoHands: Math.min(raw.twoHands, 1 - out),
+    freeRel: v3(raw.freeRel.x - 0.2 * out, raw.freeRel.y + (0.3 + 0.25 * p) * out, raw.freeRel.z - 0.3 * out),
+    top: v3(raw.top.x - 0.08 * out, raw.top.y + 0.12 * out * p, raw.top.z + 0.08 * out),
   };
 }
 function hitWeight(anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext): number {
@@ -594,32 +640,35 @@ export const hitOverlay: Overlay = { id: 'hit', weight: hitWeight, apply: hitApp
 // ---------------------------------------------------------------------------------------------------------------
 // Falls and getting up
 
-type FallStyle = 'back' | 'side' | 'front';
-/** The fall's style from the way he is knocked (body frame). */
-export const fallStyleOf = (dx: number): FallStyle => (dx < -0.45 ? 'back' : dx > 0.45 ? 'front' : 'side');
-
-/** Ticks the fall takes (harder hits faster), and the getting up (a share of the time down, within limits). */
-const fallTicks = (sev: number): number => 12 - 2 * sev;
 /** Getting up: onto one knee, then standing up off it over its last RISE_TICKS (the hips stay low till then). */
 const RISE_TICKS = 7;
 const getUpTicks = (downTicks: number): number => clamp(0.55 * downTicks, 14, 22);
+/**
+ * Ticks he takes to go down, from the tick before the hit's: a powerful hit puts him down hard and fast, a weak one
+ * (a light man landing it on a heavy one) topples him, but never slower than half his time down.
+ */
+export const fallTicks = (f: FallTrack): number => {
+  const light = f.target ? lighterHitter(f.ratio) : 0;
+  return clamp(lerp(16, 7, f.power) + 4 * light, 6, Math.max(6, (f.endT - f.T + 1) / 2));
+};
 
 /** The fall at display time `now`: how far down (0..1) and how far up again (0..1, through the knee). */
 export function fallPhase(f: FallTrack, now: number): { down: number; up: number } {
   if (f.T < 0) return { down: 0, up: 0 };
-  const down = smooth((now - (f.T - 1.5)) / fallTicks(f.sev));
+  const down = smooth((now - (f.T - 1)) / fallTicks(f));
   const G = getUpTicks(f.endT - f.T + 1);
   const up = clamp01((now - (f.endT - G)) / G);
   return { down, up };
 }
 
+type FallStyle = 'back' | 'side' | 'front';
 /** Lying where the hit put him: on his back, on his side (toward +z for side 1) or forward on his hands and knees. */
-function lyingRaw(style: FallStyle, side: 1 | -1, dims: BodyDims, sev: number): RawPose {
+function lyingRaw(style: FallStyle, side: 1 | -1, dims: BodyDims): RawPose {
   let r: RawPose;
   if (style === 'back') {
     const hipY = 0.16;
     r = {
-      hipY, pitch: -1.15 - 0.15 * sev, roll: 0.15 * side, yaw: 0, twist: 0.1 * side, look: 0, lookDown: 0.5,
+      hipY, pitch: -1.25, roll: 0.15 * side, yaw: 0, twist: 0.1 * side, look: 0, lookDown: 0.5,
       legs: [{ foot: v3(0.55, 0, -0.17), footYaw: -0.25 }, { foot: v3(0.82, 0, 0.14), footYaw: 0.25 }],
       top: v3(-0.22, 0.03 - hipY, 0.45), freeRel: v3(0, 0, 0), twoHands: 0,
       blade: v3(0.6, 0, 1.4), bladeUp: 0,
@@ -664,6 +713,49 @@ function kneelRaw(dims: BodyDims): RawPose {
     blade: v3(1.05, 0, -0.35), bladeUp: 0,
   };
 }
+/**
+ * Dropped to a knee and a hand (a heavy man that a lighter one still puts down): on one knee, leaning toward the
+ * side he was pushed (+z for side 1), the hand on that side on the ice.
+ */
+function kneeHandRaw(dims: BodyDims, side: 1 | -1): RawPose {
+  const r = kneelRaw(dims);
+  r.hipY = 0.85 * dims.thigh; r.pitch = 0.55; r.roll = 0.35 * side; r.twoHands = 0; r.lookDown = 0.35;
+  const hand = v3(0.3, 0.03, 0.5 * side);
+  if (side > 0) r.top = v3(hand.x, hand.y - r.hipY, hand.z);
+  else { r.top = v3(0.25, -0.05, 0.25); r.freeRel = handFrom(r, dims, hand); }
+  r.blade = v3(0.9, 0, 0.6 * side - 0.3);
+  return r;
+}
+
+/**
+ * The way he goes down (his body frame, unit): from the hit's place to where the engine has him now (he slides on
+ * along it), a pure function of the frame, so it is the same however the moment is reached; while he is still on top
+ * of that place, straight back.
+ */
+function fallDirection(f: FallTrack, sample: SkaterSample, out: { x: number; z: number }): { x: number; z: number } {
+  vecToBody(sample, sample.pos.x - f.px, sample.pos.y - f.py, out);
+  const l = Math.hypot(out.x, out.z), k = Math.min(1, l / 0.3);
+  out.x = (l > 1e-9 ? out.x / l : 0) * k - (1 - k); out.z = (l > 1e-9 ? out.z / l : 0) * k;
+  const n = Math.hypot(out.x, out.z) || 1;
+  out.x /= n; out.z /= n;
+  return out;
+}
+const fdir = { x: 0, z: 0 };
+
+/** His lying pose for the way he goes down: back, side and front blended by the direction, so it never switches. */
+function lyingFor(f: FallTrack, dir: { x: number; z: number }, dims: BodyDims): RawPose {
+  const wb = smooth((-dir.x - 0.1) / 0.6), wf = smooth((dir.x - 0.1) / 0.6), ws = Math.max(0, 1 - wb - wf);
+  const right = smooth((dir.z + 0.35) / 0.7);
+  const parts: { raw: RawPose; w: number }[] = [];
+  if (wb > 0) parts.push({ raw: lyingRaw('back', dir.z >= 0 ? 1 : -1, dims), w: wb });
+  if (wf > 0) parts.push({ raw: lyingRaw('front', dir.z >= 0 ? 1 : -1, dims), w: wf });
+  if (ws > 0) parts.push({ raw: mixRaw(lyingRaw('side', -1, dims), lyingRaw('side', 1, dims), right), w: ws });
+  let lying = parts.length === 1 ? parts[0]!.raw : mixRawParts(parts.map((q) => ({ raw: q.raw, w: q.w / (wb + wf + ws) })));
+  // A heavy man that a lighter one puts down drops to a knee and a hand instead.
+  const light = f.target ? lighterHitter(f.ratio) : 0;
+  if (light > 0) lying = mixRaw(lying, mixRaw(kneeHandRaw(dims, -1), kneeHandRaw(dims, 1), right), light);
+  return lying;
+}
 
 function fallActive(sl: ContactSlot | undefined): sl is ContactSlot { return !!sl && sl.fall.T >= 0; }
 
@@ -687,8 +779,7 @@ function fallApply(raw: RawPose, anim: SkaterAnim, sample: SkaterSample, ctx: An
   const base = s > 0 ? addRawDelta(raw, rawPose('down', g, 1, m, dims, {}), rawPose('stand', g, 1, m, dims, {}), s) : raw;
   const { down, up } = fallPhase(f, now);
   if (down <= 0) return base;
-  const style = fallStyleOf(f.dx);
-  const lying = lyingRaw(style, f.dz >= 0 ? 1 : -1, dims, f.sev);
+  const lying = lyingFor(f, fallDirection(f, sample, fdir), dims);
   // Down, then up through the knee: lying -> one knee over the first part, one knee -> standing over the rest.
   let pose = mixRaw(base, lying, down);
   if (up > 0) {
@@ -704,29 +795,28 @@ export const fallOverlay: Overlay = { id: 'fall', weight: fallWeight, apply: fal
 // ---------------------------------------------------------------------------------------------------------------
 // The drawn offset of a hit
 
-/** A landed hit moves the target's drawn body this far (m) along the hit at full severity; a bounced hitter is thrown back this far. */
-const KNOCK_OFFSET = 0.3, RECOIL_OFFSET = 0.2;
 const knockOut = { x: 0, z: 0 };
 
+/**
+ * Where a hit draws him (world x, z offset), all over by HIT_EFFECT_TICKS after the hit: through the impact the two
+ * bodies drawn together until they meet (CONTACT_GAP), each half the way; then the target knocked along the hit by
+ * 0.1 + 0.25 × power m (a jolt for absorbed), a heavy hitter carried on through, a recoiling hitter thrown back.
+ */
 function knockOffset(anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext, out: { x: number; z: number }): boolean {
   out.x = 0; out.z = 0;
   const sl = contactSlotOf(anim);
   if (!sl || !sample.onIce) return false;
-  const now = ctx.tick + ctx.alpha, h = sl.hit, f = sl.fall;
-  let amt = 0, wx = 0, wy = 0;
-  if (h.cid >= 0 && h.I >= 0) {
-    const a = hitAmounts(h, now, hitAmt);
-    if (h.role === 'target') { amt = KNOCK_OFFSET * h.sev * a.knock; wx = h.ux; wy = h.uy; }
-    else if (h.result === 'bounced') { amt = RECOIL_OFFSET * h.sevBack * a.recoil; wx = -h.ux; wy = -h.uy; }
-  }
-  if (f.T >= 0) {
-    const ph = fallPhase(f, now);
-    const k = (f.wx * wx + f.wy * wy > 0.5 || amt === 0) ? 1 : 0;
-    const fa = (sl.hit.role === 'hitter' ? RECOIL_OFFSET : KNOCK_OFFSET) * f.sev * ph.down * (1 - smooth(ph.up / 0.8));
-    if (k && fa > amt) { amt = fa; wx = f.wx; wy = f.wy; }
-  }
+  const h = sl.hit;
+  if (h.cid < 0 || h.I < 0 || h.result === 'missed') return false;
+  const now = ctx.tick + ctx.alpha, a = hitAmounts(h, now, hitAmt), p = h.power;
+  const other = ctx.skaters.get(h.other);
+  const gap = other ? Math.max(0, Math.hypot(other.pos.x - sample.pos.x, other.pos.y - sample.pos.y) - CONTACT_GAP) : 0;
+  const meet = Math.min(0.3, 0.5 * gap) * a.meet;
+  let amt: number;
+  if (h.role === 'hitter') amt = meet + 0.12 * heavierHitter(h.ratio) * p * a.drive - 0.25 * a.recoil;
+  else amt = -meet + (h.result === 'landed' ? 0.1 + 0.25 * p : h.result === 'absorbed' ? 0.2 : 0.3) * a.knock;
   if (!(Math.abs(amt) > 1e-5)) return false;
-  out.x = wx * amt; out.z = wy * amt;
+  out.x = h.ux * amt; out.z = h.uy * amt;
   return true;
 }
 export const knockOverlay: Overlay = {
@@ -742,10 +832,33 @@ export const CONTACT_OVERLAYS: readonly Overlay[] = [contactTrack as Overlay, po
 // ---------------------------------------------------------------------------------------------------------------
 // The body pass
 
-/** The pass's push follows a growing overlap at once, and eases away over this many seconds once it goes. */
+/**
+ * A body's drawn offset (overlays' and the pass's together) moves at most this fast (m/s; 0.075 m in a 60 Hz frame),
+ * and a push that is no longer needed eases away over PUSH_OUT seconds.
+ */
+export const OFFSET_SPEED = 4.5;
 const PUSH_OUT = 0.15;
-/** A goalie or a carrier is moved only for what the other man cannot take (puck and net stay where they are). */
-const STIFF = 1e6;
+/** A pair in a hit may be drawn this near from the impact until this long (s) into its recovery. */
+const MEET_RECOVER = 0.3;
+
+/**
+ * The nearest two drawn figures may come (centres, m): their two body radii, or CONTACT_GAP less a margin for the two
+ * men of a hit through its impact and the first moments after it (their bodies are drawn meeting).
+ */
+export function pairMin(ctx: AnimContext, a: string, b: string, ra: number, rb: number): number {
+  for (const c of ctx.contests) {
+    if (c.kind !== 'hit' || c.stage === 'close' || (c.stage === 'recover' && c.stageT > MEET_RECOVER)) continue;
+    const { hitter, target } = c.roles;
+    if ((hitter === a && target === b) || (hitter === b && target === a)) return CONTACT_GAP - 0.05;
+  }
+  return ra + rb;
+}
+/**
+ * A carrier is moved only for what the other man cannot take (the puck stays on his blade); a goalie in dead play (he
+ * holds the puck, or is turned to face the shot) is not moved at all. In play a goalie counts as GOALIE_MASS times his weight: a
+ * skater going through his place moves him too, so the two can part fast enough at OFFSET_SPEED each.
+ */
+const STIFF = 1e6, GOALIE_MASS = 1, FIXED = Infinity;
 
 type PassScratch = { n: number; px: Float64Array; pz: Float64Array; tx: Float64Array; tz: Float64Array; r: Float64Array; m: Float64Array; ox: Float64Array; oz: Float64Array };
 const pass: PassScratch = { n: 0, px: new Float64Array(0), pz: new Float64Array(0), tx: new Float64Array(0), tz: new Float64Array(0), r: new Float64Array(0), m: new Float64Array(0), ox: new Float64Array(0), oz: new Float64Array(0) };
@@ -781,7 +894,7 @@ function budget(i: number): void {
 export const contactBodyPass: BodyPass = (bodies: readonly DrawnBody[], ctx: AnimContext, dt: number): void => {
   const n = bodies.length;
   grow(n);
-  const carrier = ctx.puck.carrierId;
+  const carrier = ctx.puck.carrierId, live = ctx.state.phase === 'live';
   for (let i = 0; i < n; i++) {
     const b = bodies[i]!;
     // The overlays' own offset, within the limit.
@@ -793,7 +906,7 @@ export const contactBodyPass: BodyPass = (bodies: readonly DrawnBody[], ctx: Ani
     const dims = b.kind === 'skater' ? ctx.skaters.get(b.id)?.dims : ctx.goalies.get(b.id)?.dims;
     const kg = dims ? weightOfDims(dims) : 85;
     pass.r[i] = radiusOfWeight(kg);
-    pass.m[i] = b.kind === 'goalie' || b.id === carrier ? STIFF : massOfWeight(kg);
+    pass.m[i] = b.kind === 'goalie' && !live ? FIXED : b.id === carrier ? STIFF : b.kind === 'goalie' ? GOALIE_MASS * massOfWeight(kg) : massOfWeight(kg);
   }
   // Pairs: a few rounds of pushing overlapping bodies apart, each within his limit.
   for (let it = 0; it < 3; it++) {
@@ -804,45 +917,56 @@ export const contactBodyPass: BodyPass = (bodies: readonly DrawnBody[], ctx: Ani
         const b = bodies[j]!;
         if (!b.onIce) continue;
         const ax = pass.px[i]! + pass.tx[i]!, az = pass.pz[i]! + pass.tz[i]!, bx = pass.px[j]! + pass.tx[j]!, bz = pass.pz[j]! + pass.tz[j]!;
-        const min = pass.r[i]! + pass.r[j]!;
-        if ((bx - ax) * (bx - ax) + (bz - az) * (bz - az) >= min * min) continue;
-        // Pushed apart along the line between them as last drawn (with last frame's push), so the push keeps its side
-        // when one skates right through the other's place.
-        let dx = bx + b.eased.x - ax - a.eased.x, dz = bz + b.eased.z - az - a.eased.z;
-        const dl = Math.hypot(dx, dz);
-        if (dl < 1e-6) { dx = Math.cos(a.facing); dz = Math.sin(a.facing); } else { dx /= dl; dz /= dl; }
-        const o = min - ((bx - ax) * dx + (bz - az) * dz), ma = pass.m[i]!, mb = pass.m[j]!;
-        if (!(o > 0)) continue;
-        const shareA = mb / (ma + mb);
-        // Each side's share, then whatever one cannot take (his limit) goes to the other.
+        const r2 = pass.r[i]! + pass.r[j]!;
+        if ((bx - ax) * (bx - ax) + (bz - az) * (bz - az) >= r2 * r2) continue;
+        const min = pairMin(ctx, a.id, b.id, pass.r[i]!, pass.r[j]!);
+        const d = Math.hypot(bx - ax, bz - az);
+        if (d >= min) continue;
+        // Pushed apart along the line between them; while one is nearly on top of the other, along the line between
+        // them as last drawn, so the push keeps its side when one skates right through the other's place.
+        const hx = b.pos.x + b.eased.x - a.pos.x - a.eased.x, hz = b.pos.y + b.eased.z - a.pos.y - a.eased.z, hl = Math.hypot(hx, hz);
+        const k = smooth(d / 0.3), ux = d > 1e-9 ? (bx - ax) / d : 0, uz = d > 1e-9 ? (bz - az) / d : 0;
+        let dx = ux * k + (hl > 1e-9 ? hx / hl : Math.cos(a.facing)) * (1 - k), dz = uz * k + (hl > 1e-9 ? hz / hl : Math.sin(a.facing)) * (1 - k);
+        const dl = Math.hypot(dx, dz) || 1;
+        dx /= dl; dz /= dl;
+        const o = min - d, ma = pass.m[i]!, mb = pass.m[j]!;
+        // Each side's share, then whatever one cannot take (his limit) goes to the other; a FIXED body takes none.
+        const shareA = ma === FIXED ? 0 : mb === FIXED ? 1 : mb / (ma + mb);
         const ta0x = pass.tx[i]!, ta0z = pass.tz[i]!;
         pass.tx[i] = ta0x - dx * o * shareA; pass.tz[i] = ta0z - dz * o * shareA; budget(i);
         const gotA = (ta0x - pass.tx[i]!) * dx + (ta0z - pass.tz[i]!) * dz;
-        const tb0x = pass.tx[j]!, tb0z = pass.tz[j]!;
-        const wantB = o - gotA;
-        pass.tx[j] = tb0x + dx * wantB; pass.tz[j] = tb0z + dz * wantB; budget(j);
-        const gotB = (pass.tx[j]! - tb0x) * dx + (pass.tz[j]! - tb0z) * dz;
-        const rest = o - gotA - gotB;
-        if (rest > 1e-6) { pass.tx[i] = pass.tx[i]! - dx * rest; pass.tz[i] = pass.tz[i]! - dz * rest; budget(i); }
+        if (mb !== FIXED) {
+          const tb0x = pass.tx[j]!, tb0z = pass.tz[j]!;
+          const wantB = o - gotA;
+          pass.tx[j] = tb0x + dx * wantB; pass.tz[j] = tb0z + dz * wantB; budget(j);
+          const gotB = (pass.tx[j]! - tb0x) * dx + (pass.tz[j]! - tb0z) * dz;
+          const rest = o - gotA - gotB;
+          if (rest > 1e-6 && ma !== FIXED) { pass.tx[i] = pass.tx[i]! - dx * rest; pass.tz[i] = pass.tz[i]! - dz * rest; budget(i); }
+        }
       }
     }
   }
-  // Into a growing push at once, away from it slowly, then the boards and the limit on the total.
-  const kIn = dt > 0 ? 1 : 0, kOut = dt > 0 ? 1 - Math.exp(-dt / PUSH_OUT) : 0;
+  // The drawn offset (kept in `eased` from frame to frame): toward the overlays' offset plus the push, a growing or
+  // turning push at once and one no longer needed slowly, no faster than OFFSET_SPEED; then within MAX_OFFSET and
+  // the boards.
+  const kOut = dt > 0 ? 1 - Math.exp(-dt / PUSH_OUT) : 0, step = OFFSET_SPEED * Math.max(0, dt);
   for (let i = 0; i < n; i++) {
     const b = bodies[i]!;
-    if (!b.onIce) { b.eased.x = 0; b.eased.z = 0; continue; }
-    const tx = pass.tx[i]!, tz = pass.tz[i]!, ex = b.eased.x, ez = b.eased.z;
-    // Toward a push that is growing or turning: at once; toward a smaller one: slowly.
-    const k = tx * tx + tz * tz - (ex * tx + ez * tz) > 1e-9 ? kIn : kOut;
-    b.eased.x = ex + (tx - ex) * k; b.eased.z = ez + (tz - ez) * k;
-    let x = pass.ox[i]! + b.eased.x, z = pass.oz[i]! + b.eased.z;
+    if (!b.onIce) { b.eased.x = 0; b.eased.z = 0; b.offset.x = 0; b.offset.z = 0; continue; }
+    const tx = pass.tx[i]!, tz = pass.tz[i]!, ex = b.eased.x - pass.ox[i]!, ez = b.eased.z - pass.oz[i]!;
+    // The push part: toward a larger or turning one at once, toward a smaller one slowly.
+    const k = tx * tx + tz * tz - (ex * tx + ez * tz) > 1e-9 ? 1 : kOut;
+    let x = pass.ox[i]! + ex + (tx - ex) * k, z = pass.oz[i]! + ez + (tz - ez) * k;
     const l = Math.hypot(x, z);
     if (l > MAX_OFFSET) { x *= MAX_OFFSET / l; z *= MAX_OFFSET / l; }
     // Inside the boards: never nearer them than his radius (the engine keeps his place there; only an offset can
     // take him nearer, and it is taken back along the boards' normal).
     const gap = boardsGap(b.pos.x + x, b.pos.y + z, nrm), need = pass.r[i]! - gap;
     if (need > 0) { x -= nrm.x * need; z -= nrm.z * need; }
+    // No faster than OFFSET_SPEED.
+    const mx = x - b.eased.x, mz = z - b.eased.z, ml = Math.hypot(mx, mz);
+    if (ml > step) { x = b.eased.x + (mx * step) / ml; z = b.eased.z + (mz * step) / ml; }
+    b.eased.x = x; b.eased.z = z;
     b.offset.x = x; b.offset.z = z;
   }
 };

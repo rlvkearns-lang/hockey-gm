@@ -381,13 +381,27 @@ if (only && only.includes('saves')) {
 // open-ice hit with a fall and get-up, a hit into the boards, an absorbed hit and a bounced hit, each from the side at ice
 // level (a fixed camera square to the line between the two men, window.__watch.aimAt), the follow camera (on the
 // target or the checker) and the broadcast camera, plus a contact sheet per sequence. Examples come from the event log
-// with nobody else within 2.5 m of either man around the moment. `CONTACT_SKIP` (e.g. hitFall=1) takes a later one.
+// with nobody else within 2.5 m of either man around the moment. `CONTACT_SKIP` (e.g. hitFall=1) takes a later one;
+// `CONTACT_TICKS` (name=tick,...) takes the hits at those ticks; `CONTACT_VIEWS` limits the cameras.
 if (only && only.includes('contact')) {
   const { ctx: kctx, p: kp } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light', deviceScaleFactor: 2 });
   await kp.evaluate(() => window.__watch.setManual(true));
   const skip = Object.fromEntries((process.env.CONTACT_SKIP ?? '').split(',').filter(Boolean).map((x) => x.split('=')).map(([k, v]) => [k, Number(v)]));
-  const found = await kp.evaluate(({ skip }) => {
+  // CONTACT_TICKS=name=tick,... names hits by their tick instead (e.g. heavyOnLight=82804), for examples chosen
+  // from the players' weights and closing speeds outside the page.
+  const picks = Object.fromEntries((process.env.CONTACT_TICKS ?? '').split(',').filter(Boolean).map((x) => x.split('=')).map(([k, v]) => [k, Number(v)]));
+  const found = await kp.evaluate(({ skip, picks }) => {
     const w = window.__watch, ev = w.events(), out = {}, n = {};
+    if (Object.keys(picks).length) {
+      for (const [k, tick] of Object.entries(picks)) {
+        const e = ev.find((x) => x.type === 'hit' && x.tick === tick);
+        if (!e) continue;
+        w.seekPlain(e.tick); const s = w.state(), t = s.skaters.find((x) => x.id === e.otherId), h = s.skaters.find((x) => x.id === e.playerId);
+        const D = e.detail.result === 'landed' ? t.downT : e.detail.result === 'bounced' ? h.downT : 0;
+        out[k] = { tick: e.tick, a: e.playerId, b: e.otherId, focus: e.detail.result === 'bounced' ? e.playerId : e.otherId, end: e.tick + Math.ceil(D * 30 - 1e-6) };
+      }
+      return out;
+    }
     const take = (k, v) => { if (out[k]) return; n[k] = (n[k] ?? 0) + 1; if (n[k] > (skip[k] ?? 0)) out[k] = v; };
     const R = 8.53, HL = 30.48, HW = 12.955;
     const boardsGap = (x, y) => { const ax = Math.abs(x), ay = Math.abs(y), cx = HL - R, cy = HW - R; return ax > cx && ay > cy ? R - Math.hypot(ax - cx, ay - cy) : Math.min(HL - ax, HW - ay); };
@@ -423,14 +437,14 @@ if (only && only.includes('contact')) {
       }
     }
     return out;
-  }, { skip });
+  }, { skip, picks });
   console.log('contact', JSON.stringify(found));
   log.contact = found;
   for (const [k, v] of Object.entries(found)) {
     const o = k.startsWith('poke') ? [-6, -2, 1, 4, 7, 10, 16, 26]
       : v.end > v.tick ? [-12, -5, -2, 1, 6, Math.round((v.end - v.tick) * 0.5), v.end - v.tick - 4, v.end - v.tick + 9]
         : [-12, -6, -3, -1, 1, 4, 10, 20];
-    for (const view of ['side', 'follow', 'broadcast']) {
+    for (const view of (process.env.CONTACT_VIEWS ?? 'side,follow,broadcast').split(',')) {
       const r = await kp.evaluate(({ v, o, view }) => {
         const w = window.__watch;
         w.setSpeed(1);

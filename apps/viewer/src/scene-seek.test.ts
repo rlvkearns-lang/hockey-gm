@@ -257,6 +257,6 @@ describe('continuity in a real game', () => {
     // Today's worst is 9.1 cm (blends under the engine's rapid changes; the synthetic bound in gait.test.ts is 6).
     expect(worst).toBeGreaterThan(0.03);
     expect(worst, worstAt).toBeLessThan(0.1);
-    expect(worstContact).toBeLessThan(CONTACT_FRAME_BOUND);
+    expect(worstContact).toBeLessThan(CONTACT_FRAME_BOUND); // feet, hands and hip together
   });
 });
