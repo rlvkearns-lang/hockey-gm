@@ -65,3 +65,4 @@ Proposed shape **[my call, not yet agreed]**:
 - For goalies: goals saved above expected, by shot location and type, rebound control.
 - Basic view by default; an "advanced" switch reveals the rest. Scouts and the assistant GM can cite these in reports.
 - Requires the engine to record a position on every event (being added in the current fix round) and the league stage to store per-game on-ice data.
+- Owner agreed (2026-11-23): rival GMs use these numbers to differing degrees as part of their personality ("analytics" types versus "old school"), so undervalued players can be found before others notice.
