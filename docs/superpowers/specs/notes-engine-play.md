@@ -81,3 +81,15 @@ Proposed shape **[my call]**:
 - Standing up for a teammate: after a heavy or questionable hit, teammates on the ice may respond, by their own personality (aggression, fighting, leadership, friendship with the man who was hit) and by who was hit (a rookie, a star, the goalie). The response ranges from a shove and a scrum to a fight. A team that never responds, or a player who does, is noticed by the room (people layer).
 - All of this belongs with engine round 3 (scrums and fights), and uses penalties from round 2.
 - Owner agreed to the moments, game temperature and standing-up-for-teammates shapes above (2026-11-23).
+
+## Coaching during a game (owner, 2026-11-23)
+
+- Optional. The default is automatic: the coach changes lines and pulls the goalie. The player can choose to step in: send out particular lines, and pull or switch the goalie whenever he likes.
+
+Consequences and proposed shape **[my call]**:
+
+- A game becomes seed + setup + a timed list of bench commands. With no commands it is exactly today's game. The engine gains a command input (next line out, line matching, pull or swap the goalie, later a timeout), applied at a given tick, in engine round 2 with tactics.
+- The viewer currently plays the whole game ahead of time. With coaching it still does, until the player gives a command; then the game is re-run from that moment with the command added, which is fast and exact because the engine can resume from a snapshot. Replays and seeking keep working.
+- Commands take effect the way they would on a real bench: at the next change or whistle, not instantly.
+- It interacts with the line-up setting: under "coach decides", stepping in overrules the coach and he notices; under full manual control there is no cost.
+- Friends league: a game between two human GMs is simmed once for both, so live coaching there needs both online together (the watch-party case) or is switched off; to settle when that stage is designed.
