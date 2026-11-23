@@ -82,3 +82,14 @@ Proposed shape for the GM's own leaks **[my call, not yet agreed]**:
 - It can work: a rival GM calls, an agent softens, a market for a player appears.
 - It can backfire: the player it is about finds out and is hurt or angry; the insider or the other party works out who planted it; repeated plants cost the GM trust with insiders, agents, rival GMs and his own room.
 - The chance of being traced depends on the insider, on how many people could have known, and on whether the story turns out false.
+
+## Reputation summary (owner, 2026-11-23)
+
+- The owner asked for a table or tab summarising how the GM is viewed by the public, by fans, and by others.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- One "Reputation" page with a row per audience: fans, media, the team owner (when owner mode is on), the GM's own players, players around the league (matters for free agents), agents, and rival GMs.
+- Each row gives a rough reading in words (for example "trusted", "wary", "hostile"), the direction it is moving, and the two or three things that most shaped it lately ("kept his promise to Keane", "traded a fan favourite", "caught planting a story").
+- Rows open to more detail: rival GMs one by one, agents one by one.
+- Readings are impressions gathered the same way as player feelings, not exact numbers, with the same off switch for plain numbers.
