@@ -16,3 +16,8 @@ Proposed details **[my call]**:
 ## Trades between human GMs (owner, 2026-11-23)
 
 - A per-league setting: no check (the default), commissioner approval, or a league vote where other GMs get a day to object.
+
+## Watching games (owner, 2026-11-23)
+
+- Each GM watches on his own time, with the result hidden until he watches or skips. A game is simmed once and replayed from its seed.
+- Watching together live (a watch party) is a possible later addition, not a priority: the owner would rather the effort go elsewhere.
