@@ -141,3 +141,4 @@ Proposed shape **[my call]**:
 - Age-dependent details follow age, not chance: grey hair and a receding hairline only on older players, beards filling in with age.
 - Mixed and immigrant backgrounds stay possible and are handled deliberately (for example a Canadian-born player with a Nigerian surname), rather than by random mismatch.
 - Height and weight are drawn together and fit position; birthplace fits the leagues he came through (a Swedish junior from a Swedish town).
+- Owner agreed (2026-11-23), and stressed: players born in a country should reflect that country's real mix of backgrounds (Canadian-born players should not all be white).
