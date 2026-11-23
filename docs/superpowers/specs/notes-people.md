@@ -113,3 +113,10 @@ Proposed shape **[my call, not yet agreed]**:
 - Alerts use the inbox's three levels; league-wide major moves are "breaking news" on the feed with an optional pop-up.
 - No-move handling: asking is itself an event with a memory. The outcome depends on personality, his five feelings, the destination (contender, hometown, friends there) and how the GM asks (honestly, with a reason, or by pressure). A list of acceptable teams can be negotiated into the contract or offered by the player later. Asking and being refused leaves a mark; asking through the agent first is the softer route.
 - Contracts have a value that can be negative. Rival GMs price cap space; moving a bad deal costs a sweetener (pick, prospect) or retained salary, and teams with space and a patient owner act as takers. Belongs to stage 3 (GM job).
+
+- Correction from the owner (2026-11-23): "a Larkin situation" means a captain asking for a trade. Also "a Hellebuyck situation": a star the fans might turn on.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- A captain's trade request is the heaviest version of a trade request: it shakes the room (teammates wonder whether to stay), the fans and the owner, and leaks fast. How the GM handles it (quietly, honouring it, refusing, stripping the captaincy) is remembered by everyone.
+- Fans have their own feeling toward each notable player, separate from the player's feelings: built from performance against expectation and pay, playoff results, loyalty shown, and what he says publicly. A star can be loved in the regular season and turned on after playoff failures. Fan mood reaches the player (boos at home, pressure) and by personality he shrugs, presses, or wants out.
