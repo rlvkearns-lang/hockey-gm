@@ -61,6 +61,11 @@ export type AnimContext = {
  * as the goalie figure's `turn`) turns his whole drawn figure; it is NOT weighted (the overlay eases it itself) and is
  * read whatever the weight. It exists for one ruled exception, faceoff setups (dead play): in live play every turn is
  * exactly 0.
+ *
+ * `apply` is not always a pure read: the limiters of contact and the battles (overlays/contact.ts, battles.ts) write
+ * slot state from it, and a weight may read what the previous frame's apply wrote (`lim.lag`). That holds because the
+ * scene poses every on-ice figure exactly once per frame, including every frame of a seek's pre-roll (seekScene). Never
+ * pose a figure twice at different times in one frame, and never skip posing in the pre-roll as an optimisation.
  */
 export type Overlay<S = unknown> = {
   id: string;
@@ -77,6 +82,9 @@ export type Overlay<S = unknown> = {
  * empty).
  */
 export type SkaterAnim = { gait: GaitState; fresh: boolean; carrying: boolean; slots: Readonly<Record<string, unknown>> };
+// (Not a snapshot: several overlays (the stick, contact, battle and goalie reach slots) mutate their slot objects in
+// place from step and apply, so a SkaterAnim cannot be kept and resumed later. To show an earlier moment again (a
+// replay), go through seekScene, which rebuilds every slot by its pre-roll.)
 
 /** An overlay's state for this skater (undefined before its first step, or after he starts afresh). */
 export const slotOf = <S>(anim: SkaterAnim, id: string): S | undefined => anim.slots[id] as S | undefined;
@@ -124,7 +132,8 @@ export type GoalieAnim = { gait: GoalieGait; fresh: boolean; slots: Readonly<Rec
  * left-catching frame: x forward, z to his right, glove on his left). `apply` may move the glove, the blocker, the
  * stick heel and blade, each leg's ankle (where the pad goes) and knee hint, and the pelvis and torso, before the limbs
  * are solved; to blend toward a key pose the engine is not showing, return goalieKeyRaw(pose, dims, side) (or a mix
- * of it, mixGoalieRaw). Goalies are never drawn offset.
+ * of it, mixGoalieRaw). A goalie overlay has no offset of its own; the body pass (BodyPass, contact.ts) may still
+ * draw a goalie up to 0.35 m from his engine place in live play, to keep a skater from being drawn inside him.
  */
 export type GoalieOverlay<S = unknown> = {
   id: string;

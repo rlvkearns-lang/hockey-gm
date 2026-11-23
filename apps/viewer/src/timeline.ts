@@ -102,3 +102,16 @@ export function buildTimeline(events: readonly GameEvent[]): Timeline {
     contest: (contestId) => contests.get(contestId),
   };
 }
+
+/**
+ * The latest event of `type` at or before `tick` with no drop of the puck (`faceoff`) and no period end since it (a
+ * stoppage's aftermath, read from the timeline rather than from the engine's stoppage and setup lengths); `playerId`
+ * and `role` as for Timeline.last.
+ */
+export function lastSinceDrop<T extends GameEventType>(tl: Timeline, type: T, tick: number, playerId?: string, role?: Role): GameEventOf<T> | undefined {
+  const t = Math.floor(tick);
+  if (t < 0) return undefined;
+  const drop = tl.last('faceoff', t, t), end = tl.last('periodEnd', t, t);
+  const bound = Math.max(drop ? drop.tick : -1, end ? end.tick : -1);
+  return bound >= t ? undefined : tl.last(type, t, t - bound - 1, playerId, role);
+}

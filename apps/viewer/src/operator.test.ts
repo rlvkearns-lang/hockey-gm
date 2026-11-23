@@ -57,6 +57,14 @@ describe('camera operator', () => {
       }
     }
   });
+  it('a change of ends cuts even while a goal holds the camera on the net (a goal on a period\'s last tick); a restart does not', () => {
+    let st = initialOperator('broadcast');
+    const hold = { net: { x: 26, y: 0, z: 0 }, k: 1 };
+    const at = (cut?: 'ends' | 'restart') => ({ puck: { x: 20, y: 0, z: 0 }, attackingRight: true, goal: hold, cut });
+    for (let i = 0; i < 60; i++) st = stepOperator(st, at(), 1 / 60).state;
+    expect(stepOperator(st, at('ends'), 1 / 60).cut).toBe(true);
+    expect(stepOperator(st, at('restart'), 1 / 60).cut).toBe(false);
+  });
   it('a change of ends, a new angle or a seek cuts; an angle whose spot jumps (ice level) cuts there at any frame rate', () => {
     let st = initialOperator('iceLevel');
     const at = (x: number) => ({ puck: { x, y: 0, z: 0 }, attackingRight: true });

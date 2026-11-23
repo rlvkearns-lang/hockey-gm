@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { ContestState, GameEventOf } from '@hockey/engine';
+import type { ContestState, GameEvent, GameEventOf } from '@hockey/engine';
 import { createCursor } from '../playback';
 import { createGameScene, seekScene } from '../scene';
 import { recorded, testSetup } from '../test/game';
 import { buildTimeline } from '../timeline';
 import { initialSkaterAnim, OVERLAYS, poseSkater, stepSkater, type SkaterSample } from '../animator';
 import { contextWith, sample } from '../test/anim';
-import { BATTLE_OVERLAYS } from './battles';
+import { BATTLE_OVERLAYS, battleSlotOf } from './battles';
 
 /**
  * Board battles: their end and their mirror image. The whole-period measurements (one pass over the first period of
@@ -72,5 +72,30 @@ describe('battles end and mirror cleanly', () => {
     near(l.pose.offset.x, r.pose.offset.x); near(l.pose.offset.z, -r.pose.offset.z);
     // The stance is really on (not two plain skating poses).
     expect(Math.abs(l.pose.pose.pitch - 0.36)).toBeGreaterThan(0.2);
+  });
+
+  it('during the resolve the kind of win is the one the recorded contestEnd gives, not one worked out from the roles', () => {
+    // A board battle in its resolve whose roles say "pinned" (the pinned man lost); the engine's log says "stick".
+    const me = sample({ speed: 0.3 }), other = sample({ speed: 0.2 });
+    (me as { id: string }).id = 'p1'; (other as { id: string }).id = 'p2';
+    me.pos.x = 3; me.pos.y = 11.6; other.pos.x = 3.2; other.pos.y = 12.3;
+    const ctx = contextWith({});
+    (ctx.skaters as Map<string, SkaterSample>).set('p1', me).set('p2', other);
+    const contest = {
+      id: 91, kind: 'boardBattle', stage: 'resolve', stageT: 0.1, participants: ['p1', 'p2'], leader: 'p1', spot: { x: 3.3, y: 12.4 }, freeIds: [],
+      roles: { a: 'p1', b: 'p2', carrier: null, stripped: null, first: 'p1', pinned: 'p2', digLast: 'p1', supportA: null, supportB: null, winner: 'p1' },
+      data: { holdsPuck: true, slide: 0, held: 0, firstSet: true, balance: 2, nextAt: 1, digRounds: 1, clean: true },
+    } as unknown as ContestState;
+    (ctx as unknown as { contests: ContestState[] }).contests = [contest];
+    (ctx.state as { contests: ContestState[] }).contests = [contest];
+    const ends = (result: string) => buildTimeline([
+      { type: 'contestStart', side: null, playerId: null, otherId: null, pos: { x: 3.3, y: 12.4 }, detail: { contestId: 91, kind: 'boardBattle', participants: ['p1', 'p2'] }, tick: 900, period: 1, clock: 0, assistIds: [] },
+      { type: 'contestEnd', side: null, playerId: 'p1', otherId: null, pos: { x: 3.3, y: 12.4 }, detail: { contestId: 91, kind: 'boardBattle', result, winnerId: 'p1', puck: 'toWinner' }, tick: 1006, period: 1, clock: 0, assistIds: [] },
+    ] as unknown as GameEvent[]);
+    for (const result of ['stick', 'scramble', 'pinned'] as const) {
+      (ctx as { timeline: ReturnType<typeof buildTimeline> }).timeline = ends(result);
+      const anim = stepSkater(initialSkaterAnim(), me, ctx, 1 / 30, BATTLE_OVERLAYS);
+      expect(battleSlotOf(anim)!.recs.boardBattle.how).toBe(result);
+    }
   });
 });

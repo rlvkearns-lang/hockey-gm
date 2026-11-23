@@ -14,8 +14,8 @@ import { mixRaw, type RawPose } from '../pose-mix';
  *   a shot within 0.9 m of a skater's centre and turns the puck back from where it is, often a metre or two short of
  *   him), so the puck is drawn coming off his stick. He holds it, then gives way to a fall (the gait's down share).
  * - celebrateOverlay: after a `goal`, the scorer raises his arms with his stick up; his teammates on the ice raise their
- *   sticks and turn toward him. All fade by CELEBRATE_END after the goal, before the next draw (the stoppage after a
- *   goal is 1.5 s and the faceoff setup at least 3 s more).
+ *   sticks and turn toward him. All fade by CELEBRATE_END after the goal, and in any case DRAW_CLEAR before the next
+ *   draw (the `faceoff` the timeline has after the goal), however long the engine's stoppage and setup last.
  * - beatenGoalie: the goalie scored on slumps: head and shoulders down, hands low; the same timing.
  */
 
@@ -37,6 +37,8 @@ const BLOCK_REACH = 1.55;
 const CELEBRATE_RISE = 9;
 /** ...holds to CELEBRATE_HOLD and has faded out by CELEBRATE_END (ticks after the goal). */
 const CELEBRATE_HOLD = TICKS(3), CELEBRATE_END = TICKS(4);
+/** It has faded out at least this long (ticks) before the draw that follows, fading over at most CELEBRATE_FADE. */
+const DRAW_CLEAR = TICKS(0.5), CELEBRATE_FADE = CELEBRATE_END - CELEBRATE_HOLD;
 
 type Block = { e: GameEventOf<'block'> | null; begin: number; contact: number; w: number };
 /**
@@ -128,8 +130,17 @@ function goalOf(ctx: AnimContext, now: number): GameEventOf<'goal'> | undefined 
   if (ctx.timeline.next('faceoff', g.tick, Math.max(0, Math.floor(now) - g.tick))) return undefined;
   return g;
 }
-const celebrateLevel = (g: GameEventOf<'goal'>, now: number, delay: number, rise = CELEBRATE_RISE): number =>
-  smooth((now - (g.tick - 1 + delay)) / rise) * (1 - smooth((now - g.tick - CELEBRATE_HOLD) / (CELEBRATE_END - CELEBRATE_HOLD)));
+/**
+ * The celebration's level: up over `rise` from `delay` after the goal, held, and faded out by CELEBRATE_END after it,
+ * or by DRAW_CLEAR before the next draw if that comes sooner (the fade then as long as there is room for, at most
+ * CELEBRATE_FADE).
+ */
+function celebrateLevel(g: GameEventOf<'goal'>, now: number, delay: number, rise = CELEBRATE_RISE, tl?: AnimContext['timeline']): number {
+  const draw = tl?.next('faceoff', g.tick, CELEBRATE_END + DRAW_CLEAR);
+  const end = draw ? Math.min(CELEBRATE_END, draw.tick - g.tick - DRAW_CLEAR) : CELEBRATE_END;
+  const fade = Math.max(1, Math.min(CELEBRATE_FADE, end - 1));
+  return smooth((now - (g.tick - 1 + delay)) / rise) * (1 - smooth((now - g.tick - (end - fade)) / fade));
+}
 /**
  * The scorer raises his arms once his shot's follow-through is over (overlays/stick.ts runs it FOLLOW_TICKS, 24, after
  * the release, and has let it go by this many ticks after the release), over SCORER_RISE ticks: within a second of the
@@ -152,7 +163,7 @@ export const celebrateOverlay: Overlay = {
     if (!g || g.side !== sample.side) return 0;
     const scorer = g.playerId === sample.id;
     if (!scorer && !g.onIce?.[sample.side].includes(sample.id)) return 0;
-    const w = (scorer ? celebrateLevel(g, now, scorerDelay(g, ctx), SCORER_RISE) : 0.85 * celebrateLevel(g, now, 4)) * (1 - styleShare(anim.gait, 'down'));
+    const w = (scorer ? celebrateLevel(g, now, scorerDelay(g, ctx), SCORER_RISE, ctx.timeline) : 0.85 * celebrateLevel(g, now, 4, CELEBRATE_RISE, ctx.timeline)) * (1 - styleShare(anim.gait, 'down'));
     return w > 1e-4 ? w : 0;
   },
   apply(raw, _anim, sample, ctx, dims) {
@@ -185,7 +196,7 @@ export const beatenGoalie: GoalieOverlay = {
     const now = ctx.tick + ctx.alpha, g = goalOf(ctx, now);
     if (!g || g.otherId !== sample.id) return 0;
     // Soon after the puck is in (it crosses his plane a tick or two before the goal's tick).
-    const w = celebrateLevel(g, now, BEATEN_DELAY, BEATEN_RISE);
+    const w = celebrateLevel(g, now, BEATEN_DELAY, BEATEN_RISE, ctx.timeline);
     return w > 1e-4 ? w : 0;
   },
   apply(raw, _anim, _sample, _ctx, dims) {

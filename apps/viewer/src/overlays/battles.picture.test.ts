@@ -30,7 +30,7 @@ describe('seeking into a battle', () => {
         if (!fa.pose || !fb.pose) continue;
         const a = fa.pose, b = fb.pose;
         // The stance's own parts: the blade, the free hand, the shoulders' turn. (The hips and the top hand solved from
-        // the blade also carry the gait's stride, which no engine state pins: scene-seek.test.ts.)
+        // the blade also carry the gait's stride, whose phase depends on the gait's history: scene-seek.picture.test.ts.)
         const m = Math.max(dist3(a.arms[0].hand, b.arms[0].hand), dist3(a.blade, b.blade), Math.abs((a.twist ?? 0) - (b.twist ?? 0)));
         here = Math.max(here, m);
         if (m > worst) { worst = m; worstAt = `${t} ${id}`; }

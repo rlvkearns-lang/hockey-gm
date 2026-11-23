@@ -32,9 +32,9 @@ import { boardsGap, pokeOverlay, radiusOfWeight, weightOfDims } from './contact'
  *   the loser turned the wrong way (facing the boards, stick off it; a beaten pinner thrown into the boards; a scramble
  *   or protect loser lunging after it).
  * - netFrontOverlay: the attacker planted wide in front facing the puck, blade on the ice; the defender behind him
- *   leaning in with his glove and forearm in his back (the cross-check drawn as the push, not a shaft held across: a
- *   raised two-handed shaft has no steady hand solution), stick at the attacker's skates; `free`: the attacker has a
- *   step and his stick clear, the defender's push off; `tied`: the defender's blade lifts the attacker's stick.
+ *   leaning in and shoving, both hands on his stick held across the attacker's hips (a cross-check: the shaft across,
+ *   the blade out to his left at hip height); `free`: the attacker has a step and his stick clear, the defender's push
+ *   off and his stick back on the ice; `tied`: the defender's blade lifts the attacker's stick.
  * - raceOverlay: both sprint low reaching one-handed with the stick toward the puck, a glove on the other man when he
  *   is alongside; the winner's blade gets there.
  * Every stance comes off within KEEP_SECONDS of the contest's end (or at once and smoothly when it is cut off: a whistle,
@@ -149,12 +149,14 @@ function contestOf(id: string, ctx: AnimContext): BattleContest | null {
   return null;
 }
 
-/** A board battle's result from its roles (as the engine's finish() works it out). */
-function boardHow(sl: BattleRec): string {
-  if (sl.winner === null) return '';
-  const w = sl.winner, l = w === sl.a ? sl.b : sl.a;
-  const sup = w === sl.a ? sl.supportA : sl.supportB, lsup = w === sl.a ? sl.supportB : sl.supportA;
-  return sup !== null && lsup === null ? 'support' : sl.pinned === null ? 'scramble' : sl.pinned === l ? 'pinned' : 'stick';
+/**
+ * A board battle's result during its resolve: how the engine says it was won, read from the battle's recorded
+ * `contestEnd` (its result: pinned, stick, support or scramble), not worked out again from the roles; '' if it ends
+ * any other way.
+ */
+function boardHow(cid: number, ctx: AnimContext): string {
+  const res = ctx.timeline.contest(cid)?.end?.detail.result;
+  return res === 'pinned' || res === 'stick' || res === 'support' || res === 'scramble' ? res : '';
 }
 
 /** Read the live contest into the slot. */
@@ -171,7 +173,7 @@ function readContest(sl: BattleRec, c: BattleContest, ctx: AnimContext): void {
     sl.supportA = r.supportA; sl.supportB = r.supportB; sl.carrier = r.carrier;
     boardsGap(c.spot.x, c.spot.y, nrm);
     sl.nx = nrm.x; sl.ny = nrm.z;
-    if (c.stage === 'resolve') { sl.how = boardHow(sl); sl.winnerId = r.winner; sl.loserId = r.winner === r.a ? r.b : r.a; }
+    if (c.stage === 'resolve') { sl.how = boardHow(c.id, ctx); sl.winnerId = r.winner; sl.loserId = r.winner === r.a ? r.b : r.a; }
   } else if (c.kind === 'netFront') {
     sl.a = c.roles.attacker; sl.b = c.roles.defender;
   } else {

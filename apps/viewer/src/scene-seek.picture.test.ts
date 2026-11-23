@@ -50,8 +50,11 @@ describe('seeking shows the moment as play would have', () => {
     const sorted = (v: number[]) => [...v].sort((x, y) => x - y);
     const q = (v: number[], k: number) => sorted(v)[Math.floor((v.length - 1) * k)]!;
     // Measured with the 1.5 s pre-roll: hip within 2.9 cm and lean within 0.08 rad for 90% of figures, worst hip
-    // 12.8 cm, 84% agreeing on both. What is left is the stride's phase (which foot is pushing, and so the pelvis's
-    // rise and fall): it is the gait's own clock, which no engine state sets, so no pre-roll pins it.
+    // 12.8 cm, 84% agreeing on both. What is left is the gait's own history: its stride phase (which foot is pushing,
+    // and so the pelvis's rise and fall) and its style are integrated, with the style machine's dwell and break rules,
+    // from wherever the gait last started afresh, so they depend on how far back play started and on the step size,
+    // and a 1.5 s pre-roll does not pin them (it is not a matter of the pre-roll's step: at the display step it differs
+    // as much; 20 s of pre-roll nearly does). The fix is the gait in the recording (the final review's I3, scheduled).
     expect(q(hip, 0.9)).toBeLessThan(0.04);
     expect(Math.max(...hip)).toBeLessThan(0.16);
     expect(q(pitch, 0.9)).toBeLessThan(0.1);

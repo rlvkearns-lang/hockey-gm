@@ -93,4 +93,21 @@ describe('what shows round a goal', () => {
     }
     sc.dispose();
   });
+
+  it('the camera hold has let go of the net by the next drop of the puck, however soon the engine drops it', () => {
+    // A goal, and the faceoff the timeline has 2 s after it (shorter than the engine's stoppage and setup today).
+    const ev = (type: string, tick: number, extra: Record<string, unknown> = {}) => ({ type, tick, side: 'home', playerId: 'h1', otherId: 'g2', pos: { x: 26, y: 0 }, period: 1, clock: 0, assistIds: [], detail: {}, ...extra });
+    const goal = ev('goal', 300, { detail: { distance: 8, releaseTick: 290 } });
+    const quick = buildTimeline([goal, ev('faceoff', 300 + ticks(2), { side: null })] as unknown as GameEventOf<'goal'>[]);
+    for (const t of [300 + ticks(2), 300 + ticks(2.5), 300 + ticks(4)]) expect(goalShow(quick, t).hold, `${t}`).toBeNull();
+    // The hold lets go over the last second before the drop.
+    expect(goalShow(quick, 300 + ticks(0.9)).hold!.k).toBeGreaterThan(0.99);
+    expect(goalShow(quick, 300 + ticks(1.95)).hold!.k).toBeLessThan(0.02);
+    // A drop 5 s after the goal: as before (light 3 s, hold to 3 s then easing over 1 s, tag 5 s).
+    const usual = buildTimeline([goal, ev('faceoff', 300 + ticks(5), { side: null })] as unknown as GameEventOf<'goal'>[]);
+    expect(goalShow(usual, 300 + ticks(2.9)).light).toBe(1);
+    expect(goalShow(usual, 300 + ticks(2.9)).hold!.k).toBeGreaterThan(0.99);
+    expect(goalShow(usual, 300 + ticks(4.5)).tag).not.toBeNull();
+    expect(goalShow(usual, 300 + ticks(4.05)).hold).toBeNull();
+  });
 });

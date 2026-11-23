@@ -4,6 +4,7 @@ import type { Playback } from './playback';
 import { createGameScene } from './scene';
 import { isCut, probeOf } from './cuts';
 import { sharedPlayback } from './test/game';
+import { buildTimeline, lastSinceDrop } from './timeline';
 
 /** The drawn puck's continuity while play runs (npm run test:picture; moved from scene-puck.test.ts). */
 describe('game scene', () => {
@@ -19,6 +20,7 @@ describe('game scene', () => {
    */
   function puckMovement(hz: number, seconds: number, events?: readonly GameEvent[]): { release: number[]; other: number[]; exact: boolean } {
     const sc = createGameScene(game, events ? { events } : {});
+    const tl = events ? buildTimeline(events) : null;
     pb.seek(1200); sc.reset(); sc.update(pb.frame(), 0);
     const last = sc.puckWorld();
     const release: number[] = [], other: number[] = [], speeds: number[] = [];
@@ -30,9 +32,9 @@ describe('game scene', () => {
       if (speeds.length > Math.ceil(hz / 2) * 2) speeds.splice(0, 2);
       const excess = Math.hypot(p.x - last.x, p.z - last.z) - Math.max(...speeds) / hz;
       if (f.next.phase === 'live' && f.prev.phase === 'live') (f.prev.carrierId !== null && f.next.carrierId === null ? release : other).push(excess);
-      // (Except in the stopped play after a goal, where the puck is drawn eased into the net: a ruled exception, Task 6
-      // fix round 1, tested in puck-marker.test.ts.)
-      const afterGoal = f.prev.phase === 'stopped' && (events ?? []).some((e) => e.type === 'goal' && e.tick <= f.prev.tick && f.prev.tick - e.tick <= 120);
+      // (Except in the stopped play after a goal, before the next faceoff, where the puck is drawn eased into the net: a
+      // ruled exception, Task 6 fix round 1, tested in puck-marker.test.ts.)
+      const afterGoal = f.prev.phase === 'stopped' && tl !== null && lastSinceDrop(tl, 'goal', f.prev.tick) !== undefined;
       if (f.prev.carrierId === null && f.next.carrierId === null && !afterGoal) {
         // Across a tick the engine cuts in (the puck put on the dot) the engine's puck is its earlier place all tick.
         const k = isCut(probeOf(f.prev), f.next) ? 0 : f.alpha;

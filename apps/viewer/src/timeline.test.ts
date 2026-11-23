@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DT } from '@hockey/engine';
-import { buildTimeline } from './timeline';
+import { buildTimeline, lastSinceDrop } from './timeline';
 import { recorded } from './test/game';
 
 describe('timeline', () => {
@@ -64,5 +64,15 @@ describe('timeline', () => {
     for (let i = 0; i < 1e6; i++) if (tl.last('release', (i * 37) % 100000, Math.round(1.5 / DT))) n++;
     expect(n).toBeGreaterThan(0);
     expect(performance.now() - t0).toBeLessThan(1000);
+  });
+
+  it('lastSinceDrop finds the latest event with no faceoff or period end since it', () => {
+    const ev = (type: string, tick: number) => ({ type, tick, side: null, playerId: null, otherId: null, pos: { x: 0, y: 0 }, period: 1, clock: 0, assistIds: [], detail: {} });
+    const tl = buildTimeline([ev('goal', 100), ev('faceoff', 250), ev('goal', 400), ev('periodEnd', 500), ev('faceoff', 900)] as unknown as Parameters<typeof buildTimeline>[0]);
+    expect(lastSinceDrop(tl, 'goal', 249)?.tick).toBe(100);
+    expect(lastSinceDrop(tl, 'goal', 250)).toBeUndefined();
+    expect(lastSinceDrop(tl, 'goal', 499)?.tick).toBe(400);
+    expect(lastSinceDrop(tl, 'goal', 600)).toBeUndefined();
+    expect(lastSinceDrop(tl, 'goal', 99)).toBeUndefined();
   });
 });

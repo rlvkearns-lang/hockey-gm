@@ -15,9 +15,9 @@ import type { Vec3 } from './pose-mix';
  * game time. Across the scene's other cuts ('jump': the engine moving the puck in the middle of play)
  * it eases.
  *
- * After a goal (input `goal`, from goal-show.ts: weight 1 for GOAL_HOLD_SECONDS, then easing to 0) it holds on the net
- * scored on and the scorer instead of the puck: the engine's restart (the puck put on the centre dot) does not cut the
- * camera while it holds, and as the hold lets go the camera eases to the play (an angle may still cut once by its
+ * After a goal (input `goal`, from goal-show.ts: weight 1 for GOAL_HOLD_SECONDS, then easing to 0, and gone by the next
+ * drop of the puck) it holds on the net scored on and the scorer instead of the puck: the engine's restart (the puck put
+ * on the centre dot) does not cut the camera while it holds (a change of ends does), and as the hold lets go the camera eases to the play (an angle may still cut once by its
  * own rule, as ice level changing spot). The broadcast camera tightens a little on the goal.
  */
 
@@ -117,7 +117,8 @@ export function stepOperator(op: CameraOperator, input: OperatorInput, dt: numbe
   const h = Number.isFinite(dt) && dt > 0 ? dt : 0;
   // A goal's hold: the camera watches the net (and the scorer) and does not cut to the engine's restart.
   const gl = input.goal, holdK = gl && gl.k > 0 ? Math.min(1, gl.k) : 0;
-  let snap = op.pending || input.snap === true || (holdK === 0 && (input.cut === 'restart' || input.cut === 'ends'));
+  // (A change of ends always cuts: the figures are all moved; a goal on a period's last tick lets go of the net there.)
+  let snap = op.pending || input.snap === true || input.cut === 'ends' || (holdK === 0 && input.cut === 'restart');
   let watch = input.puck;
   if (gl && holdK > 0) {
     const p = holdPoint(gl.net, gl.scorer);

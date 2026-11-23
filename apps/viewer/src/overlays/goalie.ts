@@ -3,6 +3,7 @@ import { goalieSlotOf, type AnimContext, type GoalieAnim, type GoalieOverlay, ty
 import type { BodyDims } from '../body';
 import { glovePocket, goalieKeyRaw, mixGoalieRaw, type GoalieFigurePose, type GoalieRaw } from '../goalie-pose';
 import type { Vec3 } from '../pose-mix';
+import { lastSinceDrop } from '../timeline';
 
 /**
  * Saves that reach the puck (pure: no three.js, no DOM). For a shot on its way to his net (a `release` of kind `shot`
@@ -530,8 +531,6 @@ export const goalieTrack: GoalieOverlay = {
  * goalieReach.
  */
 export const FACING_BACK = 1.5;
-/** How far back (ticks) a whistle's freeze or goal is looked for: the stoppage and the longest faceoff setup. */
-const DEAD_TICKS = Math.round(TICKS(1.5 + 8 + 0.5));
 
 const facingScratch = { w: 0, facing: 0 };
 /** The facing he is held at and how much of it shows, or null (play is live, or nothing to hold). */
@@ -539,13 +538,13 @@ function deadFacingOf(s: GoalieSample, ctx: AnimContext): { w: number; facing: n
   const st = ctx.state;
   if (st.phase !== 'stopped' && st.phase !== 'faceoffSetup') return null;
   const tl = ctx.timeline, tick = st.tick;
-  const goal = tl.last('goal', tick, DEAD_TICKS, s.id, 'other');
-  const freeze = tl.last('freeze', tick, DEAD_TICKS, s.id);
+  // The goal against him or his held save that stopped this play: the latest with no faceoff (nor period end) since,
+  // however long the engine's stoppage and setup last.
+  const goal = lastSinceDrop(tl, 'goal', tick, s.id, 'other');
+  const freeze = lastSinceDrop(tl, 'freeze', tick, s.id);
   const held = freeze && freeze.detail.cause === 'save' ? freeze : undefined;
   const e = goal && (!held || goal.tick >= held.tick) ? goal : held;
   if (!e) return null;
-  const draw = tl.last('faceoff', tick, DEAD_TICKS);
-  if (draw && draw.tick >= e.tick) return null;
   // Where the shot was let go from.
   const relTick = e.type === 'goal' ? e.detail.releaseTick : tl.last('shot', e.tick, 0, s.id, 'other')?.detail.releaseTick ?? null;
   const shooter = e.type === 'goal' ? e.playerId : tl.last('save', e.tick, 0, s.id)?.otherId ?? null;

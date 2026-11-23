@@ -12,6 +12,9 @@ import type { Timeline } from './timeline';
  *   about the camera before the goal depends on whether the shot goes in, so the camera gives nothing away) for
  *   GOAL_HOLD_SECONDS, easing back to the play over GOAL_HOLD_EASE;
  * - a save: the shots number pulses for SAVE_PULSE_SECONDS (nothing else; no words over the ice).
+ *
+ * The camera's hold has let go of the net by the time the puck is dropped again (the next `faceoff` in the timeline;
+ * its ease brought forward if need be), however long the engine's stoppage and faceoff setup last.
  */
 
 export const GOAL_LIGHT_SECONDS = 3;
@@ -73,6 +76,9 @@ export function goalShow(tl: Timeline, time: number): GoalShow {
     savePulse: saveSince >= 0 && saveSince < SAVE_PULSE_SECONDS ? 1 - smooth(saveSince / SAVE_PULSE_SECONDS) : 0,
   };
   if (!live || !goal) return show;
+  // Seconds from the goal to the next drop of the puck (Infinity: none within what shows).
+  const draw = tl.next('faceoff', goal.tick, Math.ceil(LONGEST / DT) + 1);
+  const toDraw = draw ? (draw.tick - goal.tick) * DT : Infinity;
   if (since < GOAL_LIGHT_SECONDS) show.light = goalEnd(goal);
   if (since < GOAL_FLASH_SECONDS && goal.side) {
     show.flash = goal.side;
@@ -80,9 +86,12 @@ export function goalShow(tl: Timeline, time: number): GoalShow {
     show.flashK = (0.85 + 0.15 * Math.cos((2 * Math.PI * since) / FLASH_PERIOD)) * (1 - smooth((since - 1) / (GOAL_FLASH_SECONDS - 1)));
     show.pop = since < POP_SECONDS ? Math.sin((Math.PI * since) / POP_SECONDS) : 0;
   }
+  // (The tag names the scorer into the play that follows, as on television.)
   if (since < GOAL_TAG_SECONDS) show.tag = goal;
-  if (since < GOAL_HOLD_SECONDS + GOAL_HOLD_EASE) {
-    show.hold = { net: goalNet(goal), k: (1 - Math.exp(-since / GOAL_HOLD_IN)) * (1 - smooth((since - GOAL_HOLD_SECONDS) / GOAL_HOLD_EASE)), scorerId: goal.playerId };
+  // The hold: on at the goal, letting go over GOAL_HOLD_EASE from GOAL_HOLD_SECONDS, and in any case gone by the drop.
+  const holdEnd = Math.min(GOAL_HOLD_SECONDS + GOAL_HOLD_EASE, toDraw), ease = Math.min(GOAL_HOLD_EASE, holdEnd);
+  if (since < holdEnd) {
+    show.hold = { net: goalNet(goal), k: (1 - Math.exp(-since / GOAL_HOLD_IN)) * (1 - smooth((since - (holdEnd - ease)) / ease)), scorerId: goal.playerId };
   }
   return show;
 }

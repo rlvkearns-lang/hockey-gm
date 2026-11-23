@@ -19,7 +19,7 @@ import { lerpAngle, type Frame, type Playback } from './playback';
 import { battleHighlight, initialMarker, MARKER_PX, markerRadius, stepMarker, type MarkerBody, type MarkerMode, type MarkerState } from './puck-marker';
 import { createRigKit, createSkaterRig, isSharedTexture, type RigColors, type SkaterRig } from './rig';
 import { buildRink } from './rink';
-import { buildTimeline, type Timeline } from './timeline';
+import { buildTimeline, lastSinceDrop, type Timeline } from './timeline';
 
 /**
  * The whole game on the ice (three.js): every skater and both goalies as jointed figures, the puck, the rink and the
@@ -126,9 +126,10 @@ const MARKER_SKATER = { r: 0.28, h: 1.75 }, MARKER_GOALIE = { r: 0.45, h: 1.5 };
 const MARKER_OPACITY = 0.8;
 /**
  * After a goal the puck is eased into the net over `seconds`: to `fromBack` m short of the net's back and at least
- * `fromSide` m inside its sides, while the stopped play after the goal lasts (the goal within `within` ticks).
+ * `fromSide` m inside its sides, while the stopped play after the goal lasts (the goal with no faceoff since:
+ * timeline.ts lastSinceDrop).
  */
-const NET_REST = { seconds: 0.45, fromBack: 0.2, fromSide: 0.2, within: 120 };
+const NET_REST = { seconds: 0.45, fromBack: 0.2, fromSide: 0.2 };
 /** A held puck is tilted from this height (m) over this much more: in the glove, not under it on the ice. */
 const HELD_TILT_FROM = 0.12, HELD_TILT_OVER = 0.2;
 /** The way a puck held in the glove faces: up the ice, up a little, and toward the broadcast side (unnormalised). */
@@ -407,7 +408,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     // After a goal, in the stopped play until the faceoff setup (a ruled exception): the puck, which the engine rests
     // on the goal line, is eased into the back of the net on the side it went in.
     if (prev.phase === 'stopped' && next.phase === 'stopped') {
-      const g = timeline.last('goal', prev.tick, NET_REST.within);
+      const g = lastSinceDrop(timeline, 'goal', prev.tick);
       if (g) {
         const k = smooth01(((frame.tick + a - g.tick) * DT) / NET_REST.seconds), end = g.pos.x >= 0 ? 1 : -1;
         const tx = end * (RINK.goalLineX + RINK.netDepth - NET_REST.fromBack);
@@ -582,6 +583,9 @@ export const PREROLL_STEP = 1 / 30;
  * anyway), the scene is reset there and stepped through to `tick` at PREROLL_STEP without drawing. A man who is down
  * is then drawn down, a skater mid-stride mid-stride, a goalie in a save in the save, and the carried puck on the
  * blade. `preroll` 0 is a plain seek (reset and one update).
+ *
+ * Every pre-roll step is a full update (every on-ice figure stepped and posed once): overlay limiters write slot state
+ * from Overlay.apply (anim-context.ts), so a pre-roll that skipped posing would leave them where play would not.
  */
 export function seekScene(pb: Playback, sc: GameScene, tick: number, preroll = PREROLL_SECONDS): void {
   const target = Math.min(Math.max(Number.isFinite(tick) ? tick : 0, 0), pb.totalTicks);

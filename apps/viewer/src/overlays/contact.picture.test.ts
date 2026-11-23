@@ -38,9 +38,10 @@ const copyPose = (p: SkaterPose): SkaterPose => ({
 describe('a fall is the same however you reach it', () => {
   // The target through his fall and get-up (down, mid-down, getting up, up as downT ends): every joint and where he is
   // drawn. The hitter while the hit still shows on him (to HIT_EFFECT_TICKS): where he is drawn (the hit's offsets).
-  // His pose is his skating gait with the hit on top, and a seek's pre-roll at 1/30 s can settle a gait in another
-  // style or phase than play at 1/60 s (a glide for a sprint, a stop to the other side), as before this task; the same
-  // holds for the target before T + 8 and after downT ends, while some of his gait still shows.
+  // His pose is his skating gait with the hit on top, and a seek's 1.5 s pre-roll can settle a gait in another style or
+  // phase than longer play does (a glide for a sprint, a stop to the other side: the gait's phase and style depend on
+  // its history since it last started afresh, scene-seek.picture.test.ts); the same holds for the target before T + 8
+  // and after downT ends, while some of his gait still shows.
   it('seeking into a landed hit\'s fall and get-up shows what play shows (worst joint within 0.1 m)', () => {
     let checked = 0, worst = 0, worstAt = '';
     for (const seed of [5, 42]) {
