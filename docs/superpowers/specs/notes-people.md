@@ -120,3 +120,16 @@ Proposed shape **[my call, not yet agreed]**:
 
 - A captain's trade request is the heaviest version of a trade request: it shakes the room (teammates wonder whether to stay), the fans and the owner, and leaks fast. How the GM handles it (quietly, honouring it, refusing, stripping the captaincy) is remembered by everyone.
 - Fans have their own feeling toward each notable player, separate from the player's feelings: built from performance against expectation and pay, playoff results, loyalty shown, and what he says publicly. A star can be loved in the regular season and turned on after playoff failures. Fan mood reaches the player (boos at home, pressure) and by personality he shrugs, presses, or wants out.
+
+## Talking to the media (owner, 2026-11-23)
+
+- Owner agreed to the captain-trade-request and fan-mood shapes above.
+- Owner asked whether the GM should have a media presence and be able to answer questions.
+
+Proposed shape **[my call, not yet agreed]**, with a caution:
+
+- Caution: routine press conferences in management games become a repetitive chore that players click through. So no scheduled pressers after every game.
+- The media comes to the GM only when something is happening: a storyline, a big trade or signing, a rumour about one of his players, the deadline, a losing streak, the end of the season.
+- Each time there are a few real choices (back the player, stay neutral, criticise, deny, confirm, no comment), and what is said is remembered by the player, the room, fans, the owner and rival GMs. A public promise counts as a promise.
+- The GM can also go to the media unprompted (announce a direction, defend a player), which is the public version of the private leak.
+- Handing it off: "no comment" by default, or the assistant GM / a PR person speaks for him under the delegation rules, with their own skill at it.
