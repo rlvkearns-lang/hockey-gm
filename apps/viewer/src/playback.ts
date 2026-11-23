@@ -11,7 +11,7 @@ export type Playback = {
   readonly totalTicks: number;
   readonly events: readonly GameEvent[];
   readonly result: GameResult;
-  /** Show exactly `tick` (clamped to the game). */
+  /** Show exactly `tick` (clamped to the game); restores and steps now, not on the next frame(). */
   seek(tick: number): void;
   /** Move display time by `seconds` of game time (negative goes back), clamped to the game. */
   advance(seconds: number): void;
@@ -70,6 +70,7 @@ export function createPlayback(setup: GameSetup, opts: { snapshotEverySeconds?: 
     result,
     seek(tick) {
       position = Math.min(Math.max(tick, 0), totalTicks);
+      place(Math.floor(position)); // eager: restore and step now, so the playback is at `tick` when seek returns
     },
     advance(seconds) {
       position = Math.min(Math.max(position + seconds / DT, 0), totalTicks);
