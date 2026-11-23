@@ -51,3 +51,4 @@ Proposed shape **[my call, not yet agreed]**:
 - Relocation the same way: a struggling market (attendance, arena, owner) leads to rumours, then a move with a new name and look; fans and players react (a player who bought a house there).
 - Starting as an expansion GM: design the team, hire staff, go through the expansion draft and entry draft, with patient owner expectations for the first years.
 - Designing a look is choosing, not drawing: pick colours, pick a crest from several generated from the name and city, pick a jersey pattern.
+- Expansion drafts (owner, 2026-11-23): the player's team submits a protected list and can lose a player, like the real thing. The assistant GM can handle it if the player chooses to hand it off.
