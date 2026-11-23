@@ -1,6 +1,7 @@
 import { recordTouch } from '../actions';
 import { sitBack } from '../team-play';
 import { TUNING } from '../tuning';
+import { heldSeconds, watchTurnover } from '../turnovers';
 import type { ContestState, PlayerDef, SkaterState } from '../types';
 import { dist, hypot2 } from '../vec';
 import {
@@ -140,9 +141,12 @@ function finish(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier:
   }
   if (outcome === OUTCOME.kept) return { winnerId: carrier.id, puck: 'unchanged' };
   ctx.emit(contestEvent(state, {
-    type: 'takeaway', side: checker.side, playerId: checker.id, otherId: carrier.id, assistIds: [], detail: outcome === OUTCOME.take ? 'poke' : 'pokeLoose',
+    type: 'turnover', side: checker.side, playerId: checker.id, otherId: carrier.id, assistIds: [], detail: outcome === OUTCOME.take ? 'poke' : 'pokeLoose',
   }));
-  if (outcome === OUTCOME.take) return { winnerId: checker.id, puck: 'toWinner' };
+  if (outcome === OUTCOME.take) {
+    watchTurnover(state, checker.side, checker.id, carrier.id, 'poke', { held: heldSeconds(state, carrier.id) });
+    return { winnerId: checker.id, puck: 'toWinner' };
+  }
   // His stick knocks it off the carrier's: a touch, and the puck squirts away from him.
   const p = state.puck.pos;
   state.lastTouch = { id: checker.id, side: checker.side };

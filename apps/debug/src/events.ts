@@ -10,7 +10,11 @@ export const whenText = (e: Pick<GameEvent, 'clock' | 'period'>): string => `${c
 export type EventKind = 'pass' | 'lineChange' | 'goal' | 'other';
 export const kindOf = (e: GameEvent): EventKind => (e.type === 'pass' || e.type === 'lineChange' || e.type === 'goal' ? e.type : 'other');
 
-const TAKEAWAY_HOW: Record<string, string> = { hit: 'with a hit', poke: 'with a poke check', pokeLoose: 'knocking it loose with a poke check', battle: 'in a battle' };
+const TAKEAWAY_HOW: Record<string, string> = { poke: 'with a poke check', battle: 'in a battle' };
+const TURNOVER_HOW: Record<string, string> = {
+  hit: 'with a hit', poke: 'with a poke check', pokeLoose: 'knocking it loose with a poke check', battle: 'in a battle',
+  battleLoose: 'in a battle, the puck squirting loose', intercepted: 'by intercepting a pass', deflected: 'by deflecting a pass',
+};
 const BATTLE_HOW: Record<string, string> = { protect: 'He kept the puck', pinned: 'He pinned him on the boards', stick: 'He won it with his stick', scramble: 'In the scramble' };
 const SAVE_HOW: Record<string, string> = { pad: 'with the pad', glove: 'with the glove', blocker: 'with the blocker', butterfly: 'in the butterfly', stance: '' };
 
@@ -34,8 +38,9 @@ export function describe(e: GameEvent, defs: Map<string, PlayerDef>, abbr: Recor
       case 'post': return `${me} hit the post`;
       case 'block': return `${me} blocked ${other}'s shot`;
       case 'hit': return e.detail === 'absorbed' ? `Hit: ${other} took a hit from ${me} and stayed on his feet` : `Hit: ${me} hit ${other}`;
+      case 'turnover': return `Turnover: ${me} won the puck off ${other}${TURNOVER_HOW[e.detail] ? ' ' + TURNOVER_HOW[e.detail] : ''}`;
       case 'takeaway': return `Takeaway: ${me} took the puck from ${other}${TAKEAWAY_HOW[e.detail] ? ' ' + TAKEAWAY_HOW[e.detail] : ''}`;
-      case 'giveaway': return `Giveaway: ${me} lost the puck${e.detail === 'intercepted' ? ` (${other} stepped in)` : e.detail === 'deflected' ? ` (${other} deflected it)` : ''}`;
+      case 'giveaway': return `Giveaway: ${me} lost the puck${e.detail === 'intercepted' ? ` (${other} picked off his pass)` : ''}`;
       case 'battle': {
         const kind = e.detail === 'netFront' ? 'Net-front battle' : 'Board battle';
         const how = BATTLE_HOW[e.detail];

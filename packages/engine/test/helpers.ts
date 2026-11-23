@@ -211,7 +211,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     pickupBlock: null, pendingPass: null, shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [], ticks: [] }, lastAttackTouch: { home: null, away: null },
     noChange: null, delayedOffside: null, icingWatch: null, lastRelease: null, contestCooldowns: [],
-    tiedUpUntil: [], reboundEdge: null,
+    tiedUpUntil: [], reboundEdge: null, turnoverWatch: null,
     bench: {
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
@@ -622,7 +622,7 @@ function pokeDuel(defender: PlayerDef, carrier: PlayerDef): Duel {
 export function runPoke(defender: PlayerDef, carrier: PlayerDef): boolean {
   const h = pokeDuel(defender, carrier);
   duelToEnd(h);
-  return h.events.some((e) => e.type === 'takeaway' && e.playerId === 'away-C');
+  return h.events.some((e) => e.type === 'turnover' && e.playerId === 'away-C');
 }
 
 /** The contest state of a poke check one tick after it starts (every attribute 70). */
@@ -655,7 +655,7 @@ export function pokeReleased(): { contests: number; takeaways: number; contestId
   for (let i = 0; i < 30; i++) duelStep(h);
   return {
     contests: h.st.contests.length,
-    takeaways: h.events.filter((e) => e.type === 'takeaway').length,
+    takeaways: h.events.filter((e) => e.type === 'takeaway' || e.type === 'turnover').length,
     contestIds: h.st.skaters.filter((k) => k.contestId !== null).length,
   };
 }
@@ -1275,7 +1275,7 @@ export type GameRecord = {
 export type CalibrationOpts = { homeOverall?: number; awayOverall?: number };
 
 /** Event types whose detail is counted too (e.g. `hit:landed`, `freeze:trapped`, `takeaway:poke`). */
-const DETAILED = new Set(['hit', 'freeze', 'takeaway', 'giveaway', 'battle', 'save', 'pass', 'lineChange']);
+const DETAILED = new Set(['hit', 'freeze', 'takeaway', 'giveaway', 'turnover', 'battle', 'save', 'pass', 'lineChange']);
 
 /**
  * Calibration game `i`: two generated teams (home roster seed 2i + 1 at `homeOverall`, away 2i + 2 at `awayOverall`,
@@ -1367,6 +1367,8 @@ export type Summary = {
   faceoffs: number; offsides: number; icings: number;
   /** Per game, both teams. */
   faceoffsTotal: number; offsidesTotal: number; icingsTotal: number;
+  /** Share of games in which the home side's faceoff share is outside 35% to 65%. */
+  faceoffShareOutside: number;
   /** Saves over shots on goal. */
   savePct: number;
   homeWinShare: number; tieShare: number;
@@ -1391,6 +1393,7 @@ export function summarise(rs: GameRecord[]): Summary {
     offsides: perTeam(total(rs, (r) => countOf(r, 'offside'))),
     icings: perTeam(total(rs, (r) => countOf(r, 'icing'))),
     faceoffsTotal: total(rs, (r) => countOf(r, 'faceoff')) / g,
+    faceoffShareOutside: rs.filter((r) => { const n = r.team.home.faceoffsWon + r.team.away.faceoffsWon; const sh = n === 0 ? 0.5 : r.team.home.faceoffsWon / n; return sh < 0.35 || sh > 0.65; }).length / g,
     offsidesTotal: total(rs, (r) => countOf(r, 'offside')) / g,
     icingsTotal: total(rs, (r) => countOf(r, 'icing')) / g,
     savePct: shots === 0 ? 0 : total(rs, (r) => countOf(r, 'save')) / shots,

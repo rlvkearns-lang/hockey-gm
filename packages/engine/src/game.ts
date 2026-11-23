@@ -13,6 +13,7 @@ import { createRng } from './rng';
 import { TUNING } from './tuning';
 import { movementOf, stepSkater, type Movement } from './skating';
 import { buildResult } from './stats';
+import { confirmTurnover } from './turnovers';
 import { assignJobs, isTiedUp, steeredByContest } from './team-play';
 import type {
   GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
@@ -85,7 +86,7 @@ function initialState(setup: GameSetup): GameState {
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
-    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null,
+    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null, turnoverWatch: null,
     bench: initialBench(setup),
   };
 }
@@ -281,6 +282,8 @@ export function createGame(setup: GameSetup): Game {
     }
     const call = refereeTick(state, prevPuckX, defs);
     if (call) events.push(call);
+    const turnover = confirmTurnover(state);
+    if (turnover) events.push(turnover);
 
     for (const b of onIceBodies) b.toi += DT;
     const liveTicks = Math.round((PERIOD_SECONDS - state.clock) / DT) + 1;
@@ -296,6 +299,7 @@ export function createGame(setup: GameSetup): Game {
       state.lastRelease = null;
       state.tiedUpUntil = [];
       state.reboundEdge = null;
+      state.turnoverWatch = null;
       clearContests(state);
       restPuck(state);
       state.phase = state.period >= PERIODS ? 'final' : 'intermission';

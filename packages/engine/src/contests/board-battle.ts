@@ -4,6 +4,7 @@ import { DT } from '../constants';
 import { boardsNormal, distToBoards, FACEOFF_DOTS, resolveBoards, RINK } from '../rink';
 import { movementOf } from '../skating';
 import { TUNING } from '../tuning';
+import { heldSeconds, watchTurnover } from '../turnovers';
 import type { ContestState, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
@@ -51,8 +52,10 @@ type BattleData = {
   slide: number;
   /** The carrier's participant index while he shields a carried puck (`protect`), else NONE. */
   carrier: number;
-  /** The participant index of a carrier who lost the puck into their feet (a win by the other man is a takeaway), else NONE. */
+  /** The participant index of a carrier who lost the puck into their feet (a win by the other man is a turnover), else NONE. */
   stripped: number;
+  /** How long (s) the stripped carrier had had the puck when it went into their feet. */
+  held: number;
   /** The first man in (+6), and 1 once that is settled. */
   first: number;
   firstSet: number;
@@ -126,7 +129,7 @@ export const boardBattleContest: Contest = {
       id: -1, kind: KIND, stage: carrierIdx === NONE ? 'arrive' : 'protect', stageT: 0, participants: participants.slice(), leader: null,
       spot: { x: p.pos.x, y: p.pos.y }, freeIds: carrierIdx === NONE ? [] : [participants[carrierIdx]!],
       data: {
-        holdsPuck: 0, slide: 0, carrier: carrierIdx, stripped: NONE, first: NONE, firstSet: 0, balance: 0, pinned: NONE, nextAt: PIN_ROUND,
+        holdsPuck: 0, slide: 0, carrier: carrierIdx, stripped: NONE, held: 0, first: NONE, firstSet: 0, balance: 0, pinned: NONE, nextAt: PIN_ROUND,
         digLast: NONE, digRounds: 0, winner: NONE, clean: 0, supportA: NONE, supportB: NONE,
       },
     };
@@ -278,6 +281,7 @@ function protect(c: ContestState, ctx: ContestCtx): ContestResult | null {
     return cooledOff(c, ctx, carrier.id);
   }
   d.stripped = ci;
+  d.held = heldSeconds(state, carrier.id);
   d.carrier = NONE;
   c.freeIds.length = 0;
   c.leader = null;
@@ -381,11 +385,15 @@ function finish(c: ContestState, ctx: ContestCtx): ContestResult {
   const outnumbered = (l === 0 ? d.supportA : d.supportB) === NONE;
   const detail = supportIdx !== NONE && outnumbered ? 'support' : d.pinned === NONE ? 'scramble' : d.pinned === l ? 'pinned' : 'stick';
   ctx.emit(contestEvent(state, { type: 'battle', side: winner.side, playerId: winner.id, otherId: idOf(c, l), assistIds: [], detail }));
-  // Won off the man who was carrying it: a takeaway.
-  if (d.stripped === l) ctx.emit(contestEvent(state, { type: 'takeaway', side: winner.side, playerId: winner.id, otherId: idOf(c, l), assistIds: [], detail: 'battle' }));
+  // Won off the man who was carrying it: a turnover, clean (`battle`) or squirting loose (`battleLoose`).
+  if (d.stripped === l) ctx.emit(contestEvent(state, { type: 'turnover', side: winner.side, playerId: winner.id, otherId: idOf(c, l), assistIds: [], detail: d.clean === 1 ? 'battle' : 'battleLoose' }));
   for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
   setCooldown(state, idOf(c, l), 'pokeCheck', T.loserPokeCooldown);
-  if (d.clean === 1) return { winnerId: supportIdx !== NONE ? idOf(c, supportIdx) : winner.id, puck: 'toWinner' };
+  if (d.clean === 1) {
+    const to = supportIdx !== NONE ? idOf(c, supportIdx) : winner.id;
+    if (d.stripped === l) watchTurnover(state, winner.side, winner.id, idOf(c, l), 'battle', { held: d.held });
+    return { winnerId: to, puck: 'toWinner' };
+  }
   // He gets a piece of it, but it squirts along the boards.
   state.lastTouch = { id: winner.id, side: winner.side };
   state.possession = winner.side;

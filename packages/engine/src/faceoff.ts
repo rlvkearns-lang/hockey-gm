@@ -2,6 +2,7 @@ import { recordTouch } from './actions';
 import { clearContests, effective, winProb } from './contests/core';
 import { resolveBoards } from './rink';
 import type { Rng } from './rng';
+import { TUNING } from './tuning';
 import type { GameEvent, GameState, PlayerDef, Position, Side, SkaterState } from './types';
 import { hypot2, type Vec2 } from './vec';
 
@@ -123,14 +124,19 @@ const onIceIn = (state: GameState, side: Side, slots: Position[]): SkaterState[]
 
 const FACEOFFS = { faceoffs: 1 };
 
-/** Chance that home wins the draw: winProb of the difference between the centres' effective faceoffs ratings (each plus his team's jump). */
+/**
+ * Chance that home wins the draw: winProb of the difference between the centres' effective faceoffs ratings, scaled by
+ * TUNING.faceoff.edgeScale. The team's jump on the night is left out, and the edge is scaled down, because a draw is
+ * taken dozens of times a game between the same few centres: at full size one centre's edge swung whole games' faceoff
+ * shares too far.
+ */
 export function drawChance(state: GameState, defs: Map<string, PlayerDef>): number {
   const rating = (side: Side): number => {
     const c = onIceIn(state, side, ['C'])[0];
     const d = c ? defs.get(c.id) : undefined;
-    return (c && d ? effective(d, c, FACEOFFS) : NO_CENTRE_RATING) + state.teamJump[side];
+    return c && d ? effective(d, c, FACEOFFS) : NO_CENTRE_RATING;
   };
-  return winProb(rating('home') - rating('away'));
+  return winProb((rating('home') - rating('away')) * TUNING.faceoff.edgeScale);
 }
 
 /**

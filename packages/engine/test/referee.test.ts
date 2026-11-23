@@ -70,11 +70,17 @@ describe('referee', () => {
       const ds = new Map(defs); ds.set('home-C', def({ id: 'home-C', position: 'C', faceoffs: 95 })); ds.set('away-C', def({ id: 'away-C', position: 'C', faceoffs: 45 }));
       if (dropPuck(st, ds, createRng(seed)).side === 'home') wins++;
     }
-    // A 50-point edge: winProb(50) is about 0.89, just under the parity cap; 0.92 allows sampling noise over 2,000 draws.
+    // A 50-point edge, halved for draws (TUNING.faceoff.edgeScale): winProb(25) is about 0.74; 0.92 allows sampling noise.
     expect(wins / 2000).toBeGreaterThan(0.58); expect(wins / 2000).toBeLessThanOrEqual(0.92);
     // The rule itself, without noise: the draw chance the faceoff code computes for this matchup is at most the 0.9 cap.
     const ds = new Map(defs); ds.set('home-C', def({ id: 'home-C', position: 'C', faceoffs: 95 })); ds.set('away-C', def({ id: 'away-C', position: 'C', faceoffs: 45 }));
     expect(drawChance(stateWith({ carrier: null, puckX: 0 }), ds)).toBeLessThanOrEqual(0.9);
+  });
+  it('the team\'s jump on the night does not touch faceoffs', () => {
+    const st = stateWith({ carrier: null, puckX: 0 });
+    const even = drawChance(st, defs);
+    st.teamJump = { home: 9, away: -9 };
+    expect(drawChance(st, defs)).toBe(even);
   });
   it('the draw winner has possession and the next drop clears noChange', () => {
     const g = createGame(setup(2));

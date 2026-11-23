@@ -63,8 +63,8 @@ export const TUNING = {
   /** The night (game.ts): drawn once per game. */
   night: {
     /**
-     * Each team's jump: a normal shift with this standard deviation (rating points) of its contest ratings and faceoffs
-     * only (not skating, passing, shooting or decisions), a small part of a 10-point talent gap.
+     * Each team's jump: a normal shift with this standard deviation (rating points) of its contest ratings
+     * only (not faceoffs, skating, passing, shooting or decisions), a small part of a 10-point talent gap.
      */
     teamJumpSd: 3,
     /** Each goalie's night (a hot or cold game): a normal shift of his save log-odds with this standard deviation. */
@@ -291,6 +291,15 @@ export const TUNING = {
     cooldownSeconds: 0.8,
     race: { compete: 0.4, agility: 0.3, balance: 0.3 } as SkaterWeights,
   },
+
+  /**
+   * Box-score takeaways and giveaways (turnovers.ts): a clean turnover counts once the winning side has kept the puck
+   * keepSeconds; a pass picked off from a passer under less than unforcedPressure (0..1, see pressureOn) is a giveaway.
+   */
+  boxScore: { keepSeconds: 2, unforcedPressure: 0.5, controlSeconds: 1.5 },
+
+  /** Faceoffs (faceoff.ts): the centres' rating difference is scaled by edgeScale before winProb. */
+  faceoff: { edgeScale: 0.5 },
 
   /** Scoring (goalie.ts): a teammate's touch earns an assist only if he had the puck within this long (s) of the goal. */
   scoring: { assistWindowSeconds: 10 },

@@ -164,13 +164,19 @@ export type GameState = {
    * A pass on its way: its intended receiver skates onto it and may take it at any speed until tick `untilTick`.
    * `tried` lists the opponents who have had their one chance to intercept it.
    */
-  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[] } | null;
+  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; pressure: number } | null;
+  /**
+   * A turnover that may still go in the box score (see turnovers.ts): `side`'s `playerId` won the puck off `otherId`
+   * (a takeaway) or `otherId` gave it to him (a giveaway, credited to `otherId`) on `tick`; it counts once `side` has
+   * kept the puck for TUNING.boxScore.keepSeconds.
+   */
+  turnoverWatch: { kind: 'takeaway' | 'giveaway'; side: Side; playerId: string; otherId: string; how: string; tick: number } | null;
   /** The last skater to let the puck go (pass, shot, dump) and the tick he did; a hit on him counts for a moment after. */
   lastRelease: { id: string; tick: number } | null;
   /** Skater `id` may not start a contest of `kind` before tick `untilTick` (expired entries are dropped). */
   contestCooldowns: { id: string; kind: string; untilTick: number }[];
   shotInFlight: ShotInFlight | null;
-  /** Each team's jump on the night: rating points added to all its players' contest ratings and faceoffs (drawn at the start). */
+  /** Each team's jump on the night: rating points added to all its players' contest ratings (not faceoffs; drawn at the start). */
   teamJump: Record<Side, number>;
   /** Each goalie's night: added to his save chance's log-odds for the whole game (drawn at the start; a hot or cold night). */
   goalieNight: Record<Side, number>;
@@ -217,7 +223,7 @@ export type BenchUnit = {
 export type BenchState = { forwards: BenchUnit; defence: BenchUnit };
 
 export type GameEventType =
-  | 'faceoff' | 'pass' | 'shot' | 'save' | 'goal' | 'miss' | 'post' | 'block' | 'hit' | 'takeaway'
+  | 'faceoff' | 'pass' | 'shot' | 'save' | 'goal' | 'miss' | 'post' | 'block' | 'hit' | 'turnover' | 'takeaway'
   | 'giveaway' | 'battle' | 'offside' | 'icing' | 'freeze' | 'lineChange' | 'periodEnd';
 
 export type GameEvent = {

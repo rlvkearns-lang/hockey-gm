@@ -220,8 +220,8 @@ function resolveImpact(c: ContestState, ctx: ContestCtx, h: SkaterState, t: Skat
     }
   }
   ctx.emit(contestEvent(state, { type: 'hit', side: h.side, playerId: h.id, otherId: t.id, assistIds: [], detail }));
-  // A hit that knocks the puck off the carrier is a takeaway for the hitter.
-  if (separated) ctx.emit(contestEvent(state, { type: 'takeaway', side: h.side, playerId: h.id, otherId: t.id, assistIds: [], detail: 'hit' }));
+  // A hit that knocks the puck off the carrier is a turnover (loose: not a box-score takeaway, see turnovers.ts).
+  if (separated) ctx.emit(contestEvent(state, { type: 'turnover', side: h.side, playerId: h.id, otherId: t.id, assistIds: [], detail: 'hit' }));
   c.leader = won ? h.id : t.id;
   toRecover(state, c, t.id, RECOVER_SECONDS);
 }

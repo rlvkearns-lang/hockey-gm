@@ -40,9 +40,9 @@ describe('interceptions', () => {
     const poor = interceptShare(def({ stickChecking: 40, defensivePositioning: 40 }), 2000);
     expect(good).toBeGreaterThan(poor + 0.08); expect(good).toBeLessThan(0.97); expect(poor).toBeGreaterThan(0.03);
   });
-  it('an intercepted or deflected pass is the passer\'s giveaway, not a takeaway', () => {
+  it('an intercepted or deflected pass is a turnover won by the interceptor off the passer', () => {
     const evs = interceptedPasses(def({ stickChecking: 92, defensivePositioning: 90 }), 300);
     expect(evs.length).toBeGreaterThan(0);
-    for (const e of evs) expect(e).toMatchObject({ type: 'giveaway', side: 'home', playerId: 'home-C', otherId: 'away-LD' });
+    for (const e of evs) expect(e).toMatchObject({ type: 'turnover', side: 'away', playerId: 'away-LD', otherId: 'home-C' });
   });
 });

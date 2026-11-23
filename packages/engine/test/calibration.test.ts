@@ -4,11 +4,10 @@ import { battleWinShareByType, goalsPer60ByType, runGames, setup, summarise, win
 
 /**
  * 300 games of two overall-70 teams (fresh rosters every game), and 300 of a 76 against a 66, played on worker
- * threads (runGames caches them for the file). The first test of each set pays for its games: about 1.2 s a game, so
- * up to 6 minutes on a single core; the timeout leaves room for a slow one.
+ * threads (runGames caches them for the file). Whichever test of a set runs first pays for its games: about 1.5 s a
+ * game, so up to 8 minutes on a single core; every test has the long timeout so any one of them can run alone.
  */
 const GAMES_TIMEOUT = 900_000;
-const CACHED_TIMEOUT = 10_000;
 
 describe('calibration', () => {
   it('5-on-5 totals look like hockey', () => {
@@ -23,16 +22,24 @@ describe('calibration', () => {
     expect(m.icingsTotal).toBeGreaterThan(3);    expect(m.icingsTotal).toBeLessThan(13);
     expect(m.tieShare).toBeGreaterThan(0.15);    expect(m.tieShare).toBeLessThan(0.30);
   }, GAMES_TIMEOUT);
+  it('box-score takeaways and giveaways look like hockey: 4 to 12 each per team per game', () => {
+    const m = summarise(runGames(300));
+    expect(m.takeaways).toBeGreaterThan(4); expect(m.takeaways).toBeLessThan(12);
+    expect(m.giveaways).toBeGreaterThan(4); expect(m.giveaways).toBeLessThan(12);
+  }, GAMES_TIMEOUT);
+  it('faceoff shares stay believable game to game: at most 10% of games outside 35% to 65%', () => {
+    expect(summarise(runGames(300)).faceoffShareOutside).toBeLessThanOrEqual(0.10);
+  }, GAMES_TIMEOUT);
   it('no freak scores: nothing like 15 goals in a game, and few 0-0 games', () => {
     const totals = runGames(300).map((r) => r.score.home + r.score.away);
     expect(Math.max(...totals)).toBeLessThan(15);
     expect(runGames(300).filter((r) => r.score.home === 0 && r.score.away === 0).length).toBeLessThanOrEqual(5);
-  }, CACHED_TIMEOUT);
+  }, GAMES_TIMEOUT);
   it('the better team wins more, and loses plenty', () => { const w = winShare(runGames(300, { homeOverall: 76, awayOverall: 66 })); expect(w.home).toBeGreaterThan(w.away + 0.12); 
     // controller ruling, Task 12 fix round 1: band relaxed; pre-game handicaps and mercy rules were rejected as ways to meet the original
     expect(w.away).toBeGreaterThan(0.10);
    }, GAMES_TIMEOUT);
-  it('snipers outscore grinders per 60 minutes', () => { const g = goalsPer60ByType(runGames(300)); expect(g['Sniper']).toBeGreaterThan(g['Grinder']! * 1.5); }, CACHED_TIMEOUT);
-  it('heavier, stronger players win more battles, under 75%', () => { const b = battleWinShareByType(runGames(300)); expect(b['Power Forward']).toBeGreaterThan(b['Speedster']! + 0.05); expect(b['Power Forward']).toBeLessThan(0.75); }, CACHED_TIMEOUT);
+  it('snipers outscore grinders per 60 minutes', () => { const g = goalsPer60ByType(runGames(300)); expect(g['Sniper']).toBeGreaterThan(g['Grinder']! * 1.5); }, GAMES_TIMEOUT);
+  it('heavier, stronger players win more battles, under 75%', () => { const b = battleWinShareByType(runGames(300)); expect(b['Power Forward']).toBeGreaterThan(b['Speedster']! + 0.05); expect(b['Power Forward']).toBeLessThan(0.75); }, GAMES_TIMEOUT);
   it('a game runs within budget', () => { const t0 = performance.now(); for (let i = 0; i < 5; i++) simulateGame(setup(i)); expect((performance.now() - t0) / 5).toBeLessThan(3000); }, 60_000);
 });

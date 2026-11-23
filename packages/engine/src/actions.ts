@@ -3,6 +3,7 @@ import { RINK } from './rink';
 import type { Rng } from './rng';
 import { nearestOpponentDist, steeredByContest } from './team-play';
 import { TUNING } from './tuning';
+import { watchTurnover } from './turnovers';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
 import { hypot2, segDistXY, type Vec2 } from './vec';
 import { datan2, dcos, dsin } from './dmath';
@@ -87,10 +88,11 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
   const l = hypot2(to.pos.x - p.x, to.pos.y - p.y);
   const lead = l / speed;
   const aimX = to.pos.x + to.vel.x * lead, aimY = to.pos.y + to.vel.y * lead;
-  const sigma = PASS.error.base + (100 - passing) * PASS.error.perPoint + pressureOn(state, from) * PASS.error.pressure;
+  const pressure = pressureOn(state, from);
+  const sigma = PASS.error.base + (100 - passing) * PASS.error.perPoint + pressure * PASS.error.pressure;
   const angle = datan2(aimY - p.y, aimX - p.x) + rng.gauss() * sigma;
   release(state, from, dcos(angle) * speed, dsin(angle) * speed, 0);
-  state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((lead + PASS.graceSeconds) / DT), tried: [] };
+  state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((lead + PASS.graceSeconds) / DT), tried: [], pressure };
   return event(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, assistIds: [], detail: `${l.toFixed(1)}m` });
 }
 
@@ -171,7 +173,7 @@ export function interceptChance(d: PlayerDef, speed: number): number {
 /**
  * A pass still on its way (state.pendingPass) at PASS.interceptSpeed[0] m/s or faster: each opposing skater (on the ice,
  * not leaving, not down, not steered by a contest) whose body came within PASS.interceptRange of the puck's path this tick (from
- * `prev` to its position now) gets one try. On success the pass is over and the passer's `giveaway` is returned: 60% he takes it
+ * `prev` to its position now) gets one try. On success the pass is over and a `turnover` is returned: 60% he takes it
  * (`taker`, now the carrier; the caller puts the puck on his stick), 40% he deflects it loose (`taker` null).
  */
 export function tryIntercept(
@@ -194,6 +196,7 @@ export function tryIntercept(
     state.possession = s.side;
     recordTouch(state, s.id, s.side);
     if (take) {
+      watchTurnover(state, s.side, s.id, pass.fromId, 'intercepted', { passPressure: pass.pressure });
       state.carrierId = s.id;
       p.vel.x = s.vel.x;
       p.vel.y = s.vel.y;
@@ -205,8 +208,8 @@ export function tryIntercept(
       blockPickup(state, [s.id]);
     }
     return {
-      // A pass that does not get through is the passer's giveaway (the interceptor is `otherId`).
-      event: event(state, { type: 'giveaway', side: from.side, playerId: pass.fromId, otherId: s.id, assistIds: [], detail: take ? 'intercepted' : 'deflected' }),
+      // The interceptor won the puck off the passer (whether it goes in the box score is turnovers.ts's call).
+      event: event(state, { type: 'turnover', side: s.side, playerId: s.id, otherId: pass.fromId, assistIds: [], detail: take ? 'intercepted' : 'deflected' }),
       taker: take ? s : null,
     };
   }
