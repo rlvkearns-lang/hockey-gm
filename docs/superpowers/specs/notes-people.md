@@ -50,3 +50,13 @@ Proposed shape **[my call, not yet agreed]**:
 - Memory: fair deals build trust and get calls returned; being fleeced, or having an offer leaked, makes him wary or shuts the door for a while. Memories fade.
 - Word gets around between GMs the same way it does between players.
 - GMs can be fired and hired, taking their personality and their memory of the owner to a new team.
+
+## The team owner above the GM (owner of the project, 2026-11-23)
+
+- There is an owner mode that can be turned on or off. On: a team owner sets expectations, controls the budget, and can fire the GM. Off: the GM cannot be fired and plays on.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Team owners have personalities too (patient or impatient, spender or tight, meddler or hands-off) and can sell the team, bringing in a new owner with new expectations.
+- Expectations are stated up front each season and reviewed at set points; job security is visible as a rough reading, not a number.
+- Being fired is not the end: other teams can offer the GM a job, depending on his reputation.
