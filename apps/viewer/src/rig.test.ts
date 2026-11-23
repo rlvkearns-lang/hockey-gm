@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { generateTeam, type PlayerDef } from '@hockey/engine';
 import { bodyDims } from './body';
 import { initialGait, poseOf, stepGait, type Motion } from './gait';
-import { createMarker, createSkaterRig, handedMotion } from './rig';
+import { createMarker, createRigKit, createSkaterRig, handedMotion, mirrorPose } from './rig';
+import { createGoalieRig } from './goalie-rig';
 
 const base = generateTeam(5, 'Test', 'TST').players.find((p) => p.position === 'LD')!;
 const defWith = (heightCm: number, weightKg: number, shoots: 'L' | 'R' = 'L'): PlayerDef => ({ ...base, heightCm, weightKg, shoots });
@@ -76,6 +77,85 @@ describe('skater rig', () => {
       travel.set(shoots, zSum);
     }
     expect(Math.sign(travel.get('L')!)).toBe(Math.sign(travel.get('R')!));
+  });
+
+  it('mirrorPose carries the blade, the head tilt and the grip over to a right shot', () => {
+    const d = bodyDims(185, 90);
+    const p = poseOf({ ...initialGait(), style: 'sprint', styleT: 1, phase: 0.3 }, { ...standing, speed: 9, forward: 9, accelAlong: 2 }, d);
+    const m = mirrorPose(p);
+    expect(m.blade).toEqual({ x: p.blade.x, y: p.blade.y, z: -p.blade.z });
+    expect(m.lookDown).toBe(p.lookDown);
+    expect(m.grip).toBe(p.grip);
+  });
+
+  it('draws the blade lifted off the ice when the pose carries it up, and on the ice otherwise', () => {
+    const d = bodyDims(185, 90);
+    const sprint = { ...standing, speed: 9, forward: 9, accelAlong: 2 };
+    for (const shoots of ['L', 'R'] as const) {
+      const rig = createSkaterRig(defWith(185, 90, shoots), colors);
+      const up = poseOf({ ...initialGait(), style: 'sprint', styleT: 1, phase: 0.3 }, sprint, d);
+      expect(up.blade.y).toBeGreaterThan(0.1);
+      rig.apply(up, 0, 0, 0); rig.root.updateMatrixWorld(true);
+      const lifted = new THREE.Box3().setFromObject(rig.root.getObjectByName('stickBlade')!).min.y;
+      expect(lifted).toBeGreaterThan(0.1);
+      const down = poseOf({ ...initialGait(), style: 'sprint', styleT: 1, phase: 0.3 }, sprint, d, { hasPuck: true });
+      rig.apply(down, 0, 0, 0); rig.root.updateMatrixWorld(true);
+      const onIce = new THREE.Box3().setFromObject(rig.root.getObjectByName('stickBlade')!).min.y;
+      expect(Math.abs(onIce)).toBeLessThan(0.03);
+      // The shaft ends at the blade's heel (no gap between them).
+      const heel = new THREE.Vector3(down.blade.x, down.blade.y, shoots === 'R' ? -down.blade.z : down.blade.z);
+      const shaft = rig.root.getObjectByName('shaft')!;
+      const box = new THREE.Box3().setFromObject(shaft);
+      expect(box.distanceToPoint(heel)).toBeLessThan(0.03);
+      rig.dispose();
+    }
+  });
+
+  it('tilts the head down by lookDown', () => {
+    const d = bodyDims(185, 90);
+    const rig = createSkaterRig(defWith(185, 90), colors);
+    const p = poseOf(initialGait(), standing, d);
+    const visorY = (lookDown: number): number => { rig.apply({ ...p, lookDown }, 0, 0, 0); rig.root.updateMatrixWorld(true); return centreOf(rig.root, 'face').y; };
+    expect(visorY(0.5)).toBeLessThan(visorY(0) - 0.02);
+  });
+
+  it('a shared kit gives every figure of a team the same materials and geometries', () => {
+    const kit = createRigKit();
+    const a = createSkaterRig(defWith(180, 80), colors, kit), b = createSkaterRig(defWith(195, 100, 'R'), colors, kit);
+    const c = createSkaterRig(defWith(185, 90), { jersey: 0xf2f3f5, trim: 0x1b4fa0, pants: 0x1c2438 }, kit);
+    const g = createGoalieRig({ ...defWith(188, 88), position: 'G' }, colors, kit);
+    const h = createGoalieRig({ ...defWith(192, 92), position: 'G' }, colors, kit);
+    const get = (r: { root: THREE.Object3D }, n: string) => r.root.getObjectByName(n) as THREE.Mesh;
+    // Every skater part is one material (coloured by vertex); the team's colours are in its geometry, one set per team.
+    expect(get(a, 'jersey').material).toBe(get(c, 'jersey').material);
+    expect(get(a, 'jersey').geometry).toBe(get(b, 'jersey').geometry);
+    expect(get(a, 'jersey').geometry).not.toBe(get(c, 'jersey').geometry);
+    expect(get(a, 'boot0').geometry).toBe(get(c, 'boot1').geometry);
+    expect(get(a, 'thigh0').geometry).toBe(get(b, 'thigh1').geometry);
+    expect(get(g, 'jersey').material).toBe(get(h, 'jersey').material);
+    // One shadow blob per figure in a shared kit, sharing one material.
+    const blobs = (r: { root: THREE.Object3D }) => { const out: THREE.Mesh[] = []; r.root.traverse((o) => { if (o.name === 'shadow') out.push(o as THREE.Mesh); }); return out; };
+    expect(blobs(a).length).toBe(1);
+    expect(blobs(a)[0]!.material).toBe(blobs(g)[0]!.material);
+    a.dispose(); b.dispose(); c.dispose(); g.dispose(); h.dispose(); kit.dispose();
+  });
+
+  it('a figure built with a shared kit still rests on the ice and faces the engine facing', () => {
+    const kit = createRigKit();
+    for (const shoots of ['L', 'R'] as const) {
+      const rig = createSkaterRig(defWith(170, 75, shoots), colors, kit);
+      rig.apply(poseOf(initialGait(), standing, bodyDims(170, 75)), 2, 1, 1.1);
+      rig.root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(rig.root);
+      expect(box.min.y).toBeGreaterThan(-0.02); expect(box.min.y).toBeLessThan(0.05);
+      expect(box.max.y).toBeGreaterThan(1.7 * 0.9);
+      const fwd = new THREE.Vector2(Math.cos(1.1), Math.sin(1.1));
+      const face = centreOf(rig.root, 'face'), back = centreOf(rig.root, 'number');
+      expect(new THREE.Vector2(face.x - 2, face.z - 1).dot(fwd)).toBeGreaterThan(0.05);
+      expect(new THREE.Vector2(back.x - 2, back.z - 1).dot(fwd)).toBeLessThan(-0.02);
+      rig.dispose();
+    }
+    kit.dispose();
   });
 
   it('a marker shows its facing with a notch', () => {

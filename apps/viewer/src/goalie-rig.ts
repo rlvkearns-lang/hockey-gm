@@ -4,7 +4,7 @@ import type { PlayerDef } from '@hockey/engine';
 import { bodyDims, type BodyDims } from './body';
 import { torsoRotate, type Vec3 } from './gait';
 import { twoBone, type GoalieFigurePose } from './goalie-pose';
-import { createShadowBlob, type RigColors } from './rig';
+import { createRigKit, numberTexture, surname, type RigColors, type RigKit } from './rig';
 
 /**
  * The jointed goalie figure (three.js), driven by a GoalieFigurePose (goalie-pose.ts) in the body frame (x forward,
@@ -20,35 +20,6 @@ import { createShadowBlob, type RigColors } from './rig';
 
 export type GoalieRig = { root: THREE.Group; apply(pose: GoalieFigurePose, worldX: number, worldZ: number, facing: number): void; dispose(): void };
 
-const PAD = 0xefefea;
-const DARK = 0x18191c;
-const STEEL = 0xdfe5ec;
-const STICK = 0x222327;
-const CAGE = 0xc9ced4;
-
-const hasDom = (): boolean => typeof document !== 'undefined';
-const css = (hex: number): string => `#${hex.toString(16).padStart(6, '0')}`;
-
-/** His number in the trim colour outlined in the pants colour (copied from rig.ts, where it is private). */
-function numberTexture(n: number, colors: RigColors): THREE.Texture | null {
-  if (!hasDom()) return null;
-  const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d')!;
-  g.font = `bold ${n >= 10 ? 84 : 100}px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.lineJoin = 'round';
-  g.lineWidth = 8;
-  g.strokeStyle = css(colors.pants);
-  g.strokeText(String(n), 64, 70);
-  g.fillStyle = css(colors.trim);
-  g.fillText(String(n), 64, 70);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
-}
 
 /** A capsule of radius r from its origin up along +y to `length`, so it can be aimed joint to joint. */
 const limbGeometry = (r: number, length: number): THREE.BufferGeometry => new THREE.CapsuleGeometry(r, length, 3, 10).translate(0, length / 2, 0);
@@ -88,15 +59,19 @@ function keepAboveIce(o: THREE.Object3D, cx: number, cy: number, cz: number, hx:
   if (low < 0.003) o.position.y += 0.003 - low;
 }
 
-export function createGoalieRig(def: PlayerDef, colors: RigColors): GoalieRig {
+/**
+ * A goalie figure. With a shared kit (a scene of many figures) his materials are the kit's (his team's jersey, trim and
+ * pants, and the common pad, stick and steel), his back texture comes from the kit and he has the kit's shadow blob;
+ * his geometries are his own (there are only two goalies). Without a kit he makes a private one and frees it with
+ * himself.
+ */
+export function createGoalieRig(def: PlayerDef, colors: RigColors, sharedKit?: RigKit): GoalieRig {
+  const kit = sharedKit ?? createRigKit();
   const d: BodyDims = bodyDims(def.heightCm, def.weightKg);
   const k = def.heightCm / 188;
 
-  const mats: THREE.Material[] = [];
-  const lambert = (color: number): THREE.MeshLambertMaterial => { const m = new THREE.MeshLambertMaterial({ color }); mats.push(m); return m; };
-  const jersey = lambert(colors.jersey), trim = lambert(colors.trim), pants = lambert(colors.pants);
-  const pad = lambert(PAD), dark = lambert(DARK), stickMat = lambert(STICK), cage = lambert(CAGE);
-  const steel = new THREE.MeshLambertMaterial({ color: STEEL, emissive: 0x2a2f36 }); mats.push(steel);
+  const { jersey, trim, pants } = kit.team(colors);
+  const { pad, dark, stick: stickMat, cage, steel } = kit.common;
   const geos: THREE.BufferGeometry[] = [];
   const geo = <G extends THREE.BufferGeometry>(g: G): G => { geos.push(g); return g; };
 
@@ -130,12 +105,11 @@ export function createGoalieRig(def: PlayerDef, colors: RigColors): GoalieRig {
     cap.scale.set(1.1, 0.75, 1);
     torso.add(cap);
   }
-  const numMap = numberTexture(def.number, colors);
+  const numMap = sharedKit ? kit.backTexture(surname(def.name), def.number, colors) : numberTexture(def.number, colors, surname(def.name));
   const numMat = numMap
     ? new THREE.MeshBasicMaterial({ map: numMap, transparent: true, depthWrite: false, toneMapped: false })
     : new THREE.MeshBasicMaterial({ color: colors.trim, transparent: true, opacity: 0 });
-  mats.push(numMat);
-  const numSize = torsoW * 0.55;
+  const numSize = torsoW * 0.7;
   const number = mesh(geo(new THREE.PlaneGeometry(numSize, numSize)), numMat, 'number');
   number.position.set(-torsoD / 2 - 0.006, d.torso * 0.5, 0);
   number.rotation.y = -Math.PI / 2;
@@ -253,7 +227,7 @@ export function createGoalieRig(def: PlayerDef, colors: RigColors): GoalieRig {
   const blade = mesh(geo(new THREE.BoxGeometry(bladeL, bladeH, 0.02).translate(bladeL / 2 - 0.02, bladeH / 2, 0)), stickMat, 'stickBlade');
   root.add(stick, blade);
 
-  const shadow = createShadowBlob();
+  const shadow = kit.shadow();
   shadow.name = 'shadow';
   root.add(shadow);
 
@@ -325,9 +299,9 @@ export function createGoalieRig(def: PlayerDef, colors: RigColors): GoalieRig {
 
   function dispose(): void {
     for (const g of geos) g.dispose();
-    shadow.geometry.dispose();
-    for (const m of mats) { const map = (m as THREE.MeshBasicMaterial).map; if (map) map.dispose(); m.dispose(); }
-    (shadow.material as THREE.Material).dispose();
+    numMat.dispose();
+    if (sharedKit) kit.releaseTexture(numMap);
+    else { numMap?.dispose(); kit.dispose(); }
   }
 
   return { root, apply, dispose };

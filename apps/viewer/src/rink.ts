@@ -152,6 +152,7 @@ export function buildRink(): THREE.Group {
   // Arena floor around the rink, then the ice.
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 120).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: FLOOR }));
   floor.position.y = -0.02;
+  floor.name = 'floor'; // a scene with an arena round the rink hides this and lays its own floor
   g.add(floor);
   const icePts = outline(0, 32);
   const ice = flat(new THREE.Shape(icePts), 0, ICE);
