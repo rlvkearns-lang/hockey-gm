@@ -97,10 +97,11 @@ describe('game scene', () => {
     }
   });
 
-  it('the released puck starts from the blade: at the release tick the drawn puck is within 0.25 m of the releaser blade', () => {
-    // The engine lets the puck go during the step that ends on the release event's tick T (in state T it is already a
-    // tick of flight from his stick), so the moment it leaves is display time T - 1: the last moment he has it. There
-    // the drawn puck is where it sits on his blade (carry.ts carryPoint), played into at 60 Hz with the event log.
+  it('the released puck starts from the blade: at the moment the engine lets it go (display time T - 1, the tick before the release event\'s tick T) the drawn puck is within 0.25 m of the releaser blade', () => {
+    // Measured one tick before the event's tick, on purpose: the engine lets the puck go during the step that ends on
+    // the release event's tick T (in state T it is already a tick of flight from his stick, and from then the drawn puck
+    // must be exactly the engine's), so the moment it leaves the stick is display time T - 1, the last moment he has
+    // it. There the drawn puck is where it sits on his blade (carry.ts carryPoint), played into at 60 Hz with the log.
     for (const seed of [5, 42]) {
       const { setup, pb: cursor } = sharedPlayback(seed);
       const sc = createGameScene(setup, { timeline: buildTimeline(cursor.events) });

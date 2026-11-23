@@ -149,61 +149,62 @@ if (want('moments')) {
   }
 }
 
-// ---- Stick actions (ONLY=actions): 8-frame sequences of a wrist shot, a slapshot, a one-timer, a pass and its
-// reception, and a dump, each from the follow camera (on the man doing it) and from ice level, with a contact sheet.
-// The shot types are told apart here as the viewer's overlays/stick.ts tells them (from the record): a one-timer
-// when he did not have the puck 8 ticks before the release; a slapshot when the release is in the top quarter of the
-// game's shot speeds, he had the puck for 32 ticks and no opponent came within 3 m in that time, and it goes off
-// within 0.6 rad of his facing; otherwise a wrist shot. `ACTION_SKIP` (e.g. wrist=2) takes a later example.
+// ---- Stick actions (ONLY=actions): 8-frame sequences of a wrist shot, a snap shot, a slapshot, a one-timer, a pass
+// and its reception, and a dump, each from the follow camera, ice level and the broadcast camera (side-on to play up
+// and down the ice), cropped close round the man with his stick, plus a contact sheet per sequence, on a page drawn at
+// twice the pixels. The examples are ones where nobody else is within 2 m of him through the action (so he is not
+// hidden), told apart as the viewer's overlays/stick.ts tells them, from the record: a one-timer when he did not have
+// the puck 8 ticks before the release; a snap shot when he had it under 15 ticks; a slapshot when he had it longer and
+// let it go 10.5 m or further from the net; otherwise a wrist shot. `ACTION_SKIP` (e.g. wrist=2) takes a later one.
 if (only && only.includes('actions')) {
+  const { ctx: actx, p: ap } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light', deviceScaleFactor: 2 });
+  await ap.evaluate(() => window.__watch.setManual(true));
   const skip = Object.fromEntries((process.env.ACTION_SKIP ?? '').split(',').filter(Boolean).map((x) => x.split('=')).map(([k, v]) => [k, Number(v)]));
-  const acts = await p.evaluate((skip) => {
+  const acts = await ap.evaluate((skip) => {
     const w = window.__watch, ev = w.events();
     const rel = ev.filter((e) => e.type === 'release' && e.tick > 300);
-    const speeds = rel.filter((e) => e.detail.kind === 'shot').map((e) => Math.hypot(e.detail.vel.x, e.detail.vel.y)).sort((a, b) => a - b);
-    const p75 = speeds[Math.floor(speeds.length * 0.75)];
     const at = (t) => { w.seekPlain(t - 1); return w.state(); }; // state() is the frame's later tick
-    const offFacing = (e) => { const k = at(e.tick - 1).skaters.find((x) => x.id === e.playerId); const a = Math.atan2(e.detail.vel.y, e.detail.vel.x) - k.facing; return Math.abs(Math.atan2(Math.sin(a), Math.cos(a))); };
-    const had = (e, back) => { for (let t = e.tick - back; t < e.tick; t++) if (at(t).carrierId !== e.playerId) return false; return true; };
-    const quiet = (e, back) => {
-      for (let t = e.tick - back; t < e.tick; t++) {
+    const carried = (e, back) => at(e.tick - back).carrierId === e.playerId;
+    const had = (e) => { let n = 0; while (n < 40 && carried(e, n + 1)) n++; return n; };
+    // Nobody else within 2 m of him from 12 ticks before to 6 after, and he is on his feet.
+    const clear = (e) => {
+      for (let t = e.tick - 12; t <= e.tick + 6; t += 3) {
         const s = at(t), me = s.skaters.find((x) => x.id === e.playerId);
-        if (s.skaters.some((o) => o.onIce && o.side !== me.side && Math.hypot(o.pos.x - me.pos.x, o.pos.y - me.pos.y) < 3)) return false;
+        if (!me || me.downT > 0) return false;
+        if (s.skaters.some((o) => o.onIce && o.id !== me.id && Math.hypot(o.pos.x - me.pos.x, o.pos.y - me.pos.y) < 2)) return false;
       }
       return true;
     };
-    const found = {}, n = { wrist: 0, slap: 0, oneTimer: 0, pass: 0, dump: 0 };
-    const take = (k, e) => { if (found[k]) return; if ((n[k]++) >= (skip[k] ?? 0)) found[k] = e; };
+    const found = {}, n = {};
+    const take = (k, e) => { if (found[k]) return; n[k] = (n[k] ?? 0) + 1; if (n[k] > (skip[k] ?? 0)) found[k] = e; };
     for (const e of rel) {
+      const want = e.detail.kind === 'shot' ? ['wrist', 'snap', 'slap', 'oneTimer'] : e.detail.kind === 'pass' ? ['pass'] : ['dump'];
+      if (want.every((k) => found[k])) continue;
+      if (!clear(e)) continue;
       if (e.detail.kind === 'shot') {
-        const off = offFacing(e);
-        if (at(e.tick - 8).carrierId !== e.playerId && off < 1) take('oneTimer', e);
-        else if (Math.hypot(e.detail.vel.x, e.detail.vel.y) >= p75 && off < 0.6 && had(e, 32) && quiet(e, 32)) take('slap', e);
-        else if (off < 0.8 && had(e, 20)) take('wrist', e);
+        const s = at(e.tick - 1), net = s.attackDir[e.side] * 27.13, dist = Math.hypot(net - e.pos.x, e.pos.y), h = had(e);
+        take(h <= 7 ? 'oneTimer' : h < 15 ? 'snap' : dist >= 10.5 ? 'slap' : 'wrist', e);
       } else if (e.detail.kind === 'pass' && e.detail.toId) {
-        // A pass he made with time (not a one-touch) that its receiver took.
-        const later = ev.find((x) => x.tick > e.tick && (x.type === 'release' || x.type === 'turnover'));
-        if (had(e, 12) && offFacing(e) < 1.2 && at(e.tick + 20).carrierId === e.detail.toId) take('pass', e);
-        void later;
-      } else if (e.detail.kind === 'dump' && had(e, 12)) take('dump', e);
-      if (found.wrist && found.slap && found.oneTimer && found.pass && found.dump) break;
+        if (had(e) >= 10 && at(e.tick + 25).carrierId === e.detail.toId) take('pass', e);
+      } else if (e.detail.kind === 'dump' && had(e) >= 10) take('dump', e);
+      if (['wrist', 'snap', 'slap', 'oneTimer', 'pass', 'dump'].every((k) => found[k])) break;
     }
     const out = {};
-    for (const [k, e] of Object.entries(found)) out[k] = { tick: e.tick, who: e.playerId, to: e.detail.toId, vel: e.detail.vel };
+    for (const [k, e] of Object.entries(found)) out[k] = { tick: e.tick, who: e.playerId, to: e.detail.toId };
     return out;
   }, skip);
   console.log('actions', JSON.stringify(acts));
   log.actions = acts;
   // Each: from when (ticks before the release) and how far apart (ticks) the 8 frames are.
-  const plan = { wrist: [15, 3], slap: [19, 4], oneTimer: [15, 3], pass: [11, 3], receive: [-6, 3], dump: [12, 3] };
+  const plan = { wrist: [15, 3], snap: [11, 2], slap: [19, 4], oneTimer: [18, 3], pass: [11, 3], receive: [-6, 3], dump: [12, 3] };
   const seqs = [];
   for (const [k, a] of Object.entries(acts)) {
-    seqs.push({ name: k, who: a.who, tick: a.tick, ...{ back: plan[k][0], step: plan[k][1] } });
+    seqs.push({ name: k, who: a.who, tick: a.tick, back: plan[k][0], step: plan[k][1] });
     if (k === 'pass' && a.to) seqs.push({ name: 'receive', who: a.to, tick: a.tick, back: plan.receive[0], step: plan.receive[1] });
   }
   for (const sq of seqs) {
-    for (const camName of ['follow', 'iceLevel']) {
-      const r = await p.evaluate(({ sq, camName }) => {
+    for (const camName of ['follow', 'iceLevel', 'broadcast']) {
+      const r = await ap.evaluate(({ sq, camName }) => {
         const w = window.__watch;
         w.setSpeed(1);
         w.setFollow(sq.who);
@@ -211,7 +212,8 @@ if (only && only.includes('actions')) {
         const start = sq.tick - sq.back;
         w.seek(start - 18);
         w.step(18 / 30); // the camera settles into its ease before the first frame
-        // The sheet shows each frame cropped close round the man (the same crop size all through, from the first frame).
+        // The sheet shows each frame cropped round the man and his stick (the same crop size all through, from the
+        // first frame, kept inside the picture).
         const sheet = document.createElement('canvas');
         const c0 = document.querySelector('.stage canvas');
         const fw = 480, fh = 480;
@@ -224,21 +226,24 @@ if (only && only.includes('actions')) {
           if (i > 0) w.step(sq.step / 30);
           const url = w.grab();
           const f = w.figureOnScreen(sq.who);
-          if (f && !side) side = Math.min(c0.height, Math.max(160, f.px * 2.6));
-          const cx = f ? f.x * c0.width : c0.width / 2, cy = f ? f.y * c0.height - (f.px * 0.45) : c0.height / 2, sd = side || c0.height;
+          if (f && !side) side = Math.min(c0.width, c0.height, Math.max(200, f.px * 3.4));
+          const sd = side || Math.min(c0.width, c0.height);
+          const cx = Math.min(c0.width - sd / 2, Math.max(sd / 2, f ? f.x * c0.width : c0.width / 2));
+          const cy = Math.min(c0.height - sd / 2, Math.max(sd / 2, f ? f.y * c0.height - f.px * 0.4 : c0.height / 2));
           g.drawImage(c0, cx - sd / 2, cy - sd / 2, sd, sd, (i % 4) * fw, Math.floor(i / 4) * fh, fw, fh);
           const rel = w.info().tick - sq.tick;
           g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect((i % 4) * fw, Math.floor(i / 4) * fh, 120, 22);
           g.fillStyle = '#fff'; g.font = '16px sans-serif'; g.fillText(`${i + 1}  T${rel >= 0 ? '+' : ''}${rel}`, (i % 4) * fw + 4, Math.floor(i / 4) * fh + 16);
           shots.push({ url, tick: w.info().tick, carrier: w.state().carrierId });
         }
-        return { shots, sheet: sheet.toDataURL('image/jpeg', 0.85) };
+        return { shots, sheet: sheet.toDataURL('image/jpeg', 0.88) };
       }, { sq, camName });
       save(`act-${sq.name}-${camName}-sheet.jpg`, r.sheet);
       r.shots.forEach((s, i) => save(`act-${sq.name}-${camName}-${i + 1}.png`, s.url));
       console.log('action', sq.name, camName, sq.who, 'release', sq.tick, 'frames', r.shots.map((s) => `${s.tick - sq.tick}:${s.carrier ?? '-'}`).join(' '));
     }
   }
+  await actx.close();
 }
 
 // ---- Puck in frame through two minutes of play, per camera (every 0.25 s).

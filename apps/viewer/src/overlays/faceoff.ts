@@ -30,10 +30,26 @@ export const faceoffCrouch: Overlay<number> = {
   apply(raw, anim, sample, ctx, dims) {
     const share = styleShare(anim.gait, 'stand');
     if (share <= 0) return raw;
-    // The dot in his (left-shot) body frame, from his engine place at the later tick.
-    const dot = toBodyFrame(sample, ctx.state.faceoffSpot, 'tick');
+    // Where the stick points: toward the dot (in his left-shot body frame, from where he is drawn), at
+    // a fixed reach in front of him, turned no further than DOT_TURN either way. As the dot comes very near him, or goes
+    // round behind him, the stick goes back to straight ahead, so it never swings round as he skates over the dot.
+    const dot = stickAim(toBodyFrame(sample, ctx.state.faceoffSpot));
     const m = motionOfSample(sample);
     const up = rawPose('stand', anim.gait, 1, m, dims, { crouch: 0, dot }), down = rawPose('stand', anim.gait, 1, m, dims, { crouch: 1, dot });
     return addRawDelta(raw, up, down, share);
   },
 };
+
+/** The faceoff stick's reach in front of him (m) and how far it turns toward the dot (rad, either way). */
+const DOT_REACH = 0.9, DOT_LEFT = -1.0, DOT_RIGHT = 0.6;
+/** How near the dot (m) the stick still points at it fully, and how it fades below that. */
+const DOT_NEAR = 1.0;
+
+/** The point the faceoff stick aims at for a dot at `dot` (body frame), continuous wherever the dot is. */
+export function stickAim(dot: { x: number; y: number; z: number }): { x: number; y: number; z: number } {
+  const dist = Math.hypot(dot.x, dot.z), a = Math.atan2(dot.z, dot.x);
+  const s = (t: number): number => { const u = t < 0 ? 0 : t > 1 ? 1 : t; return u * u * (3 - 2 * u); };
+  const k = s(dist / DOT_NEAR) * s((Math.cos(a) + 0.2) / 0.5);
+  const h = (a < DOT_LEFT ? DOT_LEFT : a > DOT_RIGHT ? DOT_RIGHT : a) * k;
+  return { x: DOT_REACH * Math.cos(h), y: 0, z: DOT_REACH * Math.sin(h) };
+}

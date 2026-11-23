@@ -95,7 +95,7 @@ export const CARRY_ON = 0.15, CARRY_OFF = 0.1;
  * and where the blend says it was that is wider than CATCH_UP_SLACK plus CARRIER_SPEED in a step means the blade
  * itself jumped (a new carrier, or a blend not reset after a seek). The gap is then closed at CATCH_UP_SPEED.
  */
-const CATCH_UP_SLACK = 0.05, CARRIER_SPEED = 25, CATCH_UP_SPEED = 24;
+const CATCH_UP_SLACK = 0.05, CARRIER_SPEED = 16, CATCH_UP_SPEED = 20.5;
 
 const blendAt = (engine: IcePoint, blade: IcePoint, w: number): IcePoint => {
   if (w === 0) return { x: engine.x, z: engine.z };

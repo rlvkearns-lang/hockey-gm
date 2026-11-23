@@ -17,9 +17,12 @@ import { sharedPlayback } from './test/game';
 // machine leaving from the blade at the moment the engine lets it go and chasing a pass onto the blade). Before that,
 // with only the faceoff crouch and the old carry.ts, these were 5: e21e2fd3cf98651d and 42: 7107aa93e57f2c7d, which
 // that code still gives.
+// Re-pinned again by Task 2's fix round 1 (the faceoff crouch's stick aim made continuous, the shot types and their
+// poses, the carried puck's catch-up speeds): 5: 12657c9df77f0d51 and 42: 01b183534ee12000 before, which the previous
+// faceoff.ts, overlays/stick.ts and carry.ts still give.
 const PICTURE_HASH: Record<number, string> = {
-  5: '12657c9df77f0d51',
-  42: '01b183534ee12000',
+  5: '4942b8aaaf7560b6',
+  42: '55d09213ba0e0c48',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */

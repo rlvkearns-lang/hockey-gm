@@ -21,10 +21,10 @@ import type { Timeline } from '../timeline';
  * wind-up has begun) lives in the shared slot of `stickTrack`, rebuilt by the pre-roll, and none of it matters for
  * longer than the pre-roll's 1.5 s.
  *
- * Shot types are cosmetic and come only from recorded facts (see classify): a one-timer when he lets it go within
- * ONE_TIMER_SECONDS of getting the puck; a slapshot when the release speed is in the top quarter of the game's shot
- * speeds and he had SLAP_TIME_SECONDS with the puck and no opponent within PRESSURE_RADIUS before the wind-up began;
- * else a wrist shot. A pass is a forehand sweep, or a backhand when the puck goes off to his stick side. A dump is a
+ * Shot types are cosmetic and come only from recorded facts, from where and how the shot was taken (see classify): a
+ * one-timer when he lets it go within ONE_TIMER_SECONDS of getting the puck; a snap shot when he had it less than
+ * SLAP_TIME_SECONDS; a slapshot from SLAP_DISTANCE or further out (the point, the high slot) when he had it at least
+ * SLAP_TIME_SECONDS without being in a contest; else a wrist shot. Every type turns his upper body toward the puck's way. A pass is a forehand sweep, or a backhand when the puck goes off to his stick side. A dump is a
  * flip (chipped up) or a hard-around (hard along the boards), from the release velocity's lift and direction.
  *
  * Poses are in the left-shot body frame (x forward, z to his right, blade on his left): world directions are turned
@@ -33,7 +33,7 @@ import type { Timeline } from '../timeline';
  * way while he is down (a contest or a hit has him), and a later action blends over an earlier one.
  */
 
-export type StickStyle = 'wrist' | 'slap' | 'oneTimer' | 'forehand' | 'backhand' | 'flip' | 'around';
+export type StickStyle = 'wrist' | 'snap' | 'slap' | 'oneTimer' | 'forehand' | 'backhand' | 'flip' | 'around';
 type ReleaseKind = 'pass' | 'shot' | 'dump';
 
 /**
@@ -49,6 +49,13 @@ export type StickAct = {
    * (body frame); both kept from the contact on.
    */
   meet: number; mx: number; mz: number;
+  /**
+   * A shot only: `far` (let go SLAP_DISTANCE or further from the net); `pending` while its type waits on whether he
+   * gets the puck in time for anything but a one-timer (he did not have it when the shot was first seen).
+   */
+  far: boolean; pending: boolean;
+  /** `loaded`: it was pending when first seen, at display time `seen` (ticks): he loads his stick meanwhile (loadOf). */
+  loaded: boolean; seen: number;
 };
 /** The reception of the pass on its way to him (`tick` of the pass, -1 for none). */
 export type Reception = {
@@ -64,7 +71,7 @@ export type Reception = {
 /**
  * The stick actions' shared state for one skater (stickTrack's slot; plain data, changed in place each step, made
  * afresh when he starts afresh). `t` is the display time in ticks of the last step. `carrier`, `gotAt` (engine tick he
- * got the puck) and `pressedAt` (last engine tick an opponent was within PRESSURE_RADIUS while he had it) are the
+ * got the puck) and `contestAt` (last engine tick he was in a contest: a battle, a poke check, a hit) are the
  * facts the shot type needs. `acts` holds the releases around now and `around` which of them are, oldest first: the
  * one before the latest (still fading, if close), the latest at or before the current tick (its follow-through) and
  * the first after it (its wind-up), as indices into `acts` (-1 for none). `give` (0..1) is how far the actions have
@@ -72,7 +79,7 @@ export type Reception = {
  */
 export type StickSlot = {
   t: number; give: number;
-  carrier: boolean; gotAt: number; pressedAt: number;
+  carrier: boolean; gotAt: number; contestAt: number;
   acts: [StickAct, StickAct, StickAct]; around: [number, number, number];
   recv: Reception;
 };
@@ -82,22 +89,20 @@ export const STICK_ID = 'stick';
 
 /** A release this soon after he got the puck (s) is a one-timer. */
 export const ONE_TIMER_SECONDS = 0.25;
-/** A hard shot (top quarter of the game's shot speeds) is a slapshot if he had this long (s) with the puck, unpressured. */
-export const SLAP_TIME_SECONDS = 0.5;
 /**
- * A slapshot or a one-timer is shot about the way he faces: the puck off within this (rad) of his facing (the engine
- * often lets the puck go well off it; those shots are drawn as wrist shots, which turn his upper body to it).
+ * A shot taken with the puck held less than this (s) is a snap shot; held at least this long, out of any contest, from
+ * SLAP_DISTANCE (m from the net centre) or further, a slapshot. 10.5 m is about the top of the circles: over the two
+ * test games it makes 10 to 15% of shots slapshots (the engine's shot distances: median about 7.5 m, top quarter from
+ * about 10 m).
  */
-export const SLAP_FACING = 0.6, ONE_TIMER_FACING = 1.0;
+export const SLAP_TIME_SECONDS = 0.5, SLAP_DISTANCE = 10.5;
 /**
- * How far (rad) a wrist shot (TURN_MAX.shot), a pass or a dump turns his upper body toward where the puck goes (the
- * feet stay); a pass or a dump has less time to turn.
+ * How far (rad) a shot (TURN_MAX.shot), a pass or a dump turns his upper body toward where the puck goes (the feet
+ * stay); a pass or a dump has less time to turn.
  */
 export const TURN_MAX = { shot: 1.4, pass: 0.9, dump: 0.9 } as const;
-/** An opponent this close (m, engine positions) pressures him (the engine's pressure is half-way at 3 m). */
-export const PRESSURE_RADIUS = 3;
 /** Wind-up before the release event (s) by shot type. */
-export const SHOT_LEAD = { wrist: 0.4, slap: 0.55, oneTimer: 0.35 } as const;
+export const SHOT_LEAD = { wrist: 0.4, snap: 0.3, slap: 0.55, oneTimer: 8 * DT } as const;
 /** A pass's wind-up (s): PASS_LEAD[0] at PASS_SPEED[0] m/s and slower, PASS_LEAD[1] at PASS_SPEED[1] and faster. */
 export const PASS_LEAD = [0.12, 0.3] as const, PASS_SPEED = [13, 22] as const;
 /** A dump's wind-up (s). */
@@ -109,6 +114,8 @@ const PICKUP_REACH = 0.9;
 
 const LOOK_TICKS = Math.ceil(SHOT_LEAD.slap / DT) + 1;
 const FOLLOW_TICKS = 24;
+/** A shot he still has not got the puck for this many ticks before it is a one-timer (its swing starts then). */
+const ONE_TIMER_DECIDE = 8;
 const ONE_TIMER_TICKS = ONE_TIMER_SECONDS / DT, SLAP_TIME_TICKS = SLAP_TIME_SECONDS / DT;
 /** A pass older than this (ticks) is no longer on its way. */
 const RECV_TICKS = Math.round(4 / DT);
@@ -131,13 +138,15 @@ type StyleDef = {
 };
 const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
 const STYLES: Record<StickStyle, StyleDef> = {
-  wrist: { back: v3(-0.5, 0.03, -0.64), beta: 0.45, r: 1.2, y: 0.55, fp: 4, fh: 8, fe: 24, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
+  wrist: { back: v3(-0.6, 0.03, -0.9), beta: 0.45, r: 1.25, y: 0.75, fp: 6, fh: 8, fe: 24, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
     twistBack: -0.35, twistFollow: 0.35, pitchBack: -0.04, pitchFollow: 0.12, hipBack: -0.03, hipFollow: -0.03 },
-  slap: { back: v3(-0.75, 1.05, -0.45), beta: 0.35, r: 1.25, y: 0.85, fp: 4, fh: 9, fe: 25, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
-    twistBack: -0.6, twistFollow: 0.45, pitchBack: -0.15, pitchFollow: 0.18, hipBack: -0.02, hipFollow: -0.06 },
-  oneTimer: { back: v3(-0.55, 0.8, -0.55), beta: 0.45, r: 1.2, y: 0.7, fp: 4, fh: 8, fe: 24, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
+  snap: { back: v3(0.2, 0.05, -0.95), beta: 0.5, r: 1.2, y: 0.6, fp: 6, fh: 8, fe: 24, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
+    twistBack: -0.25, twistFollow: 0.3, pitchBack: -0.02, pitchFollow: 0.12, hipBack: -0.03, hipFollow: -0.03 },
+  slap: { back: v3(-0.7, 0.9, -0.5), beta: 0.4, r: 1.3, y: 1.0, fp: 6, fh: 9, fe: 25, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
+    twistBack: -0.6, twistFollow: 0.45, pitchBack: -0.15, pitchFollow: 0.32, hipBack: -0.02, hipFollow: -0.09 },
+  oneTimer: { back: v3(-0.5, 0.65, -0.7), beta: 0.85, r: 1.25, y: 0.9, fp: 6, fh: 8, fe: 24, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
     twistBack: -0.5, twistFollow: 0.4, pitchBack: -0.1, pitchFollow: 0.15, hipBack: -0.02, hipFollow: -0.05 },
-  forehand: { back: v3(0.3, 0.0, -0.7), beta: 0.5, r: 1.05, y: 0.08, fp: 5, fh: 6, fe: 22, lo: -1.0, hi: 1.1, spot: { x: 0.7, z: -0.3 },
+  forehand: { back: v3(0.35, 0.0, -0.95), beta: 0.5, r: 1.05, y: 0.08, fp: 5, fh: 6, fe: 22, lo: -1.0, hi: 1.1, spot: { x: 0.7, z: -0.3 },
     twistBack: -0.2, twistFollow: 0.4, pitchBack: 0, pitchFollow: 0.06, hipBack: -0.02, hipFollow: -0.02 },
   backhand: { back: v3(0.55, 0.0, -0.05), beta: 0.5, r: 1.0, y: 0.12, fp: 5, fh: 6, fe: 22, lo: -2.6, hi: -0.8, spot: { x: 0.65, z: -0.15 },
     twistBack: 0.25, twistFollow: 0.3, pitchBack: 0, pitchFollow: 0.06, hipBack: -0.02, hipFollow: -0.02 },
@@ -146,6 +155,11 @@ const STYLES: Record<StickStyle, StyleDef> = {
   around: { back: v3(-0.3, 0.02, -0.75), beta: 0.45, r: 1.2, y: 0.18, fp: 4, fh: 7, fe: 23, lo: -1.1, hi: 0.9, spot: STRIKE_SPOT,
     twistBack: -0.4, twistFollow: 0.4, pitchBack: -0.03, pitchFollow: 0.12, hipBack: -0.03, hipFollow: -0.04 },
 };
+/**
+ * The share of the turn toward the puck's way that the draw-back takes: all of it for a shot (he squares up to it),
+ * less for a pass or a dump (a quicker, shorter draw that stays on his stick side).
+ */
+const BACK_TURN = { shot: 1, pass: 0.6, dump: 0.6 } as const;
 /** How a turn toward the puck's way is shared: the shoulders turn this much of it, the hips this much. */
 const TURN_TWIST = 1, TURN_YAW = 0.3;
 /** About where the top hand is (x, z), for the heel that puts the puck on a spot. */
@@ -173,21 +187,6 @@ const unwrap = (a: number, near: number): number => near + wrap(a - near);
 // ---------------------------------------------------------------------------------------------------------------
 // Facts and types
 
-/** The shot speed (m/s, along the ice) from which a shot is in the top quarter of the game's, per timeline. */
-const hardShots = new WeakMap<Timeline, number>();
-export function hardShotSpeed(tl: Timeline): number {
-  let v = hardShots.get(tl);
-  if (v !== undefined) return v;
-  const speeds: number[] = [];
-  for (let t = -1, e = tl.next('release', t, Infinity); e; t = e.tick, e = tl.next('release', t, Infinity)) {
-    if (e.detail.kind === 'shot') speeds.push(Math.hypot(e.detail.vel.x, e.detail.vel.y));
-  }
-  speeds.sort((a, b) => a - b);
-  v = speeds.length > 0 ? speeds[Math.floor(speeds.length * 0.75)]! : Infinity;
-  hardShots.set(tl, v);
-  return v;
-}
-
 /** A world direction (engine x, y) as a heading in his body frame (left-shot frame: mirrored for a right shot). */
 function bodyHeading(s: SkaterSample, x: number, y: number): number {
   const c = Math.cos(s.facing), n = Math.sin(s.facing);
@@ -197,9 +196,9 @@ function bodyHeading(s: SkaterSample, x: number, y: number): number {
 /**
  * The type of a release, fixed when the slot first sees it (normally LOOK_TICKS before it, before any wind-up), from
  * the release and what the slot knows then. A shot: a one-timer if he gets the puck within ONE_TIMER_SECONDS of the
- * release (when he has not got it yet, from where the pass on its way to him is and how fast it comes); a slapshot if
- * it is hard (hardShotSpeed) and he had SLAP_TIME_SECONDS with it, unpressured, before the wind-up; a wrist shot
- * otherwise. A pass: a backhand when it goes off more than 50 degrees to his stick side, else a forehand. A dump: a
+ * release (when he has not got it yet, from where the pass on its way to him is and how fast it comes); a snap shot if
+ * he has it less than SLAP_TIME_SECONDS; a slapshot if it is let go SLAP_DISTANCE or further from the net and he was
+ * in no contest from SLAP_TIME_SECONDS before the release (as far as known when it is classified); else a wrist shot. A pass: a backhand when it goes off more than 50 degrees to his stick side, else a forehand. A dump: a
  * hard-around when it leaves flat (lift under 1 m/s) or runs along the boards (within 25 degrees of them, from within
  * 6 m of them), else a flip.
  */
@@ -207,13 +206,15 @@ function classify(act: StickAct, e: GameEventOf<'release'>, s: SkaterSample, ctx
   const v = e.detail.vel, speed = Math.hypot(v.x, v.y);
   act.tick = e.tick; act.kind = e.detail.kind; act.vx = v.x; act.vy = v.y; act.vz = v.z;
   const heading = bodyHeading(s, v.x, v.y);
+  act.pending = false; act.loaded = false;
   if (act.kind === 'shot') {
-    // When he got the puck, or (if he has not yet) will get it.
-    const got = receivedAt(slot, s, ctx);
-    const quiet = act.tick - Math.max(got, slot.carrier ? slot.pressedAt : -Infinity), facing = Math.abs(heading);
-    act.style = act.tick - got <= ONE_TIMER_TICKS && facing <= ONE_TIMER_FACING ? 'oneTimer'
-      : speed >= hardShotSpeed(ctx.timeline) && quiet >= SHOT_LEAD.slap / DT + SLAP_TIME_TICKS && facing <= SLAP_FACING ? 'slap' : 'wrist';
-    act.lead = SHOT_LEAD[act.style as 'wrist' | 'slap' | 'oneTimer'] / DT;
+    const netX = ctx.state.attackDir[s.side] * ctx.rink.goalLineX;
+    act.far = Math.hypot(netX - e.pos.x, e.pos.y) >= SLAP_DISTANCE;
+    // He has it: its type now. He has not got it yet: a one-timer or a snap shot, decided once he gets it or by the
+    // tick a one-timer's swing must start (shotType); meanwhile a pass coming to him loads his stick (receiveOverlay).
+    if (slot.carrier) shotType(act, act.tick - slot.gotAt, slot);
+    else { act.pending = true; act.style = 'oneTimer'; act.lead = SHOT_LEAD.oneTimer / DT; }
+    act.loaded = act.pending; act.seen = ctx.tick + ctx.alpha;
   } else if (act.kind === 'pass') {
     act.style = heading < -0.9 ? 'backhand' : 'forehand';
     act.lead = (PASS_LEAD[0] + (PASS_LEAD[1] - PASS_LEAD[0]) * clamp01((speed - PASS_SPEED[0]) / (PASS_SPEED[1] - PASS_SPEED[0]))) / DT;
@@ -227,10 +228,22 @@ function classify(act: StickAct, e: GameEventOf<'release'>, s: SkaterSample, ctx
   act.aim = unwrap(heading, (def.lo + def.hi) / 2);
 }
 
-const newAct = (): StickAct => ({ tick: -1, kind: 'pass', style: 'forehand', lead: 0, vx: 0, vy: 0, vz: 0, aim: 0, meet: 0, mx: 0, mz: 0 });
+/**
+ * A shot's type from how long he had the puck before letting it go (`had`, ticks): a one-timer within
+ * ONE_TIMER_SECONDS, a snap shot under SLAP_TIME_SECONDS, then a slapshot from far out with no contest in that time
+ * (as far as known now), else a wrist shot.
+ */
+function shotType(act: StickAct, had: number, slot: StickSlot): void {
+  const calm = slot.contestAt < act.tick - SLAP_TIME_TICKS;
+  act.style = had <= ONE_TIMER_TICKS ? 'oneTimer' : had < SLAP_TIME_TICKS ? 'snap' : act.far && calm ? 'slap' : 'wrist';
+  act.lead = SHOT_LEAD[act.style as 'wrist' | 'snap' | 'slap' | 'oneTimer'] / DT;
+  act.pending = false;
+}
+
+const newAct = (): StickAct => ({ tick: -1, kind: 'pass', style: 'forehand', lead: 0, vx: 0, vy: 0, vz: 0, aim: 0, meet: 0, mx: 0, mz: 0, far: false, pending: false, loaded: false, seen: 0 });
 function newSlot(): StickSlot {
   return {
-    t: 0, give: 0, carrier: false, gotAt: -Infinity, pressedAt: -Infinity, acts: [newAct(), newAct(), newAct()], around: [-1, -1, -1],
+    t: 0, give: 0, carrier: false, gotAt: -Infinity, contestAt: -Infinity, acts: [newAct(), newAct(), newAct()], around: [-1, -1, -1],
     recv: { tick: -1, from: '', gotAt: NaN, lostAt: NaN, dir: 0, w: 0 },
   };
 }
@@ -262,12 +275,7 @@ export const stickTrack: Overlay<StickSlot> = {
     const carrier = st.carrierId === me;
     if (carrier && !sl.carrier) sl.gotAt = fresh ? -Infinity : k;
     sl.carrier = carrier;
-    if (carrier) {
-      const p = s.state.pos;
-      for (const o of st.skaters) {
-        if (o.onIce && o.side !== s.side && Math.hypot(o.pos.x - p.x, o.pos.y - p.y) < PRESSURE_RADIUS) { sl.pressedAt = k; break; }
-      }
-    }
+    if (s.state.contestId !== null) sl.contestAt = k;
     const down = s.state.downT > 0 || s.down ? 1 : 0;
     sl.give = fresh ? down : clamp01(sl.give + Math.sign(down - sl.give) * Math.max(0, dt) / GIVE_SECONDS);
     if (Math.abs(sl.give - down) < 1e-9) sl.give = down;
@@ -291,6 +299,9 @@ export const stickTrack: Overlay<StickSlot> = {
       const i = ar[j]!;
       if (i < 0) continue;
       const a = sl.acts[i]!;
+      // A shot waiting on its type: he has the puck now (it is decided by how long he will have had it), or he still
+      // has not got it when a one-timer must start its swing.
+      if (a.pending && (sl.carrier || ctx.state.tick >= a.tick - ONE_TIMER_DECIDE)) shotType(a, sl.carrier ? a.tick - sl.gotAt : 0, sl);
       if (ctx.state.tick >= a.tick || t > a.tick - 1) continue; // from the contact (the engine has let it go) on, kept
       a.aim = unwrap(bodyHeading(s, a.vx, a.vy), a.aim);
       a.meet = 1 - smooth((a.tick - 1 - receivedAt(sl, s, ctx)) / SETTLE_TICKS);
@@ -310,16 +321,20 @@ function trackReception(sl: StickSlot, s: SkaterSample, ctx: AnimContext, t: num
   if (!pass || pass.detail.kind !== 'pass') { r.tick = -1; return; }
   if (r.tick !== pass.tick) { r.tick = pass.tick; r.from = pass.playerId ?? ''; r.gotAt = NaN; r.lostAt = NaN; r.w = 0; r.dir = RECV_MID; }
   if (!Number.isNaN(r.gotAt) || !Number.isNaN(r.lostAt)) return;
-  if (sl.carrier && sl.gotAt >= pass.tick) { r.gotAt = fresh ? -Infinity : t; return; }
+  // Taken or gone as of the engine's tick (the display time that tick starts), so any frame rate, and a seek's
+  // pre-roll, see it change at the same moment.
+  const at = st.tick - 1;
+  if (sl.carrier && sl.gotAt >= pass.tick) { r.gotAt = fresh ? -Infinity : at; r.w = smooth((at - pass.tick) / RECV_RAMP); return; }
   const pp = st.pendingPass, p = ctx.puck.engine, me = s.pos;
-  const dx = me.x - p.x, dz = me.y - p.z, d = Math.hypot(dx, dz);
-  const closing = st.puck.vel.x * dx + st.puck.vel.y * dz > 0 || d < 1.2;
+  const dx = me.x - p.x, dz = me.y - p.z;
+  const ex = s.state.pos.x - st.puck.pos.x, ey = s.state.pos.y - st.puck.pos.y;
+  const closing = st.puck.vel.x * ex + st.puck.vel.y * ey > 0 || Math.hypot(ex, ey) < 1.2;
   if (pp && pp.toId === s.id && pp.fromId === r.from && st.carrierId === null && closing) {
     // The blade follows the puck round (no faster than RECV_TURN), so a puck coming close past him does not whip it.
     const to = unwrap(bodyHeading(s, -dx, -dz), r.dir);
     r.dir = r.w === 0 ? to : r.dir + clamp(to - r.dir, -RECV_TURN * Math.max(0, dt), RECV_TURN * Math.max(0, dt));
     r.w = Math.max(1e-9, smooth((t - pass.tick) / RECV_RAMP));
-  } else r.lostAt = fresh ? -Infinity : t;
+  } else { r.lostAt = fresh ? -Infinity : at; r.w = smooth((at - pass.tick) / RECV_RAMP); }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -340,7 +355,7 @@ function actWeight(a: StickAct, t: number): number {
 /** An action shows fully from this amount on (see releaseOverlay's weight). */
 const ACT_FULL = 0.35;
 /** Ticks over which a follow-through gives way once he has the puck again. */
-const REGAIN_TICKS = 12;
+const REGAIN_TICKS = 18;
 /** The share of the draw-back over which an action eases in. */
 const RAMP = 0.3;
 /** When (ticks after the contact) the blade is back where the skating pose has it, and the fade starts. */
@@ -384,10 +399,10 @@ function receivedAt(sl: StickSlot, s: SkaterSample, ctx: AnimContext): number {
   return st.tick + 1;
 }
 
-/** How far (rad) action `a` turns his upper body toward the puck's way (none for a slapshot or a one-timer). */
+/** How far (rad) action `a` turns his upper body toward the puck's way. */
 function turnOf(a: StickAct): number {
   const def = STYLES[a.style];
-  return a.style === 'slap' || a.style === 'oneTimer' ? 0 : clamp(a.aim - (def.lo + def.hi) / 2, -TURN_MAX[a.kind], TURN_MAX[a.kind]);
+  return clamp(a.aim - (def.lo + def.hi) / 2, -TURN_MAX[a.kind], TURN_MAX[a.kind]);
 }
 
 /** Where the stick meets the puck for action `a`: the drawn puck in his body frame, near the action's strike spot. */
@@ -411,9 +426,16 @@ function actPose(raw: RawPose, a: StickAct, t: number, s: SkaterSample, ctx: Ani
   const aim = turn + clamp(a.aim - turn, def.lo, def.hi);
   const ct = Math.cos(turn), st = Math.sin(turn);
   const { k0, k1, k2, k3, m, out } = scratch;
-  const plain = fitBody(raw, dims).blade;
+  const plain = fitBody(raw, dims).blade, load = loadOf(a, t);
   k0.x = plain.x; k0.y = plain.y; k0.z = plain.z;
-  k1.x = def.back.x * ct - def.back.z * st; k1.y = def.back.y; k1.z = def.back.x * st + def.back.z * ct;
+  // The draw-back stays mostly on his stick side (turned BACK_TURN as far as the rest of the action).
+  const bt = BACK_TURN[a.kind] * turn, cb = Math.cos(bt), sb = Math.sin(bt);
+  k1.x = def.back.x * cb - def.back.z * sb; k1.y = def.back.y; k1.z = def.back.x * sb + def.back.z * cb;
+  // A shot waiting on the puck starts from his stick loaded, turned the same way.
+  if (load > 0) {
+    const lx = LOAD.x * cb - LOAD.z * sb, lz = LOAD.x * sb + LOAD.z * cb;
+    k0.x += (lx - k0.x) * load; k0.y += (LOAD.y - k0.y) * load; k0.z += (lz - k0.z) * load;
+  }
   {
     // Where it strikes the puck: in front of him, near where the engine lets the puck go (straight ahead of him,
     // whichever way it goes), so the puck's flight from the blade starts near the engine's; or, as far as the puck will
@@ -461,7 +483,7 @@ function aroundAmount(sl: StickSlot, j: number, kind: ReleaseKind): number {
   if (a.kind !== kind) return 0;
   // He has the puck again after letting it go (a rebound, a pass back): the follow-through gives way to carrying it.
   const regain = sl.carrier && sl.gotAt > a.tick ? 1 - smooth((sl.t - (sl.gotAt - 1)) / REGAIN_TICKS) : 1;
-  return actWeight(a, sl.t) * regain * (1 - sl.give);
+  return Math.max(a.pending ? 0 : actWeight(a, sl.t), loadOf(a, sl.t)) * regain * (1 - sl.give);
 }
 
 function releaseOverlay(id: string, kind: ReleaseKind): Overlay<never> {
@@ -498,6 +520,18 @@ export const passOverlay = releaseOverlay('pass', 'pass');
 export const shotOverlay = releaseOverlay('shot', 'shot');
 /** The dump: a flip (chipped up) or a hard-around. */
 export const dumpOverlay = releaseOverlay('dump', 'dump');
+
+/** Where a receiver loads his stick for a shot as the pass comes (blade heel, body frame of a left shot). */
+const LOAD = v3(-0.45, 0.6, -0.7);
+/**
+ * How far (0..1) he has loaded his stick (drawn back and up, at LOAD) for shot `a`, which he had not got the puck for
+ * when it was first seen (a one-timer, or a snap shot off a pass): from then over LOAD_TICKS, until the contact.
+ */
+function loadOf(a: StickAct, t: number): number {
+  return a.loaded && t < a.tick - 1 ? smooth((t - a.seen) / LOAD_TICKS) : 0;
+}
+/** Ticks over which a shooter waiting on the puck loads his stick. */
+const LOAD_TICKS = 8;
 
 /** How far the reception is on at display time `t` (0..1). */
 function recvAmount(sl: StickSlot): number {

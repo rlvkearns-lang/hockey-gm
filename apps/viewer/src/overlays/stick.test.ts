@@ -10,7 +10,7 @@ import { createGameScene, seekScene, type GameScene } from '../scene';
 import { recorded, testSetup } from '../test/game';
 import { buildTimeline, type Timeline } from '../timeline';
 import { faceoffCrouch } from './faceoff';
-import { STICK_OVERLAYS, stickSlotOf, stickWeight, type StickStyle } from './stick';
+import { SLAP_DISTANCE, STICK_OVERLAYS, stickSlotOf, stickWeight, type StickStyle } from './stick';
 
 /**
  * The stick actions through the real scene and a recorded game: each helper plays the scene (with the game's event
@@ -143,6 +143,57 @@ describe('stick actions', () => {
   });
 
   // Beyond the brief's list.
+  it('a seek shows the stick actions play shows: their state and weights around shots, passes and dumps', () => {
+    for (const seed of [5, 42]) {
+      const g = game(seed);
+      const watch = { id: '', tick: 0 };
+      type Got = { w: Record<string, number>; style: string; pending: boolean; aim: number };
+      const box: { v: Got | null } = { v: null };
+      const skaters = OVERLAYS.map((ov): Overlay => ({
+        ...ov,
+        weight: (a, s, c) => {
+          const w = ov.weight(a, s, c);
+          if (s.id === watch.id) {
+            const got = (box.v ??= { w: {}, style: '', pending: false, aim: 0 });
+            got.w[ov.id] = w;
+            const act = stickSlotOf(a)?.acts.find((x) => x.tick === watch.tick);
+            if (act) { got.style = act.style; got.pending = act.pending; got.aim = act.aim; }
+          }
+          return w;
+        },
+      }));
+      const sc = createGameScene(g.setup, { timeline: g.tl, animation: { skaters } });
+      const rels = releases(g.rec);
+      const pick = (kind: string): GameEventOf<'release'>[] => rels.filter((e) => e.detail.kind === kind && e.tick > 400).slice(0, 12);
+      const offsets = [-12, -4, 0, 6];
+      let compared = 0;
+      for (const rel of [...pick('shot'), ...pick('pass'), ...pick('dump')]) {
+        watch.id = rel.playerId!; watch.tick = rel.tick;
+        // Play: from 1.5 s before the first offset, at 60 Hz.
+        const start = rel.tick + offsets[0]! - 45, played = new Map<number, Got | null>();
+        seekScene(g.pb, sc, start);
+        for (let i = 1; start + i * 0.5 <= rel.tick + offsets[offsets.length - 1]!; i++) {
+          box.v = null; g.pb.seek(start + i * 0.5); sc.update(g.pb.frame(), 1 / 60);
+          const at = start + i * 0.5;
+          if (offsets.includes(at - rel.tick)) played.set(at - rel.tick, box.v);
+        }
+        for (const off of offsets) {
+          box.v = null; seekScene(g.pb, sc, rel.tick + off);
+          const p = played.get(off), q = box.v as Got | null;
+          if (!p || !q) continue; // off the ice at that moment
+          expect(q.style, `${seed} ${rel.tick} ${off}`).toBe(p.style);
+          expect(q.pending).toBe(p.pending);
+          // The aim is followed step by step until the contact and kept from there: a 30 Hz pre-roll may keep it a
+          // fraction of a tick earlier than a 60 Hz play.
+          expect(Math.abs(q.aim - p.aim)).toBeLessThan(0.1);
+          for (const ov of STICK_OVERLAYS) expect(Math.abs((q.w[ov.id] ?? 0) - (p.w[ov.id] ?? 0)), `${seed} ${rel.tick} ${off} ${ov.id}`).toBeLessThan(0.05);
+          compared++;
+        }
+      }
+      sc.dispose();
+      expect(compared).toBeGreaterThan(120);
+    }
+  });
   it('both hands: the wind-up goes back on his stick side and the follow-through goes where the puck went, for left and right shots', () => {
     const g = game(42);
     const shoots = new Map([...g.setup.home.players, ...g.setup.away.players].map((d) => [d.id, d.shoots]));
@@ -168,28 +219,34 @@ describe('stick actions', () => {
       }
     }
   });
-  it('the shot types come from the record: a one-timer is a quick release, a slapshot a hard one', () => {
-    const g = game(42);
-    const seen: Record<StickStyle, number> = { wrist: 0, slap: 0, oneTimer: 0, forehand: 0, backhand: 0, flip: 0, around: 0 };
-    const p75 = (() => { const v = releases(g.rec).filter((e) => e.detail.kind === 'shot').map((e) => Math.hypot(e.detail.vel.x, e.detail.vel.y)).sort((a, b) => a - b); return v[Math.floor(v.length * 0.75)]!; })();
-    const styles = stylesOf(g, releases(g.rec).filter((e) => e.detail.kind === 'shot').slice(0, 30));
-    for (const [rel, style] of styles) {
-      seen[style]++;
-      if (style === 'slap') expect(Math.hypot(rel.detail.vel.x, rel.detail.vel.y)).toBeGreaterThanOrEqual(p75);
-      if (style === 'oneTimer') {
-        // He did not have the puck 0.27 s before the release.
-        g.pb.seek(rel.tick - 8); expect(g.pb.frame().prev.carrierId).not.toBe(rel.playerId);
+  it('the shot types come from where and how the shot was taken', () => {
+    for (const seed of [5, 42]) {
+      const g = game(seed);
+      const seen: Record<StickStyle, number> = { wrist: 0, snap: 0, slap: 0, oneTimer: 0, forehand: 0, backhand: 0, flip: 0, around: 0 };
+      const styles = stylesOf(g, releases(g.rec).filter((e) => e.detail.kind === 'shot').slice(0, 40));
+      for (const [rel, style] of styles) {
+        seen[style]++;
+        g.pb.seek(rel.tick - 1);
+        const st = g.pb.frame().prev, net = st.attackDir[rel.side!] * RINK.goalLineX, dist = Math.hypot(net - rel.pos.x, rel.pos.y);
+        const had = (back: number): boolean => { g.pb.seek(rel.tick - back); return g.pb.frame().prev.carrierId === rel.playerId; };
+        if (style === 'slap') { expect(dist).toBeGreaterThanOrEqual(SLAP_DISTANCE); expect(had(16)).toBe(true); }
+        if (style === 'oneTimer') expect(had(8)).toBe(false); // he did not have the puck 0.27 s before the release
+        if (style === 'snap' || style === 'oneTimer') expect(had(16)).toBe(false);
+        if (style === 'wrist') expect(had(15)).toBe(true);
       }
+      expect(seen.wrist + seen.snap + seen.slap + seen.oneTimer).toBe(40);
+      expect(seen.slap).toBeGreaterThan(1);
+      expect(seen.wrist).toBeGreaterThan(seen.slap);
     }
-    expect(seen.wrist).toBeGreaterThan(seen.slap);
   });
 });
 
 /**
  * Drive the animator (no scene) through the first period of a recorded game at 60 Hz, sampling every skater on the
  * ice as the scene does (blended between the frame's ticks, the earlier tick across an engine cut, everyone afresh
- * after a cut), and measure the largest move in a frame of a hand or the blade heel while a stick action shows on
- * him (in this frame or the last), and of the hips or a skate; and count poses with a number that is not finite.
+ * after a cut), and measure the largest move in a frame of a hand or the blade heel, and of the hips or a skate, for
+ * every skater on the ice in every frame but his first on the ice and those across an engine cut; count the frames in
+ * which a stick action shows on him, and the poses with a number that is not finite.
  */
 function drivePeriod(seed: number): { worst: number; worstBody: number; posed: number; active: number; bad: number } {
   const g = game(seed), pb = g.pb;
@@ -234,8 +291,9 @@ function drivePeriod(seed: number): { worst: number; worstBody: number; posed: n
       posed++;
       if (!finitePose(pose)) bad++;
       const was = last.get(p.id);
-      if (was && !cut && !s.down) {
-        if (on || was.on) { worst = Math.max(worst, poseDistance(was.pose, pose)); active++; }
+      if (was && !cut) {
+        worst = Math.max(worst, poseDistance(was.pose, pose));
+        if (on || was.on) active++;
         worstBody = Math.max(worstBody, Math.abs(was.pose.hipY - pose.hipY), dist3(was.pose.legs[0].foot, pose.legs[0].foot), dist3(was.pose.legs[1].foot, pose.legs[1].foot));
       }
       last.set(p.id, { pose, on });
