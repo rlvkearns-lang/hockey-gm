@@ -1,4 +1,4 @@
-import { DT, type ContestState } from '@hockey/engine';
+import { DT, type ContestState, type GameEventOf, type GameState } from '@hockey/engine';
 import type { Vec3 } from './pose-mix';
 import type { Timeline } from './timeline';
 
@@ -10,9 +10,12 @@ import type { Timeline } from './timeline';
  * drawn about the same size in the picture whatever the camera's distance: markerSize. The page's "Puck marker" setting
  * is On (always), Auto (as above) or Off (never).
  *
- * When a board battle or a net-front battle ends and a man has the puck (the engine's carrier: the man it gave the puck
- * to, or the one who picked it up after), the ring under his blade (where the carried puck is drawn) is highlighted
- * for HIGHLIGHT_SECONDS, so who came away with it shows. A function of the moment and the timeline.
+ * When a board battle or a net-front battle ends and a man who was in it has the puck, the ring under his blade (where
+ * the carried puck is drawn) is highlighted for HIGHLIGHT_SECONDS, so who came away with it shows: the man the engine
+ * gave the puck to at the battle's end (contestEnd `puck: 'toWinner'`), or one of its participants or supporters who
+ * has it (a net-front battle, which is not fought for the puck, only while the puck is within SCRUM_REACH of its
+ * spot). A man who was in no battle never lights it. A function of the moment, the timeline and the frame's engine
+ * state (cameAwayWith).
  */
 
 export type MarkerMode = 'on' | 'auto' | 'off';
@@ -88,15 +91,43 @@ export function stepMarker(st: MarkerState, input: MarkerInput, dt: number, snap
 }
 
 /**
- * The highlight of the ring under the man who came away with the puck from a battle (0..1): on for HIGHLIGHT_SECONDS
- * after a board battle or net-front battle ends while a man has the puck, fading over its last 0.25 s; 0 otherwise.
+ * Whether `carrierId` came away with the puck from the battle that ended with `e`: the man the engine gave it to at the
+ * end (`puck: 'toWinner'`), or one of the men in it. Its first two are in its `contestStart`; a supporter who joins a
+ * board battle later is in no event, but the engine sets the same contest cooldown on everyone in it as it ends
+ * (`contestCooldowns`, one entry per man and kind, until the same tick), so a man whose board-battle cooldown runs to
+ * the same tick as one of its first two men's was in it. A net-front battle only while the puck (`puck`, engine x and
+ * z) is within SCRUM_REACH of its spot (the event's place).
  */
-export function battleHighlight(tl: Timeline, time: number, carrierId: string | null): number {
+export function cameAwayWith(tl: Timeline, e: GameEventOf<'contestEnd'>, carrierId: string, state: Readonly<GameState>, puck: { x: number; z: number }): boolean {
+  if (e.detail.kind === 'netFront' && (puck.x - e.pos.x) ** 2 + (puck.z - e.pos.y) ** 2 > SCRUM_REACH * SCRUM_REACH) return false;
+  if (e.detail.puck === 'toWinner' && e.detail.winnerId === carrierId) return true;
+  const first = tl.contest(e.detail.contestId)?.start.detail.participants ?? [];
+  if (first.includes(carrierId)) return true;
+  if (e.detail.kind !== 'boardBattle') return false;
+  let until = -1, mine = -2;
+  for (const c of state.contestCooldowns) {
+    if (c.kind !== 'boardBattle' || c.untilTick <= e.tick) continue;
+    if (first.includes(c.id)) until = Math.max(until, c.untilTick);
+    if (c.id === carrierId) mine = c.untilTick;
+  }
+  return mine === until;
+}
+
+/**
+ * The highlight of the ring under the man who came away with the puck from a battle (0..1): on for HIGHLIGHT_SECONDS
+ * after a board battle or net-front battle ends while a man who was in it has the puck (cameAwayWith; the latest such
+ * battle), fading over its last 0.25 s; 0 otherwise. `state` is the frame's engine state and `puck` the engine's puck
+ * (x, z).
+ */
+export function battleHighlight(tl: Timeline, time: number, carrierId: string | null, state: Readonly<GameState>, puck: { x: number; z: number }): number {
   if (carrierId === null) return 0;
   const tick = Math.floor(time), from = tick - Math.ceil(HIGHLIGHT_SECONDS / DT) - 1;
-  // The latest board battle or net-front battle to end in that time (other contests may have ended since).
+  // The latest board battle or net-front battle to end in that time that he came away from (other contests may have
+  // ended since).
   let e = tl.last('contestEnd', tick, tick - from);
-  while (e && e.detail.kind !== 'boardBattle' && e.detail.kind !== 'netFront') e = e.tick > from ? tl.last('contestEnd', e.tick - 1, e.tick - 1 - from) : undefined;
+  while (e && ((e.detail.kind !== 'boardBattle' && e.detail.kind !== 'netFront') || !cameAwayWith(tl, e, carrierId, state, puck))) {
+    e = e.tick > from ? tl.last('contestEnd', e.tick - 1, e.tick - 1 - from) : undefined;
+  }
   if (!e) return 0;
   const t = (time - e.tick) * DT;
   if (t < 0 || t >= HIGHLIGHT_SECONDS) return 0;

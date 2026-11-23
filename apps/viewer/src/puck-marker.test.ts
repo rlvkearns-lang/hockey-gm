@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { RINK, type GameEventOf } from '@hockey/engine';
+import { DT, RINK, type GameEventOf } from '@hockey/engine';
 import { cameraTarget } from './cameras';
 import { carryPoint } from './carry';
 import { isCut, probeOf } from './cuts';
-import { MARKER_PX, markerRadius } from './puck-marker';
+import { battleHighlight, cameAwayWith, HIGHLIGHT_SECONDS, MARKER_PX, markerRadius, SCRUM_REACH } from './puck-marker';
+import { createCursor } from './playback';
 import { createGameScene, seekScene } from './scene';
-import { sharedPlayback } from './test/game';
+import { recorded, sharedPlayback, testSetup } from './test/game';
+import { buildTimeline } from './timeline';
 
 /**
  * The puck marker, the puck held in a glove and the puck in the net after a goal (Task 6; split from scene-puck.test.ts
@@ -16,6 +18,8 @@ describe('the puck marker and the held puck', () => {
   it('in the scene: a thin ring on the ice under the puck that bodies cover; On shows it, Off never; the man who comes away with the puck from a battle has it under his blade, highlighted', () => {
     const { setup, pb: cursor } = sharedPlayback(5);
     const sc = createGameScene(setup, { events: cursor.events });
+    const tl = buildTimeline(cursor.events);
+    let strangers = 0;
     const ring = sc.root.getObjectByName('puckMarker') as THREE.Mesh;
     const mat = ring.material as THREE.MeshBasicMaterial;
     expect(mat.depthTest).toBe(true); expect(mat.depthWrite).toBe(false); expect(mat.transparent).toBe(true);
@@ -35,11 +39,14 @@ describe('the puck marker and the held puck', () => {
       expect(ring.visible).toBe(false);
       sc.updateMarker(cam, 'on', 1 / 30);
       expect(ring.visible).toBe(true);
-      // Half a second after the end: the carrier (if the engine gave someone the puck) has the ring under his blade.
+      // Half a second after the end: the carrier, if he was in the battle (the final review's I2), has the ring under his
+      // blade; anyone else none.
       seekScene(cursor, sc, e.tick + 15);
       const carrier = cursor.frame().next.carrierId;
       sc.updateMarker(cam, 'auto', 0, true);
       if (!carrier) { expect(sc.marker().highlight, `battle ${e.detail.contestId} at ${e.tick}: nobody has it`).toBe(0); continue; }
+      const st = cursor.frame().next;
+      if (!cameAwayWith(tl, e, carrier, st, { x: st.puck.pos.x, z: st.puck.pos.y })) { expect(sc.marker().highlight, `battle ${e.detail.contestId}: ${carrier} was not in it`).toBe(0); strangers++; continue; }
       expect(sc.marker().highlight).toBe(1);
       expect(ring.visible).toBe(true);
       const fig = sc.figure(carrier)!, cp = carryPoint(fig.pose!), right = [...setup.home.players, ...setup.away.players].find((d) => d.id === carrier)!.shoots === 'R';
@@ -84,6 +91,7 @@ describe('the puck marker and the held puck', () => {
       expect(ring.scale.x).toBeCloseTo(markerRadius(d, 30, 720), 9);
     }
     expect(highlighted).toBeGreaterThan(3);
+    expect(strangers).toBeLessThan(highlighted);
     sc.dispose();
   });
 
@@ -148,6 +156,72 @@ describe('the puck marker and the held puck', () => {
       sc.dispose();
     }
     expect(checked).toBeGreaterThan(9 * 25);
+  });
+
+  it('the highlight never lights under a man who was in no battle: a net-front battle ends while a defenceman carries it at the point, and none does', () => {
+    const rec = recorded(5), setup = testSetup(5), pb = createCursor(setup, rec), tl = buildTimeline(rec.events);
+    const pos = new Map([...setup.home.players, ...setup.away.players].map((d) => [d.id, d.position]));
+    const sc = createGameScene(setup, { timeline: tl });
+    let found = 0;
+    for (const e of rec.events) {
+      if (found >= 3) break;
+      if (e.type !== 'contestEnd' || e.detail.kind !== 'netFront') continue;
+      // A moment in the highlight's second when a defenceman who was not in it has the puck at the point (well away
+      // from the net), and was in no other battle that ended in the last second (he may have come away from that one).
+      let t = -1;
+      for (let k = e.tick + 1; k < e.tick + 27 && t < 0; k += 2) {
+        pb.seek(k);
+        const st = pb.frame().next, c = st.carrierId;
+        if (!c || !['LD', 'RD'].includes(pos.get(c)!) || tl.contest(e.detail.contestId)!.start.detail.participants.includes(c)) continue;
+        if (Math.hypot(st.puck.pos.x - e.pos.x, st.puck.pos.y - e.pos.y) < SCRUM_REACH + 3) continue;
+        if (rec.events.some((x) => { const end = x.type === 'contestStart' && x.detail.participants.includes(c) ? tl.contest(x.detail.contestId)?.end?.tick : undefined; return end !== undefined && end > k - 31 && end <= k; })) continue;
+        t = k;
+      }
+      if (t < 0) continue;
+      pb.seek(t);
+      const st = pb.frame().next, c = st.carrierId!;
+      expect(battleHighlight(tl, t, c, st, { x: st.puck.pos.x, z: st.puck.pos.y }), `net-front ${e.detail.contestId} at ${e.tick}`).toBe(0);
+      seekScene(pb, sc, t);
+      sc.updateMarker({ x: 0, y: 20, z: 30 }, 'auto', 0, true);
+      expect(sc.marker().highlight).toBe(0);
+      found++;
+    }
+    expect(found).toBeGreaterThan(0);
+    sc.dispose();
+  });
+
+  it('over a period it lights only under a man who was in the battle (its participants and supporters as the engine has them, or the man it gave the puck to), a net-front one only by its spot', () => {
+    const rec = recorded(5), pb = createCursor(testSetup(5), rec), tl = buildTimeline(rec.events);
+    const end = rec.events.find((e) => e.type === 'periodEnd')!.tick;
+    // Everyone the engine ever has in each board or net-front battle (its participants, supporters joining later).
+    const inIt = new Map<number, Set<string>>();
+    const counts = { lit: 0, ends: 0, litEnds: new Set<number>(), byWinner: 0, byOther: 0, boardEnds: 0, netEnds: 0, litBoard: new Set<number>(), litNet: new Set<number>() };
+    for (let t = 1; t <= end; t++) {
+      pb.seek(t);
+      const st = pb.frame().prev;
+      for (const c of st.contests) {
+        if (c.kind !== 'boardBattle' && c.kind !== 'netFront') continue;
+        const set = inIt.get(c.id) ?? new Set<string>();
+        for (const id of c.participants) set.add(id);
+        inIt.set(c.id, set);
+      }
+      if (st.carrierId === null) continue;
+      const h = battleHighlight(tl, t, st.carrierId, st, { x: st.puck.pos.x, z: st.puck.pos.y });
+      if (h === 0) continue;
+      counts.lit++;
+      // Which battle: the latest board or net-front battle he was in that ended within the highlight's second.
+      let e = tl.last('contestEnd', t, Math.ceil(HIGHLIGHT_SECONDS / DT) + 1);
+      while (e && !((e.detail.kind === 'boardBattle' || e.detail.kind === 'netFront') && (inIt.get(e.detail.contestId)?.has(st.carrierId) || (e.detail.puck === 'toWinner' && e.detail.winnerId === st.carrierId)))) {
+        e = tl.last('contestEnd', e.tick - 1, e.tick - 1 - (t - Math.ceil(HIGHLIGHT_SECONDS / DT) - 1));
+      }
+      expect(e, `${t}: lit under ${st.carrierId}, who was in no battle that ended in the last second`).toBeDefined();
+      if (e!.detail.kind === 'netFront') { expect(Math.hypot(st.puck.pos.x - e!.pos.x, st.puck.pos.y - e!.pos.y)).toBeLessThanOrEqual(SCRUM_REACH); counts.litNet.add(e!.detail.contestId); }
+      else counts.litBoard.add(e!.detail.contestId);
+      if (e!.detail.winnerId === st.carrierId) counts.byWinner++; else counts.byOther++;
+    }
+    for (const e of rec.events) if (e.type === 'contestEnd' && e.tick <= end) { if (e.detail.kind === 'boardBattle') counts.boardEnds++; if (e.detail.kind === 'netFront') counts.netEnds++; }
+    console.log(JSON.stringify({ litFrames: counts.lit, boardEnds: counts.boardEnds, litBoard: counts.litBoard.size, netEnds: counts.netEnds, litNet: counts.litNet.size, underWinner: counts.byWinner, underOther: counts.byOther }));
+    expect(counts.litBoard.size).toBeGreaterThan(5);
   });
 });
 

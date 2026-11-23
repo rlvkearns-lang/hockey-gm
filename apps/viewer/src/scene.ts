@@ -514,7 +514,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     markerCam.x = cam.x; markerCam.y = cam.y; markerCam.z = cam.z;
     markerPuck.x = drawn.x; markerPuck.y = drawn.y; markerPuck.z = drawn.z;
     markerState = stepMarker(markerState, { mode, cam: markerCam, puck: markerPuck, skaters: markerSkaters, bodies: markerBodies, contests: ctx.contests }, dt, snap);
-    markerHighlight = mode === 'off' || ctx.state === null ? 0 : battleHighlight(timeline, ctx.tick + ctx.alpha, ctx.puck.carrierId);
+    markerHighlight = mode === 'off' || ctx.state === null ? 0 : battleHighlight(timeline, ctx.tick + ctx.alpha, ctx.puck.carrierId, ctx.state, ctx.puck.engine);
     const k = Math.max(markerState.k, markerHighlight);
     marker.visible = k > 0.002;
     if (!marker.visible) return;
