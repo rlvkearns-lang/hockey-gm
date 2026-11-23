@@ -12,7 +12,9 @@ import { OZONE_SPOTS, ozoneSpotPos } from '../src/team-play';
 import { decideCarrier, type Decision } from '../src/brain';
 import { executeDump, executePass, releasePuck, tryIntercept } from '../src/actions';
 import { resolveBodies } from '../src/bodies';
-import { contestTick } from '../src/contests/core';
+import { contestTick, startContest } from '../src/contests/core';
+import { hitContest } from '../src/contests/hit';
+import { assignJobs } from '../src/team-play';
 import { createGame, type Game } from '../src/game';
 import { tryBlock } from '../src/goalie';
 import { movementOf, stepSkater } from '../src/skating';
@@ -591,13 +593,13 @@ function duelStep(h: Duel): void {
   } else stepPuck(s.puck, DT);
 }
 
-/** Steps the harness until its first contest has started and ended (at most 6 s). */
+/** Steps the harness until its first contest (already running, or the first to start) has ended (at most 6 s). */
 function duelToEnd(h: Duel): void {
-  let started = false;
+  let first: ContestState | null = h.st.contests[0] ?? null;
   for (let i = 0; i < 180; i++) {
     duelStep(h);
-    if (h.st.contests.length > 0) started = true;
-    else if (started) return;
+    first ??= h.st.contests[0] ?? null;
+    if (first !== null && !h.st.contests.includes(first)) return;
   }
   throw new Error('no contest started and finished within 6 s');
 }
@@ -644,12 +646,19 @@ export function pokeReleased(): { contests: number; takeaways: number; contestId
   };
 }
 
-/** `hitter` with a sure urge to hit (tendencies.hit 1, aggression 100; neither is part of the hit's edge). */
-const keen = (hitter: PlayerDef): PlayerDef => ({ ...hitter, tendencies: { ...hitter.tendencies, hit: 1 }, attrs: { ...hitter.attrs, aggression: 100 } });
+/**
+ * `hitter` (away C) skating at `closing` m/s from 1.5 m in front of the still carrier `tgt`, with the hit already
+ * started on him (startContest, not the random trigger).
+ */
+function hitDuelStart(hitter: PlayerDef, tgt: PlayerDef, closing: number): Duel {
+  const h = duel(hitter, tgt, -0.6 + 1.5, -closing);
+  startContest(h.st, h.ds, h.rng, hitContest, ['away-C', 'home-C'], h.events);
+  return h;
+}
 
-/** `hitter` skates at `closing` m/s into the still carrier `target` from 1.5 m in front of him; the harness after the hit. */
+/** The hit of hitDuelStart played out; the harness after it. */
 function hitDuel(hitter: PlayerDef, tgt: PlayerDef, closing: number): Duel {
-  const h = duel(keen(hitter), tgt, -0.6 + 1.5, -closing);
+  const h = hitDuelStart(hitter, tgt, closing);
   duelToEnd(h);
   return h;
 }
@@ -662,7 +671,7 @@ export function runHit(hitter: PlayerDef, tgt: PlayerDef, closing: number): bool
 /** A big hitter's check on a smaller carrier, stopped on the tick it lands (seeds tried in turn). */
 export function hitThatLands(): GameState {
   for (let i = 0; i < 50; i++) {
-    const h = duel(keen(def({ bodyChecking: 88, strength: 90, weightKg: 104 })), def({ balance: 62, strength: 60, weightKg: 80 }), 0.9, -6);
+    const h = hitDuelStart(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), def({ balance: 62, strength: 60, weightKg: 80 }), 6);
     for (let k = 0; k < 90; k++) {
       duelStep(h);
       if (h.events.some((e) => e.type === 'hit' && e.detail === 'landed')) return h.st;
@@ -712,4 +721,39 @@ export function interceptShare(defender: PlayerDef, n: number): number {
     }
   }
   return k / n;
+}
+
+/** A poke check whose checker is moved out of stick reach (3.4 m away) just before the reach ends, played out. */
+export function pokeOutOfReach(): { c: ContestState; events: GameEvent[]; carrierId: string | null; contestIds: number } {
+  const c = startPoke(), h = contestDuel.get(c)!;
+  while (c.stageT < 0.2) duelStep(h);
+  const checker = skater(h.st, 'away', 'C');
+  checker.pos = { x: 2.8, y: 0 }; checker.vel = { x: 0, y: 0 };
+  for (let i = 0; i < 30 && h.st.contests.includes(c); i++) duelStep(h);
+  return { c, events: h.events, carrierId: h.st.carrierId, contestIds: h.st.skaters.filter((k) => k.contestId !== null).length };
+}
+
+/**
+ * Home RW passes to home C; away LW, 2.9 m off and closing at 3 m/s, starts a hit on him (startContest). Then three
+ * live ticks of team play, contests and skating: the RW's `target` after each assignJobs, and the hit's stage then.
+ */
+export function targetsDuringHitClose(): { targets: { x: number; y: number }[]; stages: string[]; freeIds: string[][] } {
+  const state = stateWith({ carrier: 'home', puckX: 0 });
+  const rw = skater(state, 'home', 'RW'), lw = skater(state, 'away', 'LW');
+  lw.pos = { x: rw.pos.x + 2.9, y: rw.pos.y }; lw.vel = { x: -3, y: 0 }; lw.facing = Math.PI;
+  const rng = createRng(7);
+  executePass(state, rw.id, 'home-C', defs, rng);
+  const c = startContest(state, defs, rng, hitContest, [lw.id, rw.id]);
+  const out = { targets: [] as { x: number; y: number }[], stages: [] as string[], freeIds: [] as string[][] };
+  for (let i = 0; i < 3; i++) {
+    state.tick++;
+    assignJobs(state, defs, tactics);
+    out.targets.push({ ...rw.target });
+    contestTick(state, defs, rng, DT);
+    out.stages.push(c.stage);
+    out.freeIds.push(c.freeIds.slice());
+    for (const s of state.skaters) if (s.onIce) stepSkater(s, harnessMoves.get(s.id)!, DT);
+    stepPuck(state.puck, DT);
+  }
+  return out;
 }

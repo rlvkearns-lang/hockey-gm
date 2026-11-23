@@ -60,6 +60,16 @@ export function phaseFor(state: GameState, side: Side): TeamPhase {
   return phaseOf(carrier.side, state.puck.pos.x, side, state.attackDir[side]);
 }
 
+/**
+ * True when `s` is in a contest that steers him (he gets no job, his carry and protect decisions are ignored, and he is
+ * no pass target and picks nothing up); false when he is in none or is one of its `freeIds`.
+ */
+export function steeredByContest(state: GameState, s: SkaterState): boolean {
+  if (s.contestId === null) return false;
+  for (const c of state.contests) if (c.id === s.contestId) return !c.freeIds.includes(s.id);
+  return true;
+}
+
 /** Distance (m) from `s` to the nearest on-ice opponent who is not down; Infinity if none. */
 export function nearestOpponentDist(state: GameState, s: SkaterState): number {
   let best = Infinity;
@@ -235,8 +245,8 @@ function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boole
 
 /**
  * Sets every on-ice skater's target, faceTarget and speedCap from his team's phase. The carrier's target and
- * speedCap belong to the brain (brainTick); here he only stops facing anything but his own way. Skaters in a
- * contest are left alone. With the puck carried, the nearest defender pressures the carrier; with it loose, the
+ * speedCap belong to the brain (brainTick); here he only stops facing anything but his own way. Skaters steered by
+ * a contest are left alone (its `freeIds` still get jobs). With the puck carried, the nearest defender pressures the carrier; with it loose, the
  * nearest skater of each side chases it (a pass's intended receiver chases for his side) and the rest keep the shape
  * of the side that last had the puck. Under a delayed offside the offending team neither presses nor chases: all of
  * it skates out of the zone.
@@ -250,7 +260,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   let awayChaser: SkaterState | null = null, awayD = Infinity;
   const tagUp = state.delayedOffside?.side ?? null;
   for (const s of state.skaters) {
-    if (!s.onIce || s.leaving || s.downT > 0 || s.contestId !== null || s === carrier || s.side === tagUp) continue;
+    if (!s.onIce || s.leaving || s.downT > 0 || steeredByContest(state, s) || s === carrier || s.side === tagUp) continue;
     if (carrier) {
       if (s.side === carrier.side) continue;
       const d = dist(s.pos, carrier.pos);
@@ -265,7 +275,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   if (pass) {
     for (const s of state.skaters) {
       if (s.id !== pass.toId) continue;
-      if (s.onIce && !s.leaving && s.downT === 0 && s.contestId === null && s.side !== tagUp) { if (s.side === 'home') homeChaser = s; else awayChaser = s; }
+      if (s.onIce && !s.leaving && s.downT === 0 && !steeredByContest(state, s) && s.side !== tagUp) { if (s.side === 'home') homeChaser = s; else awayChaser = s; }
       break;
     }
   }
@@ -273,7 +283,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   const awayPhase = phaseOf(shapeSide, puck.x, 'away', state.attackDir.away);
 
   for (const s of state.skaters) {
-    if (!s.onIce || s.leaving || s.contestId !== null) continue;
+    if (!s.onIce || s.leaving || steeredByContest(state, s)) continue;
     if (s === carrier) { s.faceTarget = null; continue; }
     const d = defs.get(s.id)!;
     const dir = state.attackDir[s.side];

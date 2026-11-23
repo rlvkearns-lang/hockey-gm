@@ -12,7 +12,7 @@ import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './ri
 import { createRng } from './rng';
 import { movementOf, stepSkater, type Movement } from './skating';
 import { buildResult } from './stats';
-import { assignJobs } from './team-play';
+import { assignJobs, steeredByContest } from './team-play';
 import type {
   GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
 } from './types';
@@ -181,8 +181,8 @@ export function createGame(setup: GameSetup): Game {
   }
 
   /**
-   * A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater (not down, not leaving, in no
-   * contest, not blocked) within PICKUP_RADIUS. A pass's intended receiver takes it at any speed if it came within
+   * A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater (not down, not leaving, not steered
+   * by a contest, not blocked) within PICKUP_RADIUS. A pass's intended receiver takes it at any speed if it came within
    * PICKUP_RADIUS of him this tick (from `prev` to now).
    */
   function tryPickup(skaters: SkaterState[], prev: { x: number; y: number }): void {
@@ -194,14 +194,14 @@ export function createGame(setup: GameSetup): Game {
     if (pass !== null) {
       for (const s of skaters) {
         if (s.id !== pass.toId) continue;
-        if (s.downT === 0 && !s.leaving && s.contestId === null && !blocked.includes(s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
+        if (s.downT === 0 && !s.leaving && !steeredByContest(state, s) && !blocked.includes(s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
         break;
       }
     }
     if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
       let bestD = PICKUP_RADIUS;
       for (const s of skaters) {
-        if (s.downT > 0 || s.leaving || s.contestId !== null || blocked.includes(s.id)) continue;
+        if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id)) continue;
         const d = dist(s.pos, p.pos);
         if (d <= bestD) { bestD = d; best = s; }
       }

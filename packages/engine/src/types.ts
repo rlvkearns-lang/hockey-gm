@@ -113,7 +113,9 @@ export type ShotInFlight = {
 /**
  * A contest under way (see contests/core.ts), what a viewer animates from. `stage` and `stageT` (seconds into that
  * stage) are kept current every tick; `leader` is whoever is ahead (null while undecided); `participants` are the
- * skaters in it now (each has `contestId` = `id`); `spot` is where it happens. `data` is the kind's own working numbers.
+ * skaters in it now (each has `contestId` = `id`); `spot` is where it happens. `freeIds` are the participants who keep
+ * their normal steering (team-play job, carrier decisions, may receive a pass) while in it; the contest steers the
+ * rest. `data` is the kind's own working numbers.
  */
 export type ContestState = {
   id: number;
@@ -123,6 +125,7 @@ export type ContestState = {
   participants: string[];
   leader: string | null;
   spot: Vec2;
+  freeIds: string[];
   data: Record<string, number>;
 };
 

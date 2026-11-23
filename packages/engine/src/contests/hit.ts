@@ -14,7 +14,7 @@ const TRIGGER_RANGE = 3;
 const MIN_CLOSING = 2;
 /** ...who has the puck or let it go less than this long ago (s)... */
 const RELEASE_WINDOW_SECONDS = 0.6;
-/** ...and makes up his mind (one draw against tendencies.hit * aggression / 100) at most once per this many seconds. */
+/** ...and makes up his mind (one draw against hitAttemptChance) at most once per this many seconds. */
 const DECIDE_SECONDS = 2;
 /** Stage lengths (s): no contact within CLOSE_MAX_SECONDS is a miss. */
 const CLOSE_MAX_SECONDS = 1.2;
@@ -72,6 +72,11 @@ export function hitChance(
   return winProb(edge);
 }
 
+/** Chance a skater goes for a hit when one is on: tendencies.hit * aggression / 100, within [0.03, 0.97]. */
+export function hitAttemptChance(d: PlayerDef): number {
+  return Math.max(0.03, Math.min(0.97, (d.tendencies.hit * d.attrs.aggression) / 100));
+}
+
 /** `t` is an opponent of `h` he could hit now: free, hittable, within TRIGGER_RANGE and being closed on fast enough. */
 function inReach(state: GameState, h: SkaterState, t: SkaterState | null): t is SkaterState {
   return t !== null && t.side !== h.side && isFree(t) && isHittable(state, t)
@@ -90,7 +95,8 @@ function steerHitter(h: SkaterState, t: SkaterState): void {
 
 /**
  * Body check, stages `close` (until contact, at most CLOSE_MAX_SECONDS), `impact` (IMPACT_SECONDS; `leader` is the
- * favourite) and `recover` (the hitter alone; `leader` is who won). Participants: the hitter, then the target.
+ * favourite) and `recover` (the hitter alone; `leader` is who won). Participants: the hitter, then the target, who is
+ * in `freeIds` (keeps playing) during `close` and steered by the hit from contact on.
  * `data.p` is the hitter's chance once contact is made.
  */
 export const hitContest: Contest = {
@@ -104,8 +110,7 @@ export const hitContest: Contest = {
     const t = inReach(state, h, carrier) ? carrier : inReach(state, h, released) ? released : null;
     if (t === null) return null;
     setCooldown(state, h.id, KIND, DECIDE_SECONDS);
-    const d = ctx.defs.get(h.id)!;
-    return ctx.rng.next() < (d.tendencies.hit * d.attrs.aggression) / 100 ? [h.id, t.id] : null;
+    return ctx.rng.next() < hitAttemptChance(ctx.defs.get(h.id)!) ? [h.id, t.id] : null;
   },
 
   start(ctx, participants) {
@@ -114,7 +119,7 @@ export const hitContest: Contest = {
     steerHitter(h, t);
     return {
       id: -1, kind: KIND, stage: 'close', stageT: 0, participants: participants.slice(), leader: null,
-      spot: { x: t.pos.x, y: t.pos.y }, data: { p: 0, recover: 0 },
+      spot: { x: t.pos.x, y: t.pos.y }, freeIds: [t.id], data: { p: 0, recover: 0 },
     };
   },
 
@@ -143,6 +148,7 @@ export const hitContest: Contest = {
       c.leader = c.data.p >= 0.5 ? h.id : t.id;
       c.spot.x = (h.pos.x + t.pos.x) / 2;
       c.spot.y = (h.pos.y + t.pos.y) / 2;
+      c.freeIds.length = 0; // from contact on, the hit decides what happens to him
       enterStage(c, 'impact');
       return null;
     }

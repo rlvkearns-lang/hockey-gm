@@ -26,7 +26,8 @@ export type ContestCtx = {
 export type ContestResult = { winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged'; looseVel?: Vec2 };
 
 /**
- * One kind of staged contest. `trigger` is asked, for each free skater (on the ice, not leaving, not down, in no
+ * One kind of staged contest. Its state's `freeIds` name the participants who keep their normal steering; the
+ * contest steers only the others. `trigger` is asked, for each free skater (on the ice, not leaving, not down, in no
  * contest) in turn, whether he starts one of this kind now, and returns its participants (him first) or null.
  * `start` builds its state and steers its players; `update` runs once per live tick after the core has added `dt` to
  * `stageT`: it steers its players (target, faceTarget, speedCap), moves the stages on (setting `stageT` to 0 at each
@@ -130,6 +131,8 @@ export function enterStage(c: ContestState, stage: string): void {
 export function dropParticipant(state: GameState, c: ContestState, id: string): void {
   const i = c.participants.indexOf(id);
   if (i >= 0) c.participants.splice(i, 1);
+  const f = c.freeIds.indexOf(id);
+  if (f >= 0) c.freeIds.splice(f, 1);
   const s = skaterById(state, id);
   if (s.contestId === c.id) s.contestId = null;
 }
@@ -202,19 +205,37 @@ export function contestTick(
     state.contests.splice(i, 1);
   }
 
-  let n = 0;
   for (const s of state.skaters) {
     if (!isFree(s)) continue;
     for (const k of contestKinds()) {
       const ps = k.trigger(ctx, s);
       if (ps === null) continue;
-      const c = k.start(ctx, ps);
-      c.id = state.tick * ID_STRIDE + n++;
-      for (const id of c.participants) skaterById(state, id).contestId = c.id;
-      state.contests.push(c);
+      begin(ctx, k, ps);
       break;
     }
   }
+}
+
+/** Starts a contest of kind `k` with `participants`: gives it the next id of this tick and marks its players. */
+function begin(ctx: ContestCtx, k: Contest, participants: string[]): ContestState {
+  const state = ctx.state;
+  let n = 0;
+  for (const c of state.contests) if (Math.floor(c.id / ID_STRIDE) === state.tick) n++;
+  const c = k.start(ctx, participants);
+  c.id = state.tick * ID_STRIDE + n;
+  for (const id of c.participants) skaterById(state, id).contestId = c.id;
+  state.contests.push(c);
+  return c;
+}
+
+/**
+ * Starts a contest of kind `k` with `participants` (all free) now, without its trigger: for set pieces and tests.
+ * contestTick advances it from the next tick.
+ */
+export function startContest(
+  state: GameState, defs: Map<string, PlayerDef>, rng: Rng, k: Contest, participants: string[], out: GameEvent[] = [], chemistry: Chemistry = [],
+): ContestState {
+  return begin({ state, defs, rng, emit: (e) => { out.push(e); }, chemistry }, k, participants);
 }
 
 /** Every contest ends at once with no result and its players are free (whistles, period ends). */

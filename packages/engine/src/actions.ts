@@ -1,7 +1,7 @@
 import { DT } from './constants';
 import { RINK } from './rink';
 import type { Rng } from './rng';
-import { nearestOpponentDist } from './team-play';
+import { nearestOpponentDist, steeredByContest } from './team-play';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
 import { hypot2, segDistXY, type Vec2 } from './vec';
 
@@ -189,7 +189,7 @@ export function interceptChance(d: PlayerDef, speed: number): number {
 
 /**
  * A pass still on its way (state.pendingPass) at INTERCEPT_SPEED[0] m/s or faster: each opposing skater (on the ice,
- * not leaving, not down, not in a contest) whose body came within INTERCEPT_RANGE of the puck's path this tick (from
+ * not leaving, not down, not steered by a contest) whose body came within INTERCEPT_RANGE of the puck's path this tick (from
  * `prev` to its position now) gets one try. On success the pass is over and a `takeaway` is returned: 60% he takes it
  * (`taker`, now the carrier; the caller puts the puck on his stick), 40% he deflects it loose (`taker` null).
  */
@@ -203,7 +203,7 @@ export function tryIntercept(
   if (speed < INTERCEPT_SPEED[0] || p.z > 0) return null;
   const from = skaterById(state, pass.fromId);
   for (const s of state.skaters) {
-    if (!s.onIce || s.leaving || s.downT > 0 || s.contestId !== null || s.side === from.side || pass.tried.includes(s.id)) continue;
+    if (!s.onIce || s.leaving || s.downT > 0 || steeredByContest(state, s) || s.side === from.side || pass.tried.includes(s.id)) continue;
     if (segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) > INTERCEPT_RANGE) continue;
     pass.tried.push(s.id);
     if (!rng.chance(interceptChance(defs.get(s.id)!, speed))) continue;

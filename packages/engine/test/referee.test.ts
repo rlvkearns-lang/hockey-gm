@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, simulateGame } from '../src/game';
 import { assignJobs } from '../src/team-play';
-import { dropPuck } from '../src/faceoff';
+import { drawChance, dropPuck } from '../src/faceoff';
 import { createRng } from '../src/rng';
 import { RINK } from '../src/rink';
 import {
@@ -67,8 +67,11 @@ describe('referee', () => {
       const ds = new Map(defs); ds.set('home-C', def({ id: 'home-C', position: 'C', faceoffs: 95 })); ds.set('away-C', def({ id: 'away-C', position: 'C', faceoffs: 45 }));
       if (dropPuck(st, ds, createRng(seed)).side === 'home') wins++;
     }
-    // A 50-point edge: winProb(50) is about 0.89, under the parity cap of 0.9 (the stand-in draw before Task 10 capped at 0.7).
-    expect(wins / 2000).toBeGreaterThan(0.58); expect(wins / 2000).toBeLessThan(0.9);
+    // A 50-point edge: winProb(50) is about 0.89, just under the parity cap; 0.92 allows sampling noise over 2,000 draws.
+    expect(wins / 2000).toBeGreaterThan(0.58); expect(wins / 2000).toBeLessThanOrEqual(0.92);
+    // The rule itself, without noise: the draw chance the faceoff code computes for this matchup is at most the 0.9 cap.
+    const ds = new Map(defs); ds.set('home-C', def({ id: 'home-C', position: 'C', faceoffs: 95 })); ds.set('away-C', def({ id: 'away-C', position: 'C', faceoffs: 45 }));
+    expect(drawChance(stateWith({ carrier: null, puckX: 0 }), ds)).toBeLessThanOrEqual(0.9);
   });
   it('the draw winner has possession and the next drop clears noChange', () => {
     const g = createGame(setup(2));

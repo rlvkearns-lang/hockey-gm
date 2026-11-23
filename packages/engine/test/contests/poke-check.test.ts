@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DT } from '../../src/constants';
-import { def, pokeReleased, runPoke, share, startPoke, stepsUntilDone } from '../helpers';
+import { def, pokeOutOfReach, pokeReleased, runPoke, share, startPoke, stepsUntilDone } from '../helpers';
 
 describe('poke checks', () => {
   it('the better stick wins more poke checks, not all', () => {
@@ -12,5 +12,10 @@ describe('poke checks', () => {
   it('releasing the puck before the stick gets there ends it with no result', () => {
     const r = pokeReleased();
     expect(r.contests).toBe(0); expect(r.takeaways).toBe(0); expect(r.contestIds).toBe(0);
+  });
+  it('a checker out of stick reach when the reach ends gets no result, and nothing is decided', () => {
+    const r = pokeOutOfReach();
+    expect(r.c.stage).toBe('reach'); expect(r.c.leader).toBeNull();
+    expect(r.events).toEqual([]); expect(r.carrierId).toBe('home-C'); expect(r.contestIds).toBe(0);
   });
 });

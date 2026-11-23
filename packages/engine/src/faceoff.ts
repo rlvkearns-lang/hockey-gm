@@ -119,19 +119,23 @@ export function snapToLineup(state: GameState): void {
 const onIceIn = (state: GameState, side: Side, slots: Position[]): SkaterState[] =>
   state.skaters.filter((s) => s.onIce && s.side === side && s.slot !== null && slots.includes(s.slot));
 
+/** Chance that home wins the draw: winProb of the difference between the centres' effective faceoffs ratings. */
+export function drawChance(state: GameState, defs: Map<string, PlayerDef>): number {
+  const rating = (side: Side): number => {
+    const c = onIceIn(state, side, ['C'])[0];
+    const d = c ? defs.get(c.id) : undefined;
+    return c && d ? effective(d, c, { faceoffs: 1 }) : NO_CENTRE_RATING;
+  };
+  return winProb(rating('home') - rating('away'));
+}
+
 /**
  * Drop the puck: one side wins the draw (home with winProb of the difference between the centres' effective faceoffs
  * ratings) and the puck slides back toward one of its defencemen; the winner has possession. Sets phase live and lifts
  * any `noChange`. Returns the faceoff event (side = winner, playerId = winning centre, otherId = losing centre).
  */
 export function dropPuck(state: GameState, defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
-  const rating = (side: Side): number => {
-    const c = onIceIn(state, side, ['C'])[0];
-    const d = c ? defs.get(c.id) : undefined;
-    return c && d ? effective(d, c, { faceoffs: 1 }) : NO_CENTRE_RATING;
-  };
-  const pHome = winProb(rating('home') - rating('away'));
-  const winner: Side = rng.chance(pHome) ? 'home' : 'away';
+  const winner: Side = rng.chance(drawChance(state, defs)) ? 'home' : 'away';
   const loser: Side = winner === 'home' ? 'away' : 'home';
   const winC = onIceIn(state, winner, ['C'])[0] ?? null;
   const loseC = onIceIn(state, loser, ['C'])[0] ?? null;

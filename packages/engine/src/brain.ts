@@ -2,6 +2,7 @@ import { executeDump, executePass, executeShot, goalieShade, pressureOn } from '
 import { composite } from './attributes';
 import { BRAIN_INTERVAL_TICKS } from './constants';
 import { RINK, zoneOf } from './rink';
+import { steeredByContest } from './team-play';
 import { bodyRadius } from './skating';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, SkaterState } from './types';
@@ -100,7 +101,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   for (const t of state.skaters) {
     if (!t.onIce || t.side !== s.side || t === s || t.downT > 0) continue;
     if (outside && t.pos.x * dir > RINK.blueLineX + bodyRadius(defs.get(t.id)!.weightKg)) { mateOffside = true; continue; }
-    if (t.leaving) continue; // still counts for offside, but is no pass target
+    if (t.leaving || steeredByContest(state, t)) continue; // still counts for offside, but is no pass target
     const l = dist(p, t.pos);
     if (l < PASS_RANGE[0] || l > PASS_RANGE[1]) continue;
     let laneMin = Infinity, recvMin = Infinity;
@@ -170,14 +171,14 @@ function carryTarget(rx: number, ly: number, zone: 'D' | 'N' | 'O', aheadLat: nu
 
 /**
  * Runs the carrier's decision every BRAIN_INTERVAL_TICKS and carries it out. Returns the event of a pass or dump (a
- * shot's event comes when it ends). A carrier in a contest (being checked) may still pass, shoot or dump, but his
- * skating belongs to the contest, so a carry or protect decision changes nothing.
+ * shot's event comes when it ends). A carrier steered by a contest (being hit, from impact on) may still pass, shoot
+ * or dump, but his skating belongs to the contest, so a carry or protect decision changes nothing.
  */
 export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng): GameEvent | null {
   if (state.carrierId === null || state.tick % BRAIN_INTERVAL_TICKS !== 0) return null;
   const s = skaterById(state, state.carrierId);
   if (!s || !s.onIce || s.downT > 0) return null;
-  const busy = s.contestId !== null;
+  const busy = steeredByContest(state, s);
   const me = defs.get(s.id)!;
   const d = decideCarrier(state, me, defs, rng);
   switch (d.kind) {
