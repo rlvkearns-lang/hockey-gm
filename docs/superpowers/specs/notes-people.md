@@ -73,3 +73,12 @@ Proposed shape **[my call, not yet agreed]**:
 - What the GM learns from following up goes on the player's "what we know" card, and the insider's hit rate becomes visible over time.
 - The GM's own dealings can leak too, and rumours about his players affect them (a player reading that he is on the block).
 - The feed also carries fan reaction and ordinary news, and uses the same text approach as the rest (templates always, optional AI key).
+
+- Owner agreed with the proposed shape above (2026-11-23), and added: the GM can leak information himself, or plant a story, to try to get something moving.
+
+Proposed shape for the GM's own leaks **[my call, not yet agreed]**:
+
+- The GM picks an insider and what to say (true or false): a player is available, another team is interested, contract talks are going well or badly.
+- It can work: a rival GM calls, an agent softens, a market for a player appears.
+- It can backfire: the player it is about finds out and is hurt or angry; the insider or the other party works out who planted it; repeated plants cost the GM trust with insiders, agents, rival GMs and his own room.
+- The chance of being traced depends on the insider, on how many people could have known, and on whether the story turns out false.
