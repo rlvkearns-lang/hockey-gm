@@ -12,3 +12,7 @@ Proposed details **[my call]**:
 
 - The league can switch between the two at any time (for example scheduled in season, commissioner-run at the draft and deadline).
 - A "ready" mark per GM, and the league can advance early when everyone is ready.
+
+## Trades between human GMs (owner, 2026-11-23)
+
+- A per-league setting: no check (the default), commissioner approval, or a league vote where other GMs get a day to object.
