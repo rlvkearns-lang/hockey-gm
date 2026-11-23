@@ -136,7 +136,13 @@ const celebrateLevel = (g: GameEventOf<'goal'>, now: number, delay: number, rise
  * goal whatever the shot's flight.
  */
 const SCORER_AFTER_RELEASE = 23, SCORER_RISE = 10;
-const scorerDelay = (g: GameEventOf<'goal'>): number => (g.detail.releaseTick === null ? 0 : Math.max(0, g.detail.releaseTick + SCORER_AFTER_RELEASE - (g.tick - 1)));
+/** The beaten goalie's deflation starts this long (ticks) after the tick before the goal's, over BEATEN_RISE ticks. */
+const BEATEN_DELAY = 2, BEATEN_RISE = 8;
+function scorerDelay(g: GameEventOf<'goal'>, ctx: AnimContext): number {
+  // His last release before the goal (the shot; or, for a puck that went in off something, whatever he let go last).
+  const rel = g.detail.releaseTick ?? (g.playerId ? ctx.timeline.last('release', g.tick, SCORER_AFTER_RELEASE + 2, g.playerId)?.tick : undefined) ?? null;
+  return rel === null ? 0 : Math.max(0, rel + SCORER_AFTER_RELEASE - (g.tick - 1));
+}
 
 export const celebrateOverlay: Overlay = {
   id: 'celebrate',
@@ -146,28 +152,28 @@ export const celebrateOverlay: Overlay = {
     if (!g || g.side !== sample.side) return 0;
     const scorer = g.playerId === sample.id;
     if (!scorer && !g.onIce?.[sample.side].includes(sample.id)) return 0;
-    const w = (scorer ? celebrateLevel(g, now, scorerDelay(g), SCORER_RISE) : 0.85 * celebrateLevel(g, now, 4)) * (1 - styleShare(anim.gait, 'down'));
+    const w = (scorer ? celebrateLevel(g, now, scorerDelay(g, ctx), SCORER_RISE) : 0.85 * celebrateLevel(g, now, 4)) * (1 - styleShare(anim.gait, 'down'));
     return w > 1e-4 ? w : 0;
   },
   apply(raw, _anim, sample, ctx, dims) {
     const g = goalOf(ctx, ctx.tick + ctx.alpha);
     if (!g) return raw;
     if (g.playerId === sample.id) {
-      // Both arms up, the stick held high, head up, leaning back a little.
-      // The stick held up level with his hand (the shaft runs level from it), out in front on his stick side.
+      // Both arms up over his head with the stick held high across them, head up, leaning back a little.
       return {
-        ...raw, pitch: -0.08, roll: 0, twist: 0, look: 0, lookDown: -0.25, twoHands: 0,
-        top: { x: 0.12, y: dims.torso + 0.42, z: 0.2 }, freeRel: { x: 0.08, y: 0.5, z: -0.12 },
-        bladeUp: raw.hipY + dims.torso + 0.42, blade: { x: 0.9, y: 0, z: -0.5 }, bladeAt: undefined, bladeAtW: 0,
+        ...raw, pitch: -0.08, roll: 0, twist: 0, look: 0, lookDown: -0.25, twoHands: 1,
+        top: { x: 0.1, y: dims.torso + 0.5, z: 0.25 }, freeRel: { x: 0.08, y: 0.5, z: -0.12 },
+        bladeUp: raw.hipY + dims.torso + 0.62, blade: { x: 0.25, y: 0, z: -1.2 }, bladeAt: undefined, bladeAtW: 0,
       };
     }
     // A teammate: stick raised, turned toward the scorer.
     const sc = ctx.skaters.get(g.playerId ?? '');
     const at = sc && sc.onIce ? toBodyFrame(sample, sc.pos) : { x: 1, y: 0, z: 0 };
     const turn = frontTurn(at, 0.9);
+    // Both hands up with the stick held high across them (a little lower than the scorer's).
     return {
-      ...raw, pitch: 0.05, twist: turn, look: turn * 0.6, lookDown: 0, twoHands: 0, top: { x: 0.3, y: dims.torso * 0.85, z: 0.22 },
-      freeRel: { x: 0.1, y: 0.35, z: -0.1 }, bladeUp: (raw.hipY + dims.torso * 0.85) * 0.85, blade: { x: 1.2, y: 0, z: 0.5 }, bladeAt: undefined, bladeAtW: 0,
+      ...raw, pitch: 0.05, twist: turn, look: turn * 0.6, lookDown: -0.1, twoHands: 1, top: { x: 0.15, y: dims.torso + 0.38, z: 0.25 },
+      freeRel: { x: 0.1, y: 0.35, z: -0.1 }, bladeUp: raw.hipY + dims.torso + 0.48, blade: { x: 0.3, y: 0, z: -1.2 }, bladeAt: undefined, bladeAtW: 0,
     };
   },
 };
@@ -178,15 +184,18 @@ export const beatenGoalie: GoalieOverlay = {
   weight(_anim, sample, ctx) {
     const now = ctx.tick + ctx.alpha, g = goalOf(ctx, now);
     if (!g || g.otherId !== sample.id) return 0;
-    const w = celebrateLevel(g, now, 6);
+    // Soon after the puck is in (it crosses his plane a tick or two before the goal's tick).
+    const w = celebrateLevel(g, now, BEATEN_DELAY, BEATEN_RISE);
     return w > 1e-4 ? w : 0;
   },
   apply(raw, _anim, _sample, _ctx, dims) {
+    // Deflated: shoulders and head dropped (looking down), standing up out of his crouch, arms hanging, stick lowered
+    // flat in front of him.
     const k = dims.torso / 0.288 / 1.88;
     return {
-      ...raw, pitch: raw.pitch + 0.3, look: 0.75, hipY: raw.hipY + 0.04 * k,
-      glove: { x: 0.3 * k, y: 0.6 * k, z: -0.38 * k }, blocker: { x: 0.3 * k, y: 0.55 * k, z: 0.34 * k },
-      heel: { x: 0.55 * k, y: 0, z: 0.25 * k },
+      ...raw, pitch: raw.pitch + 0.45, roll: raw.roll * 0.3, look: 0.95, hipY: raw.hipY + 0.06 * k,
+      glove: { x: 0.22 * k, y: 0.5 * k, z: -0.36 * k }, gloveFace: { x: 0.3, y: -0.9, z: -0.2 },
+      blocker: { x: 0.24 * k, y: 0.48 * k, z: 0.34 * k }, heel: { x: 0.75 * k, y: 0, z: 0.3 * k }, bladeDir: { x: 0.25, y: 0, z: -1 },
     };
   },
 };

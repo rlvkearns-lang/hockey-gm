@@ -1,7 +1,7 @@
 import { DT, type GameEvent, type SavePose } from '@hockey/engine';
 import { goalieSlotOf, type AnimContext, type GoalieAnim, type GoalieOverlay, type GoalieSample } from '../anim-context';
 import type { BodyDims } from '../body';
-import { goalieKeyRaw, mixGoalieRaw, type GoalieFigurePose, type GoalieRaw } from '../goalie-pose';
+import { glovePocket, goalieKeyRaw, mixGoalieRaw, type GoalieFigurePose, type GoalieRaw } from '../goalie-pose';
 import type { Vec3 } from '../pose-mix';
 
 /**
@@ -48,8 +48,10 @@ const COVER_HOLD = 3.6, COVER_FADE = 7.5;
 const REB_LEAVE = 4.5;
 /** On a goal the part ends this far short (m) of where the puck crossed. */
 const BEATEN_SHORT = 0.42;
+/** On a low goal the pad kick is this much (m) short along the leg as the puck goes by. */
+const BEATEN_PAD_SHORT = 0.55;
 /** After the puck has gone by him on a goal, the part reaches for where it went: from this long after (s), over this long. */
-const LATE_START = 0.03, LATE_TIME = 0.22;
+const LATE_START = 0.0, LATE_TIME = 0.2;
 
 /** The plane (m in front of his centre) where each part meets the puck. */
 export const CONTACT_PLANE: Record<SavePose, number> = { glove: 0.42, blocker: 0.42, pad: 0.2, butterfly: 0.25 };
@@ -118,9 +120,9 @@ export function toGoalieRaw(s: GoalieSample, w: Vec3): Vec3 {
   const dx = w.x - s.pos.x, dz = w.z - s.pos.y, c = Math.cos(s.facing), n = Math.sin(s.facing);
   return { x: dx * c + dz * n, y: w.y, z: RAW_Z * (-dx * n + dz * c) };
 }
-/** A point of his fitted figure (body frame, as drawn) in the world. */
-export function goalieWorld(s: GoalieSample, p: Vec3, out: Vec3): Vec3 {
-  const c = Math.cos(s.facing), n = Math.sin(s.facing);
+/** A point of his fitted figure (body frame, as drawn: turned `turn` from the engine facing) in the world. */
+export function goalieWorld(s: GoalieSample, p: Vec3, out: Vec3, turn = 0): Vec3 {
+  const c = Math.cos(s.facing + turn), n = Math.sin(s.facing + turn);
   out.x = s.pos.x + p.x * c - p.z * n; out.y = p.y; out.z = s.pos.y + p.x * n + p.z * c;
   return out;
 }
@@ -321,7 +323,8 @@ function pocketOffset(face: Vec3, k: number): Vec3 {
   const f = norm(face), up = norm(v3(-f.x * f.y, 1 - f.y * f.y, -f.z * f.y));
   return v3(f.x * POCKET_OUT * k + up.x * POCKET_UP * k, f.y * POCKET_OUT * k + up.y * POCKET_UP * k, f.z * POCKET_OUT * k + up.z * POCKET_UP * k);
 }
-const POCKET_OUT = 0.07, POCKET_UP = 0.1;
+/** The pocket's open face from the hand (out, up; goalie-rig.ts gPocket) and the drawn puck's half thickness. */
+const POCKET_OUT = 0.08, POCKET_UP = 0.14, PUCK_HALF = 0.019;
 
 /**
  * The key pose of `part` with that part put at `c` (raw frame): the glove or the blocker (its stick with it) at the
@@ -384,38 +387,45 @@ function placed(part: SavePose, c: Vec3, d: BodyDims, beaten: boolean, base: Goa
 }
 
 /**
- * Beaten by a shot crossing at `c` (raw frame, as at the contact), the way goals are scored on a goalie who is square
- * to the shot, blended by where it crossed (so a crossing near a boundary never switches pose):
- * - high at his middle: he went down early, leaning forward, and it went over him;
- * - high to a side: the hand on that side went up, over it (it goes under his arm) or, for a very high one, short of it;
- * - low between his pads: his legs opened (a split), the five-hole wide and his stick swept aside;
- * - low to a side: he was going the other way, legs and stick pushed off to the far side.
+ * Beaten by a shot crossing at `c` (raw frame, as at the contact): he commits to it, the part the engine's save would
+ * use going for it, but late or short, and the puck goes past it; then (`late`, 0..1 after the crossing) the part
+ * carries on to where the puck went, behind it.
+ * - high (glove or blocker): the hand comes up from below it and is still short as it goes by; if it is at his middle,
+ *   chest high, he is also leaning off its line, down toward a butterfly on the far side, so it passes beside him;
+ * - low and wide (pad): the kick goes out toward it but is short, and trails it;
+ * - low between his pads: his legs open as he goes down (the five-hole), and close after it has gone through.
+ * Each is blended by where it crossed, so a crossing near a boundary never switches pose.
  */
-function beatenRaw(c: Vec3, d: BodyDims): GoalieRaw {
+function beatenRaw(c: Vec3, d: BodyDims, late: number): GoalieRaw {
   const k = scaleOf(d), side: 1 | -1 = c.z >= 0 ? 1 : -1;
   const hi = smooth((c.y - 0.45 * k) / (0.2 * k)), mid = 1 - smooth((Math.abs(c.z) - 0.22 * k) / (0.16 * k));
-  const highMid = goalieKeyRaw('butterfly', d, 1);
-  highMid.pitch = 1.1; highMid.look = -0.1;
-  const highSide = goalieKeyRaw('stance', d, 1);
-  const over = v3(c.x, c.y + (c.y < 1.05 * k ? 0.42 : -0.1), c.z * 0.5);
-  if (side < 0) highSide.glove = shortOf(highSide.glove, over, 0.05);
-  else { const heel = subV(highSide.heel, highSide.blocker); highSide.blocker = shortOf(highSide.blocker, over, 0.05); highSide.heel = addV(highSide.blocker, heel); }
-  highSide.roll = -side * 0.22; highSide.look = 0;
-  const lowMid = goalieKeyRaw('stance', d, 1);
+  const base = goalieKeyRaw('stance', d, 1);
+  // High: the hand on its side, from below and short of it toward it.
+  const hand: SavePose = side < 0 ? 'glove' : 'blocker';
+  const below = v3(c.x - 0.05 * k, c.y - 0.42 * k, c.z - side * 0.08 * k);
+  let high = placed(hand, lerpV(below, v3(c.x, c.y + 0.08 * k, c.z), late), d, false, base);
+  if (mid > 0) {
+    // Chest high at his middle: leaning off its line, toward a butterfly on the far side.
+    const lean = goalieKeyRaw('butterfly', d, side);
+    const off = { ...mixGoalieRaw(high, lean, 0.7 * mid), glove: high.glove, gloveFace: high.gloveFace, blocker: high.blocker, blockerFace: high.blockerFace, heel: high.heel, bladeDir: high.bladeDir };
+    off.roll = high.roll * (1 - mid) - side * 0.55 * mid; off.pitch = high.pitch + 0.1 * mid;
+    high = off;
+  }
+  // Low and wide: the pad kicked toward it but short (the save leg's ankle drawn back toward his hip), then trailing it.
+  const lowSide = placed('pad', c, d, false, base), kick = lowSide.legs[side > 0 ? 1 : 0];
+  kick.ankle = shortOf(v3(0, lowSide.hipY, side * 0.1 * k), kick.ankle, BEATEN_PAD_SHORT * k * (1 - late));
+  kick.knee = lerpV(kick.knee, v3(0.25 * k, 0.3, side * 0.2 * k), 0.6 * (1 - late));
+  // Low at his middle: going down with the legs open, closing into the butterfly once it is through.
+  const split = goalieKeyRaw('stance', d, 1);
   for (const i of [0, 1] as const) {
-    const z = i === 0 ? -1 : 1, leg = lowMid.legs[i];
+    const z = i === 0 ? -1 : 1, leg = split.legs[i];
     leg.ankle = v3(0.05 * k, 0.12, z * 0.66 * k); leg.knee = v3(0.3 * k, 0.45 * k, z * 0.4 * k);
   }
-  lowMid.hipY -= 0.12 * k; lowMid.pitch = 0.4; lowMid.look = 0.5;
-  lowMid.heel = v3(0.55 * k, 0.05, 0.62 * k); lowMid.bladeDir = v3(0.6, 0, 0.8);
-  lowMid.blocker = v3(0.4 * k, 0.6 * k, 0.5 * k);
-  const lowSide = goalieKeyRaw('stance', d, 1);
-  const off = -side * 0.24 * k;
-  for (const leg of lowSide.legs) { leg.ankle = v3(leg.ankle.x, leg.ankle.y, leg.ankle.z + off); leg.knee = v3(leg.knee.x, leg.knee.y, leg.knee.z + off * 0.6); }
-  lowSide.roll = -side * 0.2; lowSide.look = 0.4;
-  lowSide.heel = v3(lowSide.heel.x, 0, lowSide.heel.z + off * 2.2);
-  if (side > 0) { lowSide.bladeDir = v3(0.3, 0, -1); lowSide.blocker = v3(lowSide.blocker.x, lowSide.blocker.y, lowSide.blocker.z + off); }
-  return mixGoalieRaw(mixGoalieRaw(lowSide, lowMid, mid), mixGoalieRaw(highSide, highMid, mid), hi);
+  split.hipY -= 0.12 * k; split.pitch = 0.4; split.look = 0.5;
+  split.heel = v3(0.55 * k, 0.05, 0.62 * k); split.bladeDir = v3(0.6, 0, 0.8);
+  split.blocker = v3(0.4 * k, 0.6 * k, 0.5 * k);
+  const lowMid = mixGoalieRaw(split, goalieKeyRaw('butterfly', d, side), late);
+  return mixGoalieRaw(mixGoalieRaw(lowSide, lowMid, mid), high, hi);
 }
 
 /** Getting set as the shot comes: hands a little forward, the hips a touch lower. */
@@ -423,7 +433,7 @@ function setRaw(raw: GoalieRaw, d: BodyDims, s: number): GoalieRaw {
   const k = scaleOf(d) * s;
   return {
     ...raw, hipY: raw.hipY - 0.03 * k, pitch: raw.pitch + 0.05 * s,
-    glove: addV(raw.glove, v3(0.14 * k, -0.04 * k, -0.04 * k)), blocker: addV(raw.blocker, v3(0.12 * k, -0.02 * k, 0.02 * k)),
+    glove: addV(raw.glove, v3(0.1 * k, 0.03 * k, -0.03 * k)), blocker: addV(raw.blocker, v3(0.12 * k, -0.02 * k, 0.02 * k)),
     heel: addV(raw.heel, v3(0.06 * k, 0, 0)),
   };
 }
@@ -455,10 +465,8 @@ function applyPlan(p: ReachPlan, raw: GoalieRaw, sample: GoalieSample, dims: Bod
   const base = p.set > 0 ? setRaw(raw, dims, p.set) : raw;
   if (p.reach <= 0) return base;
   if (p.kind !== 'goal') return mixGoalieRaw(base, placed(p.part, c, dims, false, base), p.reach);
-  // Beaten as it goes by; then, too late, the part the engine would have saved it with goes to where it went.
-  const late = smooth((p.since - LATE_START) / LATE_TIME);
-  const beaten = beatenRaw(p.rc, dims);
-  return mixGoalieRaw(base, late > 0 ? mixGoalieRaw(beaten, placed(p.part, c, dims, false, beaten), late * 0.85) : beaten, p.reach);
+  // Beaten: committed as it goes by, then too late after it (beatenRaw).
+  return mixGoalieRaw(base, beatenRaw(p.rc, dims, smooth((p.since - LATE_START) / LATE_TIME)), p.reach);
 }
 
 export const goalieReach: GoalieOverlay<ReachSlot> = {
@@ -469,16 +477,24 @@ export const goalieReach: GoalieOverlay<ReachSlot> = {
     return s;
   },
   // Each reaction blends itself in by its own factors; the overlay is on while either shows.
-  weight(anim) {
+  // Each reaction blends itself in by its own factors; the overlay is on while either shows, or while he is held facing
+  // the shot in dead play (deadFacingOf).
+  weight(anim, sample, ctx) {
     const s = goalieSlotOf<ReachSlot>(anim, REACH_ID);
-    return s && ((s.cur.active && s.cur.w > 1e-4) || (s.prev.active && s.prev.w > 1e-4)) ? 1 : 0;
+    if (s && ((s.cur.active && s.cur.w > 1e-4) || (s.prev.active && s.prev.w > 1e-4))) return 1;
+    const f = deadFacingOf(sample, ctx);
+    return f && f.w > 1e-4 ? 1 : 0;
   },
-  apply(raw, anim, sample, _ctx, dims) {
+  apply(raw, anim, sample, ctx, dims) {
     const s = goalieSlotOf<ReachSlot>(anim, REACH_ID);
-    if (!s) return raw;
     let out = raw;
-    if (s.prev.active && s.prev.w > 1e-4) out = applyPlan(s.prev, out, sample, dims);
-    if (s.cur.active && s.cur.w > 1e-4) out = applyPlan(s.cur, out, sample, dims);
+    if (s && s.prev.active && s.prev.w > 1e-4) out = applyPlan(s.prev, out, sample, dims);
+    if (s && s.cur.active && s.cur.w > 1e-4) out = applyPlan(s.cur, out, sample, dims);
+    const f = deadFacingOf(sample, ctx);
+    if (f && f.w > 1e-4) {
+      const d = f.facing - sample.facing;
+      out = { ...out, turn: Math.atan2(Math.sin(d), Math.cos(d)) * f.w };
+    }
     return out;
   },
 };
@@ -493,7 +509,44 @@ export const goalieTrack: GoalieOverlay = {
   },
 };
 
-const tmp: Vec3 = { x: 0, y: 0, z: 0 }, tmp2: Vec3 = { x: 0, y: 0, z: 0 };
+/**
+ * While play is dead after a frozen save or a goal against him, the engine squares him to the puck, which rests on the
+ * goal line behind him: he would turn round to face his own net. He is drawn still facing the way he faced the shot
+ * (toward where it was let go, as the engine squares him to it in flight) until the faceoff setup, and turns back to the
+ * engine's facing over its first FACING_BACK seconds (a ruled exception to drawing the engine's facing, for stopped play
+ * only: during play the drawn facing is exactly the engine's). The turn is the figure's `turn` (goalie-rig.ts), set by
+ * goalieReach.
+ */
+export const FACING_BACK = 1.5;
+/** How far back (ticks) a whistle's freeze or goal is looked for: the stoppage and the longest faceoff setup. */
+const DEAD_TICKS = Math.round(TICKS(1.5 + 8 + 0.5));
+
+const facingScratch = { w: 0, facing: 0 };
+/** The facing he is held at and how much of it shows, or null (play is live, or nothing to hold). */
+function deadFacingOf(s: GoalieSample, ctx: AnimContext): { w: number; facing: number } | null {
+  const st = ctx.state;
+  if (st.phase !== 'stopped' && st.phase !== 'faceoffSetup') return null;
+  const tl = ctx.timeline, tick = st.tick;
+  const goal = tl.last('goal', tick, DEAD_TICKS, s.id, 'other');
+  const freeze = tl.last('freeze', tick, DEAD_TICKS, s.id);
+  const held = freeze && freeze.detail.cause === 'save' ? freeze : undefined;
+  const e = goal && (!held || goal.tick >= held.tick) ? goal : held;
+  if (!e) return null;
+  const draw = tl.last('faceoff', tick, DEAD_TICKS);
+  if (draw && draw.tick >= e.tick) return null;
+  // Where the shot was let go from.
+  const relTick = e.type === 'goal' ? e.detail.releaseTick : tl.last('shot', e.tick, 0, s.id, 'other')?.detail.releaseTick ?? null;
+  const shooter = e.type === 'goal' ? e.playerId : tl.last('save', e.tick, 0, s.id)?.otherId ?? null;
+  if (relTick === null || !shooter) return null;
+  const rel = tl.last('release', relTick, 0, shooter);
+  if (!rel) return null;
+  const now = ctx.tick + ctx.alpha;
+  facingScratch.facing = Math.atan2(rel.pos.y - s.pos.y, rel.pos.x - s.pos.x);
+  facingScratch.w = smooth((now - (e.tick - 1)) / 6) * (st.phase === 'faceoffSetup' ? 1 - smooth(st.phaseT / FACING_BACK) : 1);
+  return facingScratch;
+}
+
+const tmp: Vec3 = { x: 0, y: 0, z: 0 }, tmp2: Vec3 = { x: 0, y: 0, z: 0 }, tmp3: Vec3 = { x: 0, y: 0, z: 0 };
 
 /**
  * One reaction's hold (see goalieHeldPuck) into `out`; `from` is where the puck was had he not had it (the engine's
@@ -502,13 +555,14 @@ const tmp: Vec3 = { x: 0, y: 0, z: 0 }, tmp2: Vec3 = { x: 0, y: 0, z: 0 };
 function heldBy(p: ReachPlan, now: number, sample: GoalieSample, ctx: AnimContext, pose: GoalieFigurePose, from: Vec3, out: Vec3): boolean {
   if (!p.active || !p.hold) return false;
   const T = p.end;
-  const glove = goalieWorld(sample, pose.glove, tmp);
-  // The pocket: out from the hand the way the glove faces and up toward its fingers; on the ice under the glove while
-  // it covers the puck (low and facing down), in the pocket once it is off the ice.
-  const off = pocketOffset(pose.gloveFace, scaleOf(sample.dims)), lift = smooth((glove.y - 0.15) / 0.5);
-  const cf = Math.cos(sample.facing), sf = Math.sin(sample.facing);
-  const px = glove.x + (off.x * cf - off.z * sf) * lift, pz = glove.z + (off.x * sf + off.z * cf) * lift;
-  const py = Math.max(0, glove.y + off.y * lift - 0.12 * (1 - lift));
+  const turn = pose.turn ?? 0;
+  const glove = goalieWorld(sample, pose.glove, tmp, turn);
+  // The pocket's open face as the rig draws it (goalie-pose.ts glovePocket), the puck's middle there; on the ice under
+  // the glove while it covers the puck (low), in the pocket once it is off the ice.
+  const pk = glovePocket(pose, sample.dims), pw = goalieWorld(sample, pk.at, tmp3, turn);
+  const lift = smooth((glove.y - 0.15) / 0.5);
+  const px = glove.x + (pw.x - glove.x) * lift, pz = glove.z + (pw.z - glove.z) * lift;
+  const py = Math.max(0, glove.y + (pw.y - PUCK_HALF - glove.y) * lift - 0.12 * (1 - lift));
   const pocket = (k: number): void => {
     out.x += (px - out.x) * k; out.y += (py - out.y) * k; out.z += (pz - out.z) * k;
   };
@@ -519,7 +573,7 @@ function heldBy(p: ReachPlan, now: number, sample: GoalieSample, ctx: AnimContex
   }
   if (now <= p.tc) { pathAt(p.path, now, out); return true; }
   // The saving part as drawn: a hand, or for a pad or the butterfly the spot where the puck met it.
-  const part = p.part === 'glove' ? v3(px, py, pz) : p.part === 'blocker' ? goalieWorld(sample, pose.blocker, tmp2) : p.c;
+  const part = p.part === 'glove' ? v3(px, py, pz) : p.part === 'blocker' ? goalieWorld(sample, pose.blocker, tmp2, turn) : p.c;
   if (p.freeze) {
     // In the glove at once (it reached the puck), or from the part under the glove as he covers it.
     const at = p.part === 'glove' ? p.c : part;

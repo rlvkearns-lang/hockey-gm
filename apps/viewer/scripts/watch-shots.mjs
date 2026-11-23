@@ -258,16 +258,25 @@ if (only && only.includes('actions')) {
 // goalie (the blocker for a block, the scorer for a celebration; window.__watch.aimAt): from behind him, from in front of
 // him (the shooter's side) and from his side at ice level, plus a contact sheet per sequence, on a page drawn at twice
 // the pixels. The frames are at the given offsets (ticks) from the moment the puck reaches him
-// (the save's or goal's tick T; the block's T). `SAVE_SKIP` (e.g. glove=2) takes a later example, `SAVE_KINDS` limits.
+// (the save's or goal's tick T; the block's T). `SAVE_SKIP` (e.g. glove=2) takes a later example, `SAVE_KINDS` limits,
+// `SAVE_COUNT` takes that many of each, `SAVE_ALL` also takes saves and goals with other players near the goalie.
 if (only && only.includes('saves')) {
   const { ctx: sctx, p: sp } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light', deviceScaleFactor: 2 });
   await sp.evaluate(() => window.__watch.setManual(true));
   const skip = Object.fromEntries((process.env.SAVE_SKIP ?? '').split(',').filter(Boolean).map((x) => x.split('=')).map(([k, v]) => [k, Number(v)]));
   const kinds = process.env.SAVE_KINDS ? process.env.SAVE_KINDS.split(',') : ['glove', 'blocker', 'pad', 'butterfly', 'cover', 'goal', 'block', 'celebrate'];
-  const found = await sp.evaluate(({ skip, kinds }) => {
+  const count = Number(process.env.SAVE_COUNT ?? 1);
+  const all = Boolean(process.env.SAVE_ALL);
+  const found = await sp.evaluate(({ skip, kinds, count, all }) => {
     const w = window.__watch, ev = w.events();
     const out = {}, n = {};
-    const take = (k, v) => { if (!kinds.includes(k) || out[k]) return; n[k] = (n[k] ?? 0) + 1; if (n[k] > (skip[k] ?? 0)) out[k] = v; };
+    // SAVE_COUNT examples of each (named glove1, glove2, ... when more than one).
+    const got = {};
+    const take = (k, v) => {
+      if (!kinds.includes(k) || (got[k] ?? 0) >= count) return;
+      n[k] = (n[k] ?? 0) + 1;
+      if (n[k] > (skip[k] ?? 0)) { got[k] = (got[k] ?? 0) + 1; out[count > 1 ? `${k}${got[k]}` : k] = v; }
+    };
     const shotAt = (t, g) => ev.find((e) => e.type === 'shot' && e.tick === t && e.otherId === g);
     // Nobody but the shooter within 3 m of the goalie (or of the blocker) over the last ticks before T (so he is not hidden).
     const clear = (t, id, except) => {
@@ -281,7 +290,7 @@ if (only && only.includes('saves')) {
     };
     for (const e of ev) {
       if (e.tick < 300) continue;
-      if ((e.type === 'save' || e.type === 'goal') && !clear(e.tick, e.type === 'save' ? e.playerId : e.otherId, e.type === 'save' ? e.otherId : e.playerId)) continue;
+      if (!all && (e.type === 'save' || e.type === 'goal') && !clear(e.tick, e.type === 'save' ? e.playerId : e.otherId, e.type === 'save' ? e.otherId : e.playerId)) continue;
       if (e.type === 'block' && !clear(e.tick, e.playerId, null)) continue;
       if (e.type === 'save') {
         const shot = shotAt(e.tick, e.playerId);
@@ -301,15 +310,16 @@ if (only && only.includes('saves')) {
       }
     }
     return out;
-  }, { skip, kinds });
+  }, { skip, kinds, count, all });
   console.log('saves', JSON.stringify(found));
   log.saves = found;
   // Offsets (ticks from T) of the 8 frames.
   const offs = {
-    save: [-6, -4, -3, -2, -1.5, -1, 0, 6], held: [-4, -2, -1.5, -1, 0, 6, 20, 40], goal: [-5, -3, -2, -1.5, -1, 0, 8, 25],
+    save: [-6, -4, -3, -2, -1.5, -1, 0, 6], held: [-8, -5, -3, -1.5, 0, 6, 20, 40], goal: [-6, -4, -2.5, -1.5, 0, 4, 12, 30],
     block: [-10, -6, -3, -2, -1, 0, 3, 12], celebrate: [0, 10, 20, 30, 45, 60, 80, 100],
   };
-  for (const [k, v] of Object.entries(found)) {
+  for (const [name, v] of Object.entries(found)) {
+    const k = name.replace(/[0-9]+$/, '');
     const o = k === 'glove' || k === 'cover' ? offs.held : k === 'goal' ? offs.goal : k === 'block' ? offs.block : k === 'celebrate' ? offs.celebrate : offs.save;
     const focus = k === 'block' ? v.blocker : k === 'celebrate' ? v.shooter : v.goalie;
     // A celebration moves about: the page's own cameras (following the scorer; broadcast; ice level) show it.
@@ -330,7 +340,7 @@ if (only && only.includes('saves')) {
         const c = Math.cos(head), n = Math.sin(head), gx = me.pos.x, gz = me.pos.y;
         const far = k === 'celebrate' ? 1.6 : 1;
         const pose = view === 'behind' ? { pos: { x: gx - c * 3.6 * far, y: 2.3 * far, z: gz - n * 3.6 * far }, look: { x: gx + c * 1.2, y: 0.7, z: gz + n * 1.2 }, fov: 46 }
-          : view === 'front' ? { pos: { x: gx + c * 4.6 * far - n * 0.9, y: 1.5 * far, z: gz + n * 4.6 * far + c * 0.9 }, look: { x: gx, y: 0.75, z: gz }, fov: 36 }
+          : view === 'front' ? { pos: { x: gx + c * 4.4 * far - n * 0.9, y: 2.5 * far, z: gz + n * 4.4 * far + c * 0.9 }, look: { x: gx, y: 0.7, z: gz }, fov: 38 }
           : { pos: { x: gx - n * 5 * far + c * 0.8, y: 0.45, z: gz + c * 5 * far + n * 0.8 }, look: { x: gx + c * 0.3, y: 0.65, z: gz + n * 0.3 }, fov: 34 };
         if (k === 'celebrate') { w.aimAt(null); w.setFollow(focus); w.setCamera(view); } else w.aimAt(pose);
         const start = v.tick + o[0];
@@ -359,9 +369,9 @@ if (only && only.includes('saves')) {
         w.aimAt(null);
         return { shots, sheet: sheet.toDataURL('image/jpeg', 0.9) };
       }, { v, o, focus, view, k });
-      save(`sv-${k}-${view}-sheet.jpg`, r.sheet);
-      r.shots.forEach((s, i) => save(`sv-${k}-${view}-${i + 1}.png`, s.url));
-      console.log('save seq', k, view, 'T', v.tick, 'frames', r.shots.map((s) => s.tick).join(' '));
+      save(`sv-${name}-${view}-sheet.jpg`, r.sheet);
+      r.shots.forEach((s, i) => save(`sv-${name}-${view}-${i + 1}.png`, s.url));
+      console.log('save seq', name, view, 'T', v.tick, 'frames', r.shots.map((s) => s.tick).join(' '));
     }
   }
   await sctx.close();

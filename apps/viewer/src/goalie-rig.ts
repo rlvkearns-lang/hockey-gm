@@ -150,7 +150,9 @@ export function createGoalieRig(def: PlayerDef, colors: RigColors, sharedKit?: R
   glove.name = 'catchGlove';
   const gBody = mesh(geo(new RoundedBoxGeometry(0.11 * k, 0.3 * k, 0.25 * k, 2, 0.05 * k)), pad);
   gBody.position.y = 0.1 * k;
-  const gPocket = mesh(geo(new RoundedBoxGeometry(0.03 * k, 0.17 * k, 0.15 * k, 1, 0.012 * k)), dark);
+  // The pocket a light leather tan inside, so a puck caught in it shows.
+  const pocketMat = new THREE.MeshLambertMaterial({ color: 0xc9a77c });
+  const gPocket = mesh(geo(new RoundedBoxGeometry(0.03 * k, 0.17 * k, 0.15 * k, 1, 0.012 * k)), pocketMat, 'gPocket');
   gPocket.position.set(0.05 * k, 0.14 * k, 0.01 * k);
   const gThumb = mesh(geo(new RoundedBoxGeometry(0.09 * k, 0.2 * k, 0.07 * k, 1, 0.03 * k)), jersey);
   gThumb.position.set(0, 0.06 * k, 0.13 * k);
@@ -238,7 +240,7 @@ export function createGoalieRig(def: PlayerDef, colors: RigColors, sharedKit?: R
 
   function apply(p: GoalieFigurePose, worldX: number, worldZ: number, facing: number): void {
     root.position.set(worldX, 0, worldZ);
-    root.rotation.set(0, -facing, 0);
+    root.rotation.set(0, -(facing + (p.turn ?? 0)), 0);
 
     pelvis.position.set(0, p.hipY, 0);
     pelvis.rotation.set(0, 0, -p.pitch * 0.3);
@@ -300,6 +302,7 @@ export function createGoalieRig(def: PlayerDef, colors: RigColors, sharedKit?: R
   function dispose(): void {
     for (const g of geos) g.dispose();
     numMat.dispose();
+    pocketMat.dispose();
     if (sharedKit) kit.releaseTexture(numMap);
     else { numMap?.dispose(); kit.dispose(); }
   }

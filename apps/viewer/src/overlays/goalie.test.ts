@@ -6,7 +6,8 @@ import { isCut, probeOf } from '../cuts';
 import { fitGoalie, goalieKeyRaw, type GoalieFigurePose } from '../goalie-pose';
 import { createCursor, lerpAngle, type Playback, type Recording } from '../playback';
 import type { Vec3 } from '../pose-mix';
-import { createGameScene, seekScene, type GameScene } from '../scene';
+import * as THREE from 'three';
+import { createGameScene, PUCK_SCALE, seekScene, type GameScene } from '../scene';
 import { recorded, testSetup } from '../test/game';
 import { buildTimeline, type Timeline } from '../timeline';
 
@@ -42,9 +43,9 @@ const releaseOf = (tl: Timeline, tick: number | null, shooter: string): GameEven
   return r && r.detail.kind === 'shot' ? r : undefined;
 };
 
-/** A point of his drawn figure (body frame) in the world. */
-function world(v: { position: { x: number; z: number }; facing: number }, p: Vec3): W {
-  const c = Math.cos(v.facing), n = Math.sin(v.facing);
+/** A point of his drawn figure (body frame) in the world: drawn at the engine facing plus the figure's own turn. */
+function world(v: { position: { x: number; z: number }; facing: number; goaliePose?: GoalieFigurePose | null }, p: Vec3): W {
+  const f = v.facing + (v.goaliePose?.turn ?? 0), c = Math.cos(f), n = Math.sin(f);
   return { x: v.position.x + p.x * c - p.z * n, y: p.y, z: v.position.z + p.x * n + p.z * c };
 }
 const d3 = (a: W, b: W): number => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
@@ -82,6 +83,21 @@ function nearestPart(v: View, p: W): number {
 function stanceHands(dims: ReturnType<typeof bodyDims>, catches: 'L' | 'R'): { glove: Vec3; blocker: Vec3 } {
   const s = fitGoalie(goalieKeyRaw('stance', dims, 1), dims, catches);
   return { glove: s.glove, blocker: s.blocker };
+}
+/** The drawn puck's half thickness (scene.ts: a real puck's 2.54 cm at PUCK_SCALE). */
+const PUCK_HALF = (0.0254 * PUCK_SCALE) / 2;
+/** The middle of the open face of a goalie's glove pocket as drawn (world), and the way it faces. */
+function pocketFace(g: Game, id: string): { at: W; out: W } {
+  const def = [...g.setup.home.players, ...g.setup.away.players].find((p) => p.id === id)!;
+  const root = g.sc.root.getObjectByName(`goalie-${def.number}`)!;
+  root.updateWorldMatrix(true, true);
+  const pocket = root.getObjectByName('gPocket')!;
+  const at = new THREE.Vector3(), q = new THREE.Quaternion();
+  pocket.getWorldPosition(at); pocket.getWorldQuaternion(q);
+  const out = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+  const k = def.heightCm / 188;
+  at.addScaledVector(out, 0.015 * k);
+  return { at: { x: at.x, y: at.y, z: at.z }, out: { x: out.x, y: out.y, z: out.z } };
 }
 const goalieDims = (setup: GameSetup, id: string) => { const d = [...setup.home.players, ...setup.away.players].find((p) => p.id === id)!; return bodyDims(d.heightCm, d.weightKg); };
 
@@ -215,13 +231,53 @@ describe('goalie saves', () => {
           seekScene(g.pb, g.sc, s.save.tick + dt);
           const v = g.sc.figure(id) as unknown as View, p = g.sc.puckWorld();
           const gw = world(v, v.goaliePose.glove);
-          // In the glove: in its pocket, which is about 0.12 m out from the middle of the hand.
-          if (s.save.detail.pose === 'glove') { expect(d3({ x: p.x, y: p.y, z: p.z }, gw), `seed ${seed} glove hold ${s.save.tick}+${dt}`).toBeLessThan(0.16); glove++; }
+          // In the glove: at the open face of its pocket as the rig draws it (the puck's middle within 6 cm of the middle
+          // of the pocket's face, and on its open side).
+          if (s.save.detail.pose === 'glove') {
+            const pk = pocketFace(g, id), mid = { x: p.x, y: p.y + PUCK_HALF, z: p.z };
+            const off = { x: mid.x - pk.at.x, y: mid.y - pk.at.y, z: mid.z - pk.at.z };
+            expect(d3(mid, pk.at), `seed ${seed} glove hold ${s.save.tick}+${dt}`).toBeLessThan(0.06);
+            expect(off.x * pk.out.x + off.y * pk.out.y + off.z * pk.out.z).toBeGreaterThan(-0.005);
+            glove++;
+          }
           else if (dt === 30) { expect(Math.hypot(p.x - gw.x, p.z - gw.z), `seed ${seed} cover ${s.save.tick}`).toBeLessThan(0.15); expect(p.y).toBeLessThan(0.05); cover++; }
         }
       }
     }
     expect(glove).toBeGreaterThan(5); expect(cover).toBeGreaterThan(1);
+  });
+
+  it('in play he is drawn at the engine facing exactly; in the dead play after a held save or a goal he keeps facing the shot', () => {
+    // Live play (both ticks drawn live): no turn on either goalie, so the drawn facing is the engine's.
+    const g5 = game(5);
+    let live = 0;
+    play(g5, 3000, 3600, 30, () => {
+      const f = g5.pb.frame();
+      if (f.prev.phase !== 'live' || f.next.phase !== 'live') return;
+      for (const side of ['home', 'away'] as const) expect(g5.sc.figure(f.next.goalies[side].id)!.goaliePose!.turn).toBeUndefined();
+      live++;
+    });
+    expect(live).toBeGreaterThan(400);
+    // Dead play: a second after a held save or a goal, he faces where the shot came from (the engine turns him to the
+    // puck resting on the goal line behind him).
+    let held = 0, turned = 0;
+    for (const seed of [5, 42]) {
+      const g = game(seed);
+      const ends = [...saves(seed).filter((s) => s.freeze).map((s) => ({ tick: s.save.tick, id: s.save.playerId!, rel: s.rel })),
+        ...g.tl.goals.flatMap((e) => { const rel = releaseOf(g.tl, e.detail.releaseTick, e.playerId!); return rel ? [{ tick: e.tick, id: e.otherId!, rel }] : []; })];
+      for (const e of ends) {
+        seekScene(g.pb, g.sc, e.tick + 30);
+        if (g.pb.frame().next.phase !== 'stopped') continue;
+        const v = g.sc.figure(e.id)!, drawn = v.facing + (v.goaliePose!.turn ?? 0);
+        const want = Math.atan2(e.rel.pos.y - v.position.z, e.rel.pos.x - v.position.x);
+        const off = (a: number) => Math.abs(Math.atan2(Math.sin(a - want), Math.cos(a - want)));
+        expect(off(drawn), `seed ${seed} ${e.tick}`).toBeLessThan(0.05);
+        if (off(v.facing) > 1) turned++;
+        held++;
+      }
+    }
+    expect(held).toBeGreaterThan(8);
+    expect(turned).toBeGreaterThan(2);
   });
 
   it('a seek into a save shows the pose play shows', () => {

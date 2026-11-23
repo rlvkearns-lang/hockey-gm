@@ -57,6 +57,11 @@ export type GoalieFigurePose = {
   glove: Vec3; gloveFace: Vec3;
   blocker: Vec3; blockerFace: Vec3;
   blade: { heel: Vec3; dir: Vec3 };
+  /**
+   * How far (rad, toward his left as the engine turns, i.e. added to the engine facing) the whole figure is drawn turned
+   * from the engine's facing; absent or 0 normally (an overlay asks for it while play is stopped, overlays/goalie.ts).
+   */
+  turn?: number;
 };
 
 export const GOALIE = {
@@ -230,7 +235,8 @@ function keyPose(p: GoaliePose, d: BodyDims, side: 1 | -1): Key {
   const stance = stanceLegs(d);
   const base: Key = {
     hipY: stance.hipY, pitch: 0.32, roll: 0, look: 0.15, legs: stance.legs,
-    glove: s(0.45, 0.92, -0.45), gloveFace: norm(v3(1, 0, -0.15)),
+    // The glove held open at his side, low to mid, its pocket facing the play.
+    glove: s(0.36, 0.8, -0.56), gloveFace: norm(v3(1, 0, -0.2)),
     blocker: s(0.46, 0.76, 0.32), blockerFace: norm(v3(1, 0, 0.15)),
     heel: s(0.68, 0, 0.1), bladeDir: norm(v3(0.25, 0, -1)),
   };
@@ -324,6 +330,8 @@ export type GoalieRaw = {
   legs: [GoalieRawLeg, GoalieRawLeg];
   glove: Vec3; gloveFace: Vec3; blocker: Vec3; blockerFace: Vec3; heel: Vec3; bladeDir: Vec3;
   shuffle: { move: number; tPush: number; q: number; lat: number };
+  /** The figure's turn from the engine facing (GoalieFigurePose.turn); absent means 0. */
+  turn?: number;
 };
 
 /** The side a pad save kicks out to, in the left-catching frame of the raw pose. */
@@ -390,6 +398,7 @@ export function mixGoalieRaw(a: GoalieRaw, b: GoalieRaw, w: number): GoalieRaw {
     glove: mixV(a.glove, b.glove, k), gloveFace: mixV(a.gloveFace, b.gloveFace, k), blocker: mixV(a.blocker, b.blocker, k),
     blockerFace: mixV(a.blockerFace, b.blockerFace, k), heel: mixV(a.heel, b.heel, k), bladeDir: mixV(a.bladeDir, b.bladeDir, k),
     shuffle: { move: n(a.shuffle.move, b.shuffle.move), tPush: n(a.shuffle.tPush, b.shuffle.tPush), q: a.shuffle.q, lat: a.shuffle.lat },
+    ...(a.turn !== undefined || b.turn !== undefined ? { turn: n(a.turn ?? 0, b.turn ?? 0) } : {}),
   };
 }
 
@@ -436,10 +445,32 @@ export function fitGoalie(raw: GoalieRaw, d: BodyDims, catches: 'L' | 'R'): Goal
     blocker: inReach(blocker, shoulders[1], reach), blockerFace: norm(blockerFace, v3(1, 0, 0)),
     blade: { heel: v3(heel.x, Math.max(0, heel.y), heel.z), dir: norm(bladeDir, v3(0, 0, -1)) },
   };
-  return catches === 'R' ? mirrorFigure(out) : out;
+  const fig = catches === 'R' ? mirrorFigure(out) : out;
+  if (raw.turn) fig.turn = raw.turn;
+  return fig;
 }
 
 /** A goalie's figure: the gait's raw pose, solved (goalieRaw then fitGoalie). */
 export function goaliePoseOf(g: GoalieGait, d: BodyDims, catches: 'L' | 'R'): GoalieFigurePose {
   return fitGoalie(goalieRaw(g, d, catches), d, catches);
+}
+
+/**
+ * The middle of the open face of the catching glove's pocket and the way it faces (body frame, as `p` is), placed as
+ * goalie-rig.ts places the glove: the forearm from the shoulder's two-bone solve (bent toward the rig's elbow pole), the
+ * glove's fingers up along it tipped toward the sky, its pocket facing `gloveFace`; the pocket box sits at (0.05, 0.14,
+ * 0.01) in the glove (times his height scale), its open face 0.015 further out. For a caught puck to be drawn in it.
+ */
+export function glovePocket(p: GoalieFigurePose, d: BodyDims): { at: Vec3; out: Vec3 } {
+  const k = scaleOf(d), gi = p.catches === 'L' ? 0 : 1;
+  const pole = torsoRotate(v3(-0.25, -0.6, gi === 0 ? -0.8 : 0.8), p.pitch, p.roll);
+  const { mid, end } = twoBone(p.shoulders[gi], p.glove, d.upperArm, d.forearm, pole);
+  const f = p.gloveFace;
+  let up = sub(end, mid);
+  up = add(up, v3(0, 1.5 * len(up), 0));
+  up = norm(sub(up, mul(f, dot(up, f))));
+  const x = norm(sub(f, mul(up, dot(f, up))), v3(1, 0, 0));
+  const z = v3(x.y * up.z - x.z * up.y, x.z * up.x - x.x * up.z, x.x * up.y - x.y * up.x);
+  const at = add(end, add(mul(x, 0.065 * k), add(mul(up, 0.14 * k), mul(z, 0.01 * k))));
+  return { at, out: x };
 }
