@@ -1,4 +1,5 @@
 import { recordTouch } from './actions';
+import { clearContests, effective, winProb } from './contests/core';
 import { resolveBoards } from './rink';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, Position, Side, SkaterState } from './types';
@@ -10,11 +11,6 @@ export const LINEUP_TOLERANCE = 0.6;
 export const FACEOFF_MIN_SECONDS = 3;
 /** ...and at the latest after this many, with players wherever they are. */
 export const FACEOFF_MAX_SECONDS = 8;
-/**
- * Stand-in chance that home wins the draw, from the two centres' faceoffs ratings a (home) and b (away):
- * 0.5 + (a - b) / 400, within [0.3, 0.7]. Task 10 replaces it with winProb.
- */
-const DRAW = { perPoint: 1 / 400, min: 0.3, max: 0.7 };
 /** Faceoffs rating used for a side with no centre on the ice. */
 const NO_CENTRE_RATING = 50;
 /** Speed range (m/s) of the puck pulled back to a defenceman. */
@@ -47,7 +43,8 @@ export function restPuck(state: GameState): void {
 
 /**
  * Whistle: phase `stopped`, puck at rest where it is, nobody in possession, no pass or shot pending, the touch chain
- * cleared, and every on-ice skater heads for his line-up spot for the faceoff at `spot`.
+ * cleared, every contest over (its players free), and every on-ice skater heads for his line-up spot for the faceoff
+ * at `spot`.
  */
 export function stopPlay(state: GameState, spot: Vec2): void {
   state.phase = 'stopped';
@@ -61,6 +58,8 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.lastAttackTouch = { home: null, away: null };
   state.delayedOffside = null;
   state.icingWatch = null;
+  state.lastRelease = null;
+  clearContests(state);
   restPuck(state);
   state.faceoffSpot = { x: spot.x, y: spot.y };
   headForLineup(state);
@@ -121,16 +120,17 @@ const onIceIn = (state: GameState, side: Side, slots: Position[]): SkaterState[]
   state.skaters.filter((s) => s.onIce && s.side === side && s.slot !== null && slots.includes(s.slot));
 
 /**
- * Drop the puck: one side wins the draw (by the centres' faceoffs ratings) and the puck slides back toward one of its
- * defencemen; the winner has possession. Sets phase live and lifts any `noChange`. Returns the faceoff event
- * (side = winner, playerId = winning centre, otherId = losing centre).
+ * Drop the puck: one side wins the draw (home with winProb of the difference between the centres' effective faceoffs
+ * ratings) and the puck slides back toward one of its defencemen; the winner has possession. Sets phase live and lifts
+ * any `noChange`. Returns the faceoff event (side = winner, playerId = winning centre, otherId = losing centre).
  */
 export function dropPuck(state: GameState, defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
   const rating = (side: Side): number => {
     const c = onIceIn(state, side, ['C'])[0];
-    return c ? defs.get(c.id)?.attrs.faceoffs ?? NO_CENTRE_RATING : NO_CENTRE_RATING;
+    const d = c ? defs.get(c.id) : undefined;
+    return c && d ? effective(d, c, { faceoffs: 1 }) : NO_CENTRE_RATING;
   };
-  const pHome = Math.min(DRAW.max, Math.max(DRAW.min, 0.5 + (rating('home') - rating('away')) * DRAW.perPoint));
+  const pHome = winProb(rating('home') - rating('away'));
   const winner: Side = rng.chance(pHome) ? 'home' : 'away';
   const loser: Side = winner === 'home' ? 'away' : 'home';
   const winC = onIceIn(state, winner, ['C'])[0] ?? null;

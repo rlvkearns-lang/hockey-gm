@@ -17,5 +17,8 @@ export * from './actions';
 export * from './goalie';
 export * from './referee';
 export * from './bench';
+export * from './contests/core';
+export * from './contests/poke-check';
+export * from './contests/hit';
 export * from './stats';
 export * from './game';

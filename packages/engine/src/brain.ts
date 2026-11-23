@@ -168,11 +168,16 @@ function carryTarget(rx: number, ly: number, zone: 'D' | 'N' | 'O', aheadLat: nu
   return { x: tx * dir, y: ty * dir };
 }
 
-/** Runs the carrier's decision every BRAIN_INTERVAL_TICKS and carries it out. Returns the event of a pass or dump (a shot's event comes when it ends). */
+/**
+ * Runs the carrier's decision every BRAIN_INTERVAL_TICKS and carries it out. Returns the event of a pass or dump (a
+ * shot's event comes when it ends). A carrier in a contest (being checked) may still pass, shoot or dump, but his
+ * skating belongs to the contest, so a carry or protect decision changes nothing.
+ */
 export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng): GameEvent | null {
   if (state.carrierId === null || state.tick % BRAIN_INTERVAL_TICKS !== 0) return null;
   const s = skaterById(state, state.carrierId);
-  if (!s || !s.onIce || s.downT > 0 || s.contestId !== null) return null;
+  if (!s || !s.onIce || s.downT > 0) return null;
+  const busy = s.contestId !== null;
   const me = defs.get(s.id)!;
   const d = decideCarrier(state, me, defs, rng);
   switch (d.kind) {
@@ -180,12 +185,14 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
     case 'pass': return executePass(state, s.id, d.toId, defs, rng);
     case 'dump': return executeDump(state, s.id, defs, rng);
     case 'carry':
+      if (busy) return null;
       s.target.x = d.to.x;
       s.target.y = d.to.y;
       s.faceTarget = null;
       s.speedCap = clamp(0.75 + me.attrs.puckHandling * 0.0025, 0, 1);
       return null;
     case 'protect': {
+      if (busy) return null;
       let near: SkaterState | null = null, nearD = Infinity;
       for (const o of state.skaters) {
         if (!o.onIce || o.side === s.side || o.downT > 0) continue;

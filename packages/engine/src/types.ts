@@ -110,6 +110,11 @@ export type ShotInFlight = {
   blockTried: string[];
 };
 
+/**
+ * A contest under way (see contests/core.ts), what a viewer animates from. `stage` and `stageT` (seconds into that
+ * stage) are kept current every tick; `leader` is whoever is ahead (null while undecided); `participants` are the
+ * skaters in it now (each has `contestId` = `id`); `spot` is where it happens. `data` is the kind's own working numbers.
+ */
 export type ContestState = {
   id: number;
   kind: string;
@@ -118,6 +123,7 @@ export type ContestState = {
   participants: string[];
   leader: string | null;
   spot: Vec2;
+  data: Record<string, number>;
 };
 
 /** Plain JSON data only: a viewer reads it between steps. */
@@ -142,8 +148,15 @@ export type GameState = {
   onIce: { home: string[]; away: string[] };
   /** Players who just released the puck and may not pick it up before tick `untilTick`. */
   pickupBlock: { ids: string[]; untilTick: number } | null;
-  /** A pass on its way: its intended receiver skates onto it and may take it at any speed until tick `untilTick`. */
-  pendingPass: { fromId: string; toId: string; untilTick: number } | null;
+  /**
+   * A pass on its way: its intended receiver skates onto it and may take it at any speed until tick `untilTick`.
+   * `tried` lists the opponents who have had their one chance to intercept it.
+   */
+  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[] } | null;
+  /** The last skater to let the puck go (pass, shot, dump) and the tick he did; a hit on him counts for a moment after. */
+  lastRelease: { id: string; tick: number } | null;
+  /** Skater `id` may not start a contest of `kind` before tick `untilTick` (expired entries are dropped). */
+  contestCooldowns: { id: string; kind: string; untilTick: number }[];
   shotInFlight: ShotInFlight | null;
   /** The goalie of each side is screened while tick < this value (set by net-front battles). */
   screenedUntilTick: Record<Side, number>;

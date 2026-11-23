@@ -1,9 +1,9 @@
-import { blockPickup, recordTouch } from './actions';
+import { blockPickup, recordTouch, tryIntercept } from './actions';
 import { BENCH_DOORS, benchTick, finishChanges, initialBench } from './bench';
 import { resolveBodies } from './bodies';
 import { brainTick } from './brain';
 import { DT, PERIOD_SECONDS, PERIODS } from './constants';
-import { contestTick } from './contests/core';
+import { clearContests, contestTick } from './contests/core';
 import { dropPuck, FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, linedUp, restPuck, setupFaceoff, snapToLineup } from './faceoff';
 import { goalieTick, resolveOnNet, trackShot, tryBlock } from './goalie';
 import { stepPuck, type PuckEvent } from './puck';
@@ -83,6 +83,7 @@ function initialState(setup: GameSetup): GameState {
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
+    lastRelease: null, contestCooldowns: [],
     bench: initialBench(setup),
   };
 }
@@ -180,8 +181,9 @@ export function createGame(setup: GameSetup): Game {
   }
 
   /**
-   * A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater within PICKUP_RADIUS. A pass's
-   * intended receiver takes it at any speed if it came within PICKUP_RADIUS of him this tick (from `prev` to now).
+   * A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater (not down, not leaving, in no
+   * contest, not blocked) within PICKUP_RADIUS. A pass's intended receiver takes it at any speed if it came within
+   * PICKUP_RADIUS of him this tick (from `prev` to now).
    */
   function tryPickup(skaters: SkaterState[], prev: { x: number; y: number }): void {
     const p = state.puck;
@@ -192,14 +194,14 @@ export function createGame(setup: GameSetup): Game {
     if (pass !== null) {
       for (const s of skaters) {
         if (s.id !== pass.toId) continue;
-        if (s.downT === 0 && !s.leaving && !blocked.includes(s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
+        if (s.downT === 0 && !s.leaving && s.contestId === null && !blocked.includes(s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
         break;
       }
     }
     if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
       let bestD = PICKUP_RADIUS;
       for (const s of skaters) {
-        if (s.downT > 0 || s.leaving || blocked.includes(s.id)) continue;
+        if (s.downT > 0 || s.leaving || s.contestId !== null || blocked.includes(s.id)) continue;
         const d = dist(s.pos, p.pos);
         if (d <= bestD) { bestD = d; best = s; }
       }
@@ -221,7 +223,7 @@ export function createGame(setup: GameSetup): Game {
     assignJobs(state, defs, tactics);
     const action = brainTick(state, defs, rng);
     if (action) events.push(action);
-    contestTick(state, defs, rng, DT);
+    contestTick(state, defs, rng, DT, events, setup.chemistry);
 
     const skaters = onIceSkaters();
     moveSkaters(skaters);
@@ -242,7 +244,12 @@ export function createGame(setup: GameSetup): Game {
         for (const ev of puckEvents) if (ev.kind === 'onNet') onNet = ev;
         if (onNet) resolveOnNet(state, onNet, defs, rng, events);
         else {
-          tryPickup(skaters, prevPuck);
+          const caught = tryIntercept(state, defs, rng, prevPuck);
+          if (caught) {
+            events.push(caught.event);
+            if (caught.taker) carryPuck(caught.taker);
+            else tryPickup(skaters, prevPuck);
+          } else tryPickup(skaters, prevPuck);
           trackShot(state, puckEvents, events);
         }
       }
@@ -261,6 +268,8 @@ export function createGame(setup: GameSetup): Game {
       state.pickupBlock = null;
       state.pendingPass = null;
       state.shotInFlight = null;
+      state.lastRelease = null;
+      clearContests(state);
       restPuck(state);
       state.phase = state.period >= PERIODS ? 'final' : 'intermission';
       state.phaseT = 0;

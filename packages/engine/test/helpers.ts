@@ -4,13 +4,15 @@ import { DT, PERIOD_SECONDS } from '../src/constants';
 import { drainEnergy, recoverEnergy } from '../src/bench';
 import { stepPuck } from '../src/puck';
 import type { Puck, PuckEvent } from '../src/puck';
-import type { GameEvent, GameEventType, GameResult, GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
+import type { ContestState, GameEvent, GameEventType, GameResult, GameSetup, GameState, PlayerDef, Side, SkaterState, Tactics, TeamDef } from '../src/types';
 import { PLAYER_TYPES } from '../src/player-types';
 import { RINK, resolveBoards } from '../src/rink';
-import { createRng } from '../src/rng';
+import { createRng, type Rng } from '../src/rng';
 import { OZONE_SPOTS, ozoneSpotPos } from '../src/team-play';
 import { decideCarrier, type Decision } from '../src/brain';
-import { executeDump, executePass, releasePuck } from '../src/actions';
+import { executeDump, executePass, releasePuck, tryIntercept } from '../src/actions';
+import { resolveBodies } from '../src/bodies';
+import { contestTick } from '../src/contests/core';
 import { createGame, type Game } from '../src/game';
 import { tryBlock } from '../src/goalie';
 import { movementOf, stepSkater } from '../src/skating';
@@ -200,7 +202,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     onIce: { home: SKATER_SLOTS.map((s) => skaterId('home', s)), away: SKATER_SLOTS.map((s) => skaterId('away', s)) },
     pickupBlock: null, pendingPass: null, shotInFlight: null, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [] }, lastAttackTouch: { home: null, away: null },
-    noChange: null, delayedOffside: null, icingWatch: null,
+    noChange: null, delayedOffside: null, icingWatch: null, lastRelease: null, contestCooldowns: [],
     bench: {
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
@@ -537,4 +539,177 @@ export function runThroughFaceoff(st: GameState): void {
   if (!g) throw new Error('not a state from afterIcingBy');
   for (let i = 0; i < 30 * 20 && st.phase !== 'live'; i++) g.step();
   if (st.phase !== 'live') throw new Error('the puck was not dropped within 20 s');
+}
+
+// ---- contest helpers ----
+//
+// A contest harness: a stateWith() state with only the home C (carrying the puck at x -0.6, facing +x) and the away C
+// on the ice, stepped tick by tick with the real contestTick, skating and body contact. A carrier carries the puck in
+// front of him; nobody runs a brain or team play, so nobody passes or picks a loose puck up. Each call gets a new seed.
+
+/** Every attribute 70. */
+export const d: PlayerDef = def();
+
+/** A fresh skater (see `at`) with the given fields overridden. */
+export function st(o: Partial<SkaterState>): SkaterState {
+  return { ...at(0, 0), ...o };
+}
+
+type Duel = { st: GameState; ds: Map<string, PlayerDef>; rng: Rng; events: GameEvent[]; moves: Map<string, Movement> };
+const duels = new WeakMap<GameState, Duel>();
+const contestDuel = new WeakMap<ContestState, Duel>();
+let duelSeed = 0;
+
+/** Home C (carrier, `carrierDef`) at x -0.6 facing +x; away C (`otherDef`) at (x, 0) moving (vx, 0); nobody else on. */
+function duel(otherDef: PlayerDef, carrierDef: PlayerDef, x: number, vx: number): Duel {
+  const state = stateWith({ carrier: 'home', puckX: 0, carrierSlot: 'C' });
+  for (const s of state.skaters) if (s.slot !== 'C') s.onIce = false;
+  state.onIce = { home: ['home-C'], away: ['away-C'] };
+  const other = skater(state, 'away', 'C');
+  other.pos = { x, y: 0 }; other.target = { x, y: 0 }; other.vel = { x: vx, y: 0 }; other.facing = Math.PI;
+  const ds = new Map(defs);
+  ds.set('home-C', { ...carrierDef, id: 'home-C', position: 'C' });
+  ds.set('away-C', { ...otherDef, id: 'away-C', position: 'C' });
+  const moves = new Map([...ds].map(([id, p]) => [id, movementOf(p, 1)]));
+  const h: Duel = { st: state, ds, rng: createRng(++duelSeed), events: [], moves };
+  duels.set(state, h);
+  return h;
+}
+
+/** One tick of the contest harness. */
+function duelStep(h: Duel): void {
+  const s = h.st;
+  s.tick++;
+  contestTick(s, h.ds, h.rng, DT, h.events);
+  const on = s.skaters.filter((k) => k.onIce);
+  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT); }
+  resolveBodies(on, (id) => h.moves.get(id)!);
+  const c = on.find((k) => k.id === s.carrierId);
+  if (c) {
+    s.puck.pos = { x: c.pos.x + Math.cos(c.facing) * 0.6, y: c.pos.y + Math.sin(c.facing) * 0.6 };
+    s.puck.vel = { x: c.vel.x, y: c.vel.y };
+  } else stepPuck(s.puck, DT);
+}
+
+/** Steps the harness until its first contest has started and ended (at most 6 s). */
+function duelToEnd(h: Duel): void {
+  let started = false;
+  for (let i = 0; i < 180; i++) {
+    duelStep(h);
+    if (h.st.contests.length > 0) started = true;
+    else if (started) return;
+  }
+  throw new Error('no contest started and finished within 6 s');
+}
+
+/** A poke check by `defender` (standing 1.2 m in front of him) on the still carrier `carrier`: true when the defender wins it. */
+export function runPoke(defender: PlayerDef, carrier: PlayerDef): boolean {
+  const h = duel(defender, carrier, 0.6, 0);
+  duelToEnd(h);
+  return h.events.some((e) => e.type === 'takeaway' && e.playerId === 'away-C');
+}
+
+/** The contest state of a poke check one tick after it starts (every attribute 70). */
+export function startPoke(): ContestState {
+  const h = duel(d, d, 0.6, 0);
+  duelStep(h);
+  const c = h.st.contests[0];
+  if (!c) throw new Error('no poke check started');
+  contestDuel.set(c, h);
+  return c;
+}
+
+/** The GameState a contest from startPoke runs in. */
+export function stateOf(c: ContestState): GameState {
+  return contestDuel.get(c)!.st;
+}
+
+/** Ticks until the contest from startPoke is over (no longer in state.contests). */
+export function stepsUntilDone(c: ContestState): number {
+  const h = contestDuel.get(c)!;
+  for (let n = 1; n <= 300; n++) { duelStep(h); if (!h.st.contests.includes(c)) return n; }
+  throw new Error('contest still running after 10 s');
+}
+
+/** A poke check during which the carrier passes the puck away (to nobody) 0.1 s in, played out. */
+export function pokeReleased(): { contests: number; takeaways: number; contestIds: number } {
+  const c = startPoke(), h = contestDuel.get(c)!;
+  for (let i = 0; i < 3; i++) duelStep(h);
+  releasePuck(h.st, 'home-C', -15, 0, 0);
+  for (let i = 0; i < 30; i++) duelStep(h);
+  return {
+    contests: h.st.contests.length,
+    takeaways: h.events.filter((e) => e.type === 'takeaway').length,
+    contestIds: h.st.skaters.filter((k) => k.contestId !== null).length,
+  };
+}
+
+/** `hitter` with a sure urge to hit (tendencies.hit 1, aggression 100; neither is part of the hit's edge). */
+const keen = (hitter: PlayerDef): PlayerDef => ({ ...hitter, tendencies: { ...hitter.tendencies, hit: 1 }, attrs: { ...hitter.attrs, aggression: 100 } });
+
+/** `hitter` skates at `closing` m/s into the still carrier `target` from 1.5 m in front of him; the harness after the hit. */
+function hitDuel(hitter: PlayerDef, tgt: PlayerDef, closing: number): Duel {
+  const h = duel(keen(hitter), tgt, -0.6 + 1.5, -closing);
+  duelToEnd(h);
+  return h;
+}
+
+/** One hit as in hitDuel: true when it lands (the target goes down). */
+export function runHit(hitter: PlayerDef, tgt: PlayerDef, closing: number): boolean {
+  return hitDuel(hitter, tgt, closing).events.some((e) => e.type === 'hit' && e.detail === 'landed');
+}
+
+/** A big hitter's check on a smaller carrier, stopped on the tick it lands (seeds tried in turn). */
+export function hitThatLands(): GameState {
+  for (let i = 0; i < 50; i++) {
+    const h = duel(keen(def({ bodyChecking: 88, strength: 90, weightKg: 104 })), def({ balance: 62, strength: 60, weightKg: 80 }), 0.9, -6);
+    for (let k = 0; k < 90; k++) {
+      duelStep(h);
+      if (h.events.some((e) => e.type === 'hit' && e.detail === 'landed')) return h.st;
+    }
+  }
+  throw new Error('no hit landed in 50 tries');
+}
+
+/** The skater who was hit in a hitThatLands state (the home carrier). */
+export function target(state: GameState): SkaterState {
+  return skater(state, 'home', 'C');
+}
+
+/** Hits per 60 minutes of ice time by the skaters of the given types (both teams of setup(r.seed)). */
+export function hitsPer60(r: GameResult, ...types: string[]): number {
+  const s = setup(r.seed);
+  const ids = new Set([...s.home.players, ...s.away.players].filter((p) => types.includes(p.type)).map((p) => p.id));
+  const lines = r.players.filter((p) => ids.has(p.id));
+  return (sum(lines.map((p) => p.hits)) / sum(lines.map((p) => p.toiSeconds))) * 3600;
+}
+
+let interceptSeed = 0;
+/**
+ * Share of `n` passes intercepted (taken or deflected) by `defender`, the only away skater, standing 0.3 m off the
+ * lane halfway along a 16 m pass from home C to a still home LW. Each pass is played out with the real puck physics
+ * and tryIntercept until it is intercepted or passes him.
+ */
+export function interceptShare(defender: PlayerDef, n: number): number {
+  let k = 0;
+  for (let i = 0; i < n; i++) {
+    const state = stateWith({ carrier: 'home', puckX: -5, carrierSlot: 'C' });
+    for (const s of state.skaters) if (!(s.side === 'home' && (s.slot === 'C' || s.slot === 'LW')) && !(s.side === 'away' && s.slot === 'LD')) s.onIce = false;
+    const recv = skater(state, 'home', 'LW');
+    recv.pos = { x: 11, y: 0 }; recv.target = { x: 11, y: 0 };
+    const def0 = skater(state, 'away', 'LD');
+    def0.pos = { x: 3, y: 0.3 }; def0.target = { x: 3, y: 0.3 };
+    const ds = new Map(defs);
+    ds.set(def0.id, { ...defender, id: def0.id, position: 'LD' });
+    const rng = createRng(++interceptSeed);
+    executePass(state, 'home-C', recv.id, ds, rng);
+    for (let t = 0; t < 30 && state.pendingPass !== null; t++) {
+      state.tick++;
+      const prev = { x: state.puck.pos.x, y: state.puck.pos.y };
+      stepPuck(state.puck, DT);
+      if (tryIntercept(state, ds, rng, prev)) { k++; break; }
+      if (state.puck.pos.x > 5) break;
+    }
+  }
+  return k / n;
 }

@@ -3,7 +3,7 @@ import { RINK } from './rink';
 import type { Rng } from './rng';
 import { nearestOpponentDist } from './team-play';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
-import { hypot2 } from './vec';
+import { hypot2, segDistXY, type Vec2 } from './vec';
 
 /** After a release (draw, pass, shot, dump), the releasing players cannot pick the puck up again for this long. */
 export const RELEASE_NO_PICKUP_SECONDS = 0.3;
@@ -71,6 +71,7 @@ function release(state: GameState, from: SkaterState, vx: number, vy: number, vz
   state.lastTouch = { id: from.id, side: from.side };
   state.possession = from.side;
   state.pendingPass = null;
+  state.lastRelease = { id: from.id, tick: state.tick };
   blockPickup(state, [from.id]);
 }
 
@@ -97,7 +98,7 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
   const sigma = PASS_ERROR.base + (100 - passing) * PASS_ERROR.perPoint + pressureOn(state, from) * PASS_ERROR.pressure;
   const angle = Math.atan2(aimY - p.y, aimX - p.x) + rng.gauss() * sigma;
   release(state, from, Math.cos(angle) * speed, Math.sin(angle) * speed, 0);
-  state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((lead + PASS_GRACE_SECONDS) / DT) };
+  state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((lead + PASS_GRACE_SECONDS) / DT), tried: [] };
   return event(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, assistIds: [], detail: `${l.toFixed(1)}m` });
 }
 
@@ -161,4 +162,71 @@ export function executeDump(state: GameState, fromId: string, defs: Map<string, 
   const angle = Math.atan2(ty - p.y, tx - p.x) + rng.gauss() * sigma;
   release(state, s, Math.cos(angle) * speed, Math.sin(angle) * speed, DUMP_VZ);
   return event(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, assistIds: [], detail: 'dump' });
+}
+
+/** An opponent this close (m) to a pass's path gets his one chance to intercept it. */
+const INTERCEPT_RANGE = 0.9;
+/**
+ * Interception chance falls linearly from full at INTERCEPT_SPEED[0] m/s (below it a loose puck can simply be picked
+ * up) to half at INTERCEPT_SPEED[1] and above.
+ */
+const INTERCEPT_SPEED: [number, number] = [12, 22];
+/** Share of interceptions that are clean takes; the rest are deflections that leave the puck loose. */
+const INTERCEPT_TAKE = 0.6;
+/** A deflected pass keeps this share of its speed and turns by a random angle in this range (rad), either way. */
+const DEFLECT_KEEP = 0.35;
+const DEFLECT_TURN: [number, number] = [0.5, 1.5];
+
+/**
+ * Chance that `d` intercepts a pass going `speed` m/s that comes within reach:
+ * clamp(0.08 + stickChecking * 0.003 + defensivePositioning * 0.002, 0.03, 0.97), scaled down for fast passes.
+ */
+export function interceptChance(d: PlayerDef, speed: number): number {
+  const base = clamp(0.08 + d.attrs.stickChecking * 0.003 + d.attrs.defensivePositioning * 0.002, 0.03, 0.97);
+  const [lo, hi] = INTERCEPT_SPEED;
+  return base * (1 - 0.5 * clamp((speed - lo) / (hi - lo), 0, 1));
+}
+
+/**
+ * A pass still on its way (state.pendingPass) at INTERCEPT_SPEED[0] m/s or faster: each opposing skater (on the ice,
+ * not leaving, not down, not in a contest) whose body came within INTERCEPT_RANGE of the puck's path this tick (from
+ * `prev` to its position now) gets one try. On success the pass is over and a `takeaway` is returned: 60% he takes it
+ * (`taker`, now the carrier; the caller puts the puck on his stick), 40% he deflects it loose (`taker` null).
+ */
+export function tryIntercept(
+  state: GameState, defs: Map<string, PlayerDef>, rng: Rng, prev: Vec2,
+): { event: GameEvent; taker: SkaterState | null } | null {
+  const pass = state.pendingPass;
+  if (pass === null) return null;
+  const p = state.puck;
+  const speed = hypot2(p.vel.x, p.vel.y);
+  if (speed < INTERCEPT_SPEED[0] || p.z > 0) return null;
+  const from = skaterById(state, pass.fromId);
+  for (const s of state.skaters) {
+    if (!s.onIce || s.leaving || s.downT > 0 || s.contestId !== null || s.side === from.side || pass.tried.includes(s.id)) continue;
+    if (segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) > INTERCEPT_RANGE) continue;
+    pass.tried.push(s.id);
+    if (!rng.chance(interceptChance(defs.get(s.id)!, speed))) continue;
+    const take = rng.chance(INTERCEPT_TAKE);
+    state.pendingPass = null;
+    state.lastTouch = { id: s.id, side: s.side };
+    state.possession = s.side;
+    recordTouch(state, s.id, s.side);
+    if (take) {
+      state.carrierId = s.id;
+      p.vel.x = s.vel.x;
+      p.vel.y = s.vel.y;
+    } else {
+      const turn = (rng.chance(0.5) ? 1 : -1) * rng.range(DEFLECT_TURN[0], DEFLECT_TURN[1]);
+      const a = Math.atan2(p.vel.y, p.vel.x) + turn, v = speed * DEFLECT_KEEP;
+      p.vel.x = Math.cos(a) * v;
+      p.vel.y = Math.sin(a) * v;
+      blockPickup(state, [s.id]);
+    }
+    return {
+      event: event(state, { type: 'takeaway', side: s.side, playerId: s.id, otherId: pass.fromId, assistIds: [], detail: take ? 'intercept' : 'deflect' }),
+      taker: take ? s : null,
+    };
+  }
+  return null;
 }

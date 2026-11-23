@@ -67,7 +67,8 @@ describe('referee', () => {
       const ds = new Map(defs); ds.set('home-C', def({ id: 'home-C', position: 'C', faceoffs: 95 })); ds.set('away-C', def({ id: 'away-C', position: 'C', faceoffs: 45 }));
       if (dropPuck(st, ds, createRng(seed)).side === 'home') wins++;
     }
-    expect(wins / 2000).toBeGreaterThan(0.58); expect(wins / 2000).toBeLessThan(0.7);
+    // A 50-point edge: winProb(50) is about 0.89, under the parity cap of 0.9 (the stand-in draw before Task 10 capped at 0.7).
+    expect(wins / 2000).toBeGreaterThan(0.58); expect(wins / 2000).toBeLessThan(0.9);
   });
   it('the draw winner has possession and the next drop clears noChange', () => {
     const g = createGame(setup(2));
