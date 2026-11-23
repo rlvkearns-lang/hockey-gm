@@ -37,3 +37,19 @@ Proposed shape **[my call]**:
 - Wanted from the real NHL rules: offer sheets, arbitration, buyouts. (Burying contracts in the minors was offered and not picked up; leave out unless asked.)
 
 Proposed shape for arbitration **[my call]**: eligible restricted free agents can file; both sides submit a number; most cases settle before the hearing; if it goes to a hearing the team argues against its own player, which he may hold against the GM by personality; the award is short-term, and above a threshold the team may walk away and lose him. Exact eligibility and thresholds to be checked against the current agreement when this stage is designed.
+
+## Cap and roster rules (owner, 2026-11-23)
+
+- Keep as close to NHL realism as possible: a salary cap that rises over time, a cap floor, and the real roster and contract rules.
+- Signing bonuses and performance bonuses are not a focus for now (leave out of the first version; a contract is years, salary per year and clauses).
+
+## How the AI teams work (Claude's proposed approach, 2026-11-23, not yet agreed)
+
+- One value model underneath everything. Every AI GM can put a number on any asset (a player on his contract, a prospect, a draft pick, cap space) in the same unit. It comes from what he expects the player to produce over the contract (using his own team's scouting estimates, so teams disagree), age, the contract's cost against that production, and his team's needs, then bent by the GM's personality (overvalues his own prospects, loves size, trusts numbers or his eyes).
+- Each team has a direction: contending, on the bubble, retooling, rebuilding. It is set from the standings, the roster's age, the cap picture, the prospect pool and the owner's patience, and reviewed at set points in the year. Direction changes how much the present is worth against the future.
+- Every decision is that value model applied through that direction: trades offered and accepted, free-agent bids, draft picks (his own board plus need), re-signing or letting players walk, buyouts, waiver claims, call-ups. The human's offers are judged by the same model.
+- Guard rails against exploits: a sanity check against league-wide consensus value so nobody is fleeced by a quirk; quantity never beats quality (three depth players do not equal a star); roster and cap legality always enforced; a GM notices if the same trick is tried twice.
+- Fallible like people, not exploitable like a formula: mistakes come from imperfect information and personality (overpaying a veteran, falling for a hot streak), not from a loophole.
+- Difficulty is how good the AI's information and patience are, not hidden bonuses.
+- Tested by running the league with no human for 20 or more seasons and checking its health: every team cap-legal, dynasties rise and fall, bad teams recover through the draft, contracts and trade volumes look like the real league, no team hoards one position; plus scripted attempts at known exploits from other management games.
+- Build order: the value model, then team direction, then each kind of decision, starting with re-signing and free agency, then the draft, then trades.
