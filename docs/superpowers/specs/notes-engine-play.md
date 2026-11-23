@@ -102,3 +102,21 @@ Consequences and proposed shape **[my call]**:
 - Correction from the viewer's final review (2026-11-23), checked against the engine source: only the puck carrier re-decides every 0.2 s. Every other skater is given a new target every tick (job assignment runs each live tick and targets are relative to the puck), team phase flips with no hysteresis, and there is no coasting: easing off is braking as hard as he can accelerate. Most jobs also cap speed at 0.8 to 0.9 of top speed, so those skaters can never sprint. Skaters are near top speed under 10% of the time, in runs of about 0.6 s.
 - For engine round 2 **[my call]**: hold a job and its target for a while (hysteresis on team phase; re-issue a target only when it has moved enough or after a minimum time); do not ease off toward a moving target; turn by carving rather than shedding speed; separate gentle coasting from hard braking; review the role speed caps. Put the carried puck on the stick blade (forward and to the shooting side) and re-tune pokes, shot origins and net clipping. Read a goalie's catching hand from the player; add to save and goal events where the puck crossed (offset from the goalie and height) so the viewer can put the glove on the puck. All of this needs the re-tune that round already plans.
 - Also for engine round 2 (seen by the viewer, 2026-11-23): winning a loose-puck race teleports the puck up to about 4 m to the winner in one tick; it should travel there.
+
+## Owner's feedback after watching a full game in 3D (2026-11-24)
+
+"Looks promising so far." He agrees with the engine habits already noted. His own observations:
+
+- He cannot really tell a goal from a save.
+- Faceoffs look a bit odd: players are not facing the right way.
+- Some decisions are odd: a player on a breakaway passes back to the point.
+- A lot of diagonal passes back to the point that the defenceman cannot collect, which then go offside (the puck leaves the zone).
+- Not many shot attempts, and no rebounds.
+
+What follows **[my call]**:
+
+- Viewer (milestone 4, with a first step now): a goal must be unmistakable: the red goal light behind the net, the horn's visual equivalent (a flash on the score bug and the scoring team's name), the play holding for a beat, the celebration, then the replay. A save needs its own read: the puck visibly stopped, caught or kicked out.
+- Viewer or engine: faceoff alignment. Centres square to each other over the dot, wingers lined up on the circle facing the dot, defencemen behind; check what the engine gives during faceoff setup and fix the facing where it is the engine's.
+- Engine round 2, decisions with the puck: a player with a clear path to the net attacks it and shoots (a breakaway never passes backward); passes back to the point are chosen only when the defenceman can receive them inside the zone, are aimed to arrive on his stick with the right weight, and the defenceman moves to keep the puck in at the line; forwards under pressure down low cycle or shoot rather than throwing it blind to the point.
+- Engine round 2, shot volume and rebounds: more shot attempts from scoring areas and from the point with traffic; saves that leave rebounds in front (by the goalie's rebound control and the shot), attackers who go to the net for them, and second and third chances. The step-1 calibration counted shots on goal at about 29 per team, but attempts, rebounds and sustained pressure are what make it look like hockey.
+- These join the earlier engine round 2 list (players committing to a direction and speed, coasting, the puck on the blade, defencemen shooting, passes relative to facing, goalies' catching hand and facing after a save).
