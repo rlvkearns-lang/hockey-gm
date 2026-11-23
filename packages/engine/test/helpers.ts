@@ -89,7 +89,7 @@ let skaterSeq = 0;
 export function at(x: number, y: number): SkaterState {
   return {
     id: `s${skaterSeq++}`, side: 'home', slot: null, pos: { x, y }, vel: { x: 0, y: 0 }, facing: 0,
-    target: { x, y }, faceTarget: null, speedCap: 1, energy: 1, onIce: true, leaving: false,
+    target: { x, y }, faceTarget: null, mode: 'forward', speedCap: 1, energy: 1, onIce: true, leaving: false,
     downT: 0, contestId: null, shiftStart: 0,
   };
 }
@@ -192,7 +192,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
       resolveBoards(pos, { x: 0, y: 0 }, 0.5, 0);
       skaters.push({
         id: skaterId(side, slot), side, slot, pos, vel: { x: 0, y: 0 }, facing: dir === 1 ? 0 : Math.PI,
-        target: { x: pos.x, y: pos.y }, faceTarget: null, speedCap: 1, energy: 1, onIce: true, leaving: false,
+        target: { x: pos.x, y: pos.y }, faceTarget: null, mode: 'forward', speedCap: 1, energy: 1, onIce: true, leaving: false,
         downT: 0, contestId: null, shiftStart: 0,
       });
     }
@@ -1443,4 +1443,45 @@ export function playersOf(r: GameResult, side: Side): GameResult['players'] {
   const abbrOf = (id: string): string => id.slice(0, id.lastIndexOf('-'));
   const home = abbrOf(r.players[0]!.id);
   return r.players.filter((p) => (abbrOf(p.id) === home) === (side === 'home'));
+}
+
+// ---- skating measures (final review I2) ----
+
+export type RetreatMeasure = { samples: number; facingPuck: number; movingBackward: number; modes: Record<string, number> };
+
+/**
+ * The final review's measure of retreating defencemen, over whole games: every live tick, each on-ice defenceman of
+ * the side without the puck (the other side has possession), not down, moving toward his own net faster than 1.5 m/s,
+ * with the puck up-ice of him. `facingPuck`: share facing the puck within 60 degrees; `movingBackward`: share whose
+ * velocity points behind his facing; `modes`: share in each SkaterState mode.
+ */
+export function retreatMeasure(seeds: number[]): RetreatMeasure {
+  let n = 0, facing = 0, back = 0;
+  const modes: Record<string, number> = {};
+  for (const seed of seeds) {
+    const g = createGame(gameSetup(seed));
+    while (!g.done) {
+      g.step();
+      const st = g.state;
+      if (st.phase !== 'live' || st.possession === null) continue;
+      for (const s of st.skaters) {
+        if (!s.onIce || s.downT > 0 || (s.slot !== 'LD' && s.slot !== 'RD') || s.side === st.possession) continue;
+        const dir = st.attackDir[s.side];
+        const nx = -dir * RINK.goalLineX - s.pos.x, ny = -s.pos.y;
+        const nl = Math.hypot(nx, ny) || 1;
+        if ((s.vel.x * nx + s.vel.y * ny) / nl <= 1.5) continue;
+        if (st.puck.pos.x * dir <= s.pos.x * dir) continue;
+        n++;
+        const toPuck = Math.atan2(st.puck.pos.y - s.pos.y, st.puck.pos.x - s.pos.x);
+        let off = Math.abs(toPuck - s.facing) % (2 * Math.PI);
+        if (off > Math.PI) off = 2 * Math.PI - off;
+        if (off <= Math.PI / 3) facing++;
+        if (s.vel.x * Math.cos(s.facing) + s.vel.y * Math.sin(s.facing) < 0) back++;
+        const m = (s as { mode?: string }).mode ?? 'none';
+        modes[m] = (modes[m] ?? 0) + 1;
+      }
+    }
+  }
+  for (const k of Object.keys(modes)) modes[k] = modes[k]! / Math.max(1, n);
+  return { samples: n, facingPuck: facing / Math.max(1, n), movingBackward: back / Math.max(1, n), modes };
 }

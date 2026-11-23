@@ -67,6 +67,9 @@ export type GameSetup = {
   chemistry: { a: string; b: string; value: number }[];
 };
 
+/** See SkaterState.mode. */
+export type SkatingMode = 'forward' | 'backward' | 'crossover';
+
 export type SkaterState = {
   id: string;
   side: Side;
@@ -79,6 +82,12 @@ export type SkaterState = {
   target: Vec2;
   /** When set, he keeps his body pointed at this spot (skating backward if need be). */
   faceTarget: Vec2 | null;
+  /**
+   * How he is skating: `forward` (facing his travel), `backward` (squared up to faceTarget, travelling more than 120
+   * degrees off his facing) or `crossover` (squared up, travelling sideways or at an angle). Squared up means he keeps
+   * his body to faceTarget; he squares up once his travel is more than 65 degrees off it and stops below 45.
+   */
+  mode: SkatingMode;
   /** 0..1 fraction of top speed he may use this tick. */
   speedCap: number;
   energy: number;

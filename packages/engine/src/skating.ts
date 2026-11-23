@@ -20,8 +20,18 @@ const ARRIVE_RADIUS = 2;
 const EDGE_GRIP = 6;
 /** Speed lost per second while down. */
 const DOWN_FRICTION = 2;
-/** Angle between travel and facing target beyond which he skates backward. */
-const BACKWARD_ANGLE = (100 * Math.PI) / 180;
+/**
+ * Squaring up: with a spot to face (faceTarget) and somewhere to go, he keeps his body to that spot once his travel is
+ * more than SQUARE_ENTER off it, and goes back to facing his travel only when it is less than SQUARE_EXIT off
+ * (hysteresis, so he does not flip between the two). Squared up, travel more than BACKWARD_FROM off his facing is
+ * backward skating; less is crossovers (sideways, or forward at an angle).
+ */
+const SQUARE_ENTER = (65 * Math.PI) / 180;
+const SQUARE_EXIT = (45 * Math.PI) / 180;
+const BACKWARD_FROM = (120 * Math.PI) / 180;
+/** Squared up, his top speed sideways is this share of his forward top speed, and his sideways acceleration this share of his accel. */
+const LATERAL_SPEED = 0.8;
+const LATERAL_ACCEL = 0.75;
 
 /** Body radius (m) of a skater of this weight. */
 export const bodyRadius = (weightKg: number): number => 0.38 + (weightKg - 85) * 0.002;
@@ -73,42 +83,63 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
     const hasGoal = dist > 0.05;
     const travel = hasGoal ? datan2(dy, dx) : s.facing;
 
-    let backward = false;
+    // Squared up (backward or crossover) or not, with hysteresis on the angle between travel and the spot to face.
+    let squared = false;
     let wantFacing = travel;
     if (s.faceTarget) {
       const fx = s.faceTarget.x - s.pos.x, fy = s.faceTarget.y - s.pos.y;
       if (fx !== 0 || fy !== 0) {
         const toFace = datan2(fy, fx);
-        if (!hasGoal) wantFacing = toFace;
+        if (!hasGoal) { wantFacing = toFace; squared = s.mode !== 'forward'; }
         else {
-          const off = Math.abs(roughWrap(toFace - travel));
-          const isBack = Math.abs(off - BACKWARD_ANGLE) > SAFE ? off > BACKWARD_ANGLE : Math.abs(wrapAngle(toFace - travel)) > BACKWARD_ANGLE;
-          if (isBack) { backward = true; wantFacing = toFace; }
+          const off = Math.abs(wrapAngle(toFace - travel));
+          squared = off > (s.mode === 'forward' ? SQUARE_ENTER : SQUARE_EXIT);
+          if (squared) wantFacing = toFace;
         }
       }
     }
 
-    // Turn, slower at speed.
-    const maxTurn = (m.turnRate / (1 + speed / 6)) * dt;
+    // Turn, slower at speed going forward (his momentum is along his blades); squared up he pivots his upper body and
+    // hips freely, since his travel no longer follows his facing.
+    const maxTurn = (squared ? m.turnRate : m.turnRate / (1 + speed / 6)) * dt;
     s.facing = wrapAngle(s.facing + clampedTurn(wantFacing - s.facing, maxTurn));
 
     const fx = dcos(s.facing), fy = dsin(s.facing);
-    const moveDir = backward ? -1 : 1;
-    // Only effort along the facing counts; scale by how well it points at the goal.
-    const align = hasGoal ? Math.max(0, (moveDir * fx * dx + moveDir * fy * dy) / dist) : 0;
-    const arrive = Math.min(1, dist / ARRIVE_RADIUS);
-    const cap = Math.max(0, Math.min(1, s.speedCap));
-    const wantSpeed = m.topSpeed * cap * arrive * align * (backward ? m.backwardFactor : 1);
-    const wantAlong = moveDir * wantSpeed;
-
     const along = s.vel.x * fx + s.vel.y * fy;
     const latX = s.vel.x - fx * along, latY = s.vel.y - fy * along;
     const step = m.accel * dt;
-    const newAlong = along + Math.max(-step, Math.min(step, wantAlong - along));
+    const arrive = Math.min(1, dist / ARRIVE_RADIUS);
+    const cap = Math.max(0, Math.min(1, s.speedCap));
     if (dt !== gripDt) { gripDt = dt; gripFactor = dexp(-EDGE_GRIP * dt); }
     const grip = gripFactor;
-    s.vel.x = fx * newAlong + latX * grip;
-    s.vel.y = fy * newAlong + latY * grip;
+
+    if (!squared) {
+      s.mode = 'forward';
+      // Only effort along the facing counts; scale by how well it points at the goal.
+      const align = hasGoal ? Math.max(0, (fx * dx + fy * dy) / dist) : 0;
+      const wantAlong = m.topSpeed * cap * arrive * align;
+      const newAlong = along + Math.max(-step, Math.min(step, wantAlong - along));
+      s.vel.x = fx * newAlong + latX * grip;
+      s.vel.y = fy * newAlong + latY * grip;
+    } else {
+      // Squared up: he pushes toward the goal in any direction, fastest forward, then sideways, slowest backward (an
+      // ellipse of top speeds), and sideways only as fast as crossovers allow.
+      const ux = hasGoal ? dx / dist : 0, uy = hasGoal ? dy / dist : 0;
+      const a = ux * fx + uy * fy, l = uy * fx - ux * fy;
+      const limA = a >= 0 ? m.topSpeed : m.topSpeed * m.backwardFactor, limL = m.topSpeed * LATERAL_SPEED;
+      const ellipse = hasGoal ? 1 / Math.sqrt((a / limA) * (a / limA) + (l / limL) * (l / limL)) : 0;
+      const want = ellipse * cap * arrive;
+      const wantAlong = a * want, wantLat = l * want;
+      const newAlong = along + Math.max(-step, Math.min(step, wantAlong - along));
+      const lat = latY * fx - latX * fy; // signed, + to his left
+      const latStep = step * LATERAL_ACCEL;
+      const pushed = lat + Math.max(-latStep, Math.min(latStep, wantLat - lat));
+      const slid = wantLat + (lat - wantLat) * grip; // his edges shed whatever he does not want
+      const newLat = Math.abs(slid - wantLat) < Math.abs(pushed - wantLat) ? slid : pushed;
+      s.vel.x = fx * newAlong - fy * newLat;
+      s.vel.y = fy * newAlong + fx * newLat;
+      s.mode = hasGoal && Math.abs(wrapAngle(travel - s.facing)) > BACKWARD_FROM ? 'backward' : 'crossover';
+    }
   }
 
   s.pos.x += s.vel.x * dt;

@@ -70,7 +70,7 @@ function initialState(setup: GameSetup): GameState {
       const b = BENCH_DOORS[side];
       skaters.push({
         id: p.id, side, slot, pos: { x: b.x, y: b.y }, vel: { x: 0, y: 0 }, facing: 0, target: { x: b.x, y: b.y },
-        faceTarget: null, speedCap: 1, energy: 1, onIce: slot !== null, leaving: false, downT: 0, contestId: null, shiftStart: 0,
+        faceTarget: null, mode: 'forward', speedCap: 1, energy: 1, onIce: slot !== null, leaving: false, downT: 0, contestId: null, shiftStart: 0,
       });
       if (slot !== null) onIce[side].push(p.id);
     }
