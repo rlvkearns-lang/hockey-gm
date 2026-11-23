@@ -57,7 +57,10 @@ export type AnimContext = {
  * skater (`slot` is undefined when he starts afresh: a reset, a seek, an engine cut, stepping on); it is kept in
  * SkaterAnim.slots[id]. `weight` says how much of it shows (0..1; ease it in and out); `apply` returns the raw pose
  * with it fully on (the animator mixes by the weight). `offset` (optional) is where it wants his body drawn relative to
- * the engine position (world metres, x and z), at full weight.
+ * the engine position (world metres, x and z), at full weight. `turn` (optional; radians, added to the engine facing,
+ * as the goalie figure's `turn`) turns his whole drawn figure; it is NOT weighted (the overlay eases it itself) and is
+ * read whatever the weight. It exists for one ruled exception, faceoff setups (dead play): in live play every turn is
+ * exactly 0.
  */
 export type Overlay<S = unknown> = {
   id: string;
@@ -65,6 +68,7 @@ export type Overlay<S = unknown> = {
   weight(anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext): number;
   apply(raw: RawPose, anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext, dims: BodyDims): RawPose;
   offset?(anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext): { x: number; z: number };
+  turn?(anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext): number;
 };
 
 /**
@@ -82,14 +86,15 @@ export const slotOf = <S>(anim: SkaterAnim, id: string): S | undefined => anim.s
  * across his facing, the change of speed and the turn over the frame's tick.
  */
 export function motionOfSample(s: SkaterSample): Motion {
-  const vx = s.vel.x, vy = s.vel.y, c = Math.cos(s.facing), n = Math.sin(s.facing), m = s.right ? -1 : 1;
+  const f = s.facing;
+  const vx = s.vel.x, vy = s.vel.y, c = Math.cos(f), n = Math.sin(f), m = s.right ? -1 : 1;
   return {
     speed: Math.hypot(vx, vy),
     forward: vx * c + vy * n,
     lateral: m * (-vx * n + vy * c),
     accelAlong: s.accelAlong,
     turnRate: m * s.turnRate,
-    facing: m * s.facing,
+    facing: m * f,
     down: s.down,
   };
 }
@@ -97,10 +102,10 @@ export function motionOfSample(s: SkaterSample): Motion {
 /**
  * A point on the ice (engine x, y) in his body frame as a pose sees it (x forward, z to his right; mirrored for a
  * right shot), from his engine place and facing at the later tick (`at: 'tick'`, as the faceoff crouch reads the dot)
- * or his blended place and facing (`at: 'frame'`, the default).
+ * or his blended place and facing (`at: 'frame'`, the default); `turn` for a figure drawn turned (Overlay.turn).
  */
-export function toBodyFrame(s: SkaterSample, p: Vec2, at: 'frame' | 'tick' = 'frame'): Vec3 {
-  const o = at === 'tick' ? s.state.pos : s.pos, f = at === 'tick' ? s.state.facing : s.facing;
+export function toBodyFrame(s: SkaterSample, p: Vec2, at: 'frame' | 'tick' = 'frame', turn = 0): Vec3 {
+  const o = at === 'tick' ? s.state.pos : s.pos, f = (at === 'tick' ? s.state.facing : s.facing) + turn;
   const dx = p.x - o.x, dy = p.y - o.y, c = Math.cos(f), n = Math.sin(f);
   return { x: dx * c + dy * n, y: 0, z: (s.right ? -1 : 1) * (-dx * n + dy * c) };
 }

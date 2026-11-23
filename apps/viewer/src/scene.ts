@@ -91,8 +91,9 @@ type SkaterFig = {
    * shared with the animator's context); null before the first update.
    */
   sample: SkaterSample | null;
-  /** His pose this frame (null while off the ice) and his drawn body (overlays' offset, then the body pass). */
+  /** His pose this frame (null while off the ice), his drawn body (overlays' offset, then the body pass) and turn. */
   pose: SkaterPose | null;
+  turn: number;
   body: DrawnBody;
   /** Index into GameState.skaters (checked each frame, searched for if it ever moves). */
   idx: number;
@@ -162,7 +163,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
       const dims = bodyDims(def.heightCm, def.weightKg);
       const fig: SkaterFig = {
         id: def.id, side, right: def.shoots === 'R', dims, rig, anim: initialSkaterAnim(), idx: skaters.length,
-        sample: null, pose: null, body: newBody(def.id, 'skater', side),
+        sample: null, pose: null, turn: 0, body: newBody(def.id, 'skater', side),
         view: { position: new THREE.Vector3(), facing: 0, onIce: false, hipY: 0, pose: null, goaliePose: null },
         hold: { blade: { x: 0, z: 0 }, position: { x: 0, z: 0 } },
       };
@@ -300,8 +301,9 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
   function poseSkaterFig(fig: SkaterFig): void {
     const s = fig.sample, b = fig.body;
     if (!s || !s.onIce) { fig.pose = null; b.onIce = false; b.offset.x = 0; b.offset.z = 0; return; }
-    const { pose, offset } = poseSkater(fig.anim, s, ctx, fig.dims, skaterOverlays);
+    const { pose, offset, turn } = poseSkater(fig.anim, s, ctx, fig.dims, skaterOverlays);
     fig.pose = pose;
+    fig.turn = turn;
     b.onIce = true; b.pos.x = s.pos.x; b.pos.y = s.pos.y; b.facing = s.facing;
     b.offset.x = offset.x; b.offset.z = offset.z;
   }
@@ -323,7 +325,8 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
       fig.rig.root.visible = false;
       return;
     }
-    const x = s.pos.x + fig.body.offset.x, z = s.pos.y + fig.body.offset.z, facing = s.facing;
+    // (Drawn turned from the engine facing only in a faceoff setup and the moment after the drop: Overlay.turn.)
+    const x = s.pos.x + fig.body.offset.x, z = s.pos.y + fig.body.offset.z, facing = fig.turn === 0 ? s.facing : s.facing + fig.turn;
     fig.rig.apply(pose, x, z, facing);
     fig.rig.root.visible = true;
     view.pose = pose;

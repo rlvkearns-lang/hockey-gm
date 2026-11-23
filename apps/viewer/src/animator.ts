@@ -7,6 +7,7 @@ import { fitGoalie, goalieMotion, goalieRaw, initialGoalieGait, mixGoalieRaw, st
 import { BATTLE_OVERLAYS } from './overlays/battles';
 import { CONTACT_OVERLAYS, contactBodyPass } from './overlays/contact';
 import { faceoffCrouch } from './overlays/faceoff';
+import { faceoffLineup } from './overlays/faceoff-lineup';
 import { GOALIE_CATCHES, goalieReach, goalieTrack } from './overlays/goalie';
 import { beatenGoalie, blockOverlay, celebrateOverlay } from './overlays/reactions';
 import { STICK_OVERLAYS } from './overlays/stick';
@@ -33,7 +34,7 @@ export { GOALIE_CATCHES, goalieHeldPuck } from './overlays/goalie';
  */
 
 /** The registered overlays, in the order they are applied (later ones see the earlier ones' result). */
-export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, ...STICK_OVERLAYS, blockOverlay as Overlay, celebrateOverlay as Overlay, ...CONTACT_OVERLAYS, ...BATTLE_OVERLAYS];
+export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, faceoffLineup as Overlay, ...STICK_OVERLAYS, blockOverlay as Overlay, celebrateOverlay as Overlay, ...CONTACT_OVERLAYS, ...BATTLE_OVERLAYS];
 
 export function initialSkaterAnim(): SkaterAnim {
   return { gait: initialGait(), fresh: true, carrying: false, slots: {} };
@@ -82,11 +83,20 @@ export function stepSkater(anim: SkaterAnim, sample: SkaterSample, ctx: AnimCont
   return { gait, fresh: false, carrying: sample.carrying, slots };
 }
 
+/** The turn (rad) his overlays draw him at from the engine facing (Overlay.turn; 0 but in a faceoff setup). */
+export function turnOf(anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext, overlays: readonly Overlay[] = OVERLAYS): number {
+  let t = 0;
+  for (const ov of overlays) if (ov.turn) t += ov.turn(anim, sample, ctx);
+  return t;
+}
+
 /**
- * His pose for this frame (body frame of a left shot; mirror for a right shot) and the offset (world x, z) at which
- * to draw his body from the engine position: the gait's raw pose, each overlay mixed in by its weight, fitted once.
+ * His pose for this frame (body frame of a left shot; mirror for a right shot), the offset (world x, z) at which
+ * to draw his body from the engine position, and the turn (radians, added to the engine facing) at which to draw it:
+ * the gait's raw pose, each overlay mixed in by its weight, fitted once.
  */
-export function poseSkater(anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext, dims: BodyDims, overlays: readonly Overlay[] = OVERLAYS): { pose: SkaterPose; offset: { x: number; z: number } } {
+export function poseSkater(anim: SkaterAnim, sample: SkaterSample, ctx: AnimContext, dims: BodyDims, overlays: readonly Overlay[] = OVERLAYS): { pose: SkaterPose; offset: { x: number; z: number }; turn: number } {
+  const turn = turnOf(anim, sample, ctx, overlays);
   const m = motionOfSample(sample);
   const handle = sample.carrying || (anim.gait.puck ?? 0) > 0 ? stickhandle(ctx.time, m.speed) : undefined;
   let raw = gaitRaw(anim.gait, m, dims, handle ? { hasPuck: sample.carrying, handle } : { hasPuck: sample.carrying });
@@ -98,7 +108,7 @@ export function poseSkater(anim: SkaterAnim, sample: SkaterSample, ctx: AnimCont
     raw = mixRaw(raw, ov.apply(raw, anim, sample, ctx, dims), k);
     if (ov.offset) { const o = ov.offset(anim, sample, ctx); ox += o.x * k; oz += o.z * k; }
   }
-  return { pose: fitBody(raw, dims), offset: { x: ox, z: oz } };
+  return { pose: fitBody(raw, dims), offset: { x: ox, z: oz }, turn };
 }
 
 // ---------------------------------------------------------------------------------------------------------------

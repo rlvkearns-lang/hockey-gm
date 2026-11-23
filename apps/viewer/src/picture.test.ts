@@ -40,9 +40,12 @@ import { sharedPlayback } from './test/game';
 // and 42: 2f707429f246afd7 before (473e45b), which this code still gives with BATTLE_OVERLAYS taken out of OVERLAYS.
 // Re-pinned by Task 5's fix round 1 (the shoulder battle, the result held as a beat, the net-front shove): 5:
 // 1dc7b8be0de90acb and 42: c4115d5c8b595eef before (8368d45); with BATTLE_OVERLAYS out this code still gives 473e45b's.
+// Re-pinned by Task 6 (faceoffs that line up, overlays/faceoff-lineup.ts: the figures turned to the dot in a faceoff
+// setup and the centres' draw; seed 42's 40 s hold a faceoff at 3334, seed 5's none): 5: 303e6178dfc64315 and 42:
+// cad81dcc00ac9916 before (c618028), which this code still gives with faceoffLineup taken out of OVERLAYS.
 const PICTURE_HASH: Record<number, string> = {
   5: '303e6178dfc64315',
-  42: 'cad81dcc00ac9916',
+  42: '571a0213d51808a7',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */
