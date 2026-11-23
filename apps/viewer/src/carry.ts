@@ -45,32 +45,51 @@ export function stickhandle(t: number, speed: number): { dx: number; dz: number 
 
 /**
  * `w` is the blade's share of the drawn puck (0: exactly the engine's puck, 1: exactly on the blade); `from` is where
- * the puck was drawn last (world ice plane). After a new game or a seek, start from `{ w: 0, from: enginePuck }`, or
- * `{ w: 1, from: bladeWorld }` if someone carries it at that moment, so nothing eases across the cut.
+ * the puck was drawn last (world ice plane), which the next step eases on from. After a new game or a seek, start from
+ * `{ w: 0, from: enginePuck }`, or `{ w: 1, from: bladeWorld }` if someone carries it at that moment, so nothing eases
+ * across the cut (a stale blend is eased out, not jumped).
  */
 export type CarryBlend = { w: number; from: IcePoint };
 
 /** Seconds to ease onto the blade once he has the puck, and back to the engine's puck once he has not. */
 export const CARRY_ON = 0.15, CARRY_OFF = 0.1;
+/**
+ * While carried, the drawn puck and both ends of the blend move with the carrier (well under 12 m/s), so a gap between
+ * where it was drawn and where the blend says it was that is wider than CATCH_UP_SLACK plus that much in a step means
+ * the blade itself jumped (a new carrier, or a blend not reset after a seek). The gap is then closed at CATCH_UP_SPEED.
+ */
+const CATCH_UP_SLACK = 0.05, CARRIER_SPEED = 12, CATCH_UP_SPEED = 24;
+
+const blendAt = (engine: IcePoint, blade: IcePoint, w: number): IcePoint => {
+  if (w === 0) return { x: engine.x, z: engine.z };
+  if (w === 1) return { x: blade.x, z: blade.z };
+  const k = smooth(w);
+  return { x: engine.x + (blade.x - engine.x) * k, z: engine.z + (blade.z - engine.z) * k };
+};
+const snapW = (w: number): number => (w >= 1 - 1e-9 ? 1 : w <= 1e-9 ? 0 : w);
 
 /**
  * Step the drawn puck by `dt` seconds. While `carried` it eases from the engine's puck onto the blade (`bladeWorld`,
  * the carry point in world x, z) within CARRY_ON; once the carry ends it eases back to the engine's puck within
  * CARRY_OFF and is then exactly it. Both ends move with the play while it eases (the engine keeps a carried puck at
- * his reach, and a released one flies from his stick), so the drawn puck never lags or jumps; a change of mind
- * part way through turns the ease round where it is.
+ * his reach, and a released one flies from his stick), so the drawn puck never lags; a change of mind part way
+ * through turns the ease round where it is. If, while carried, the blade is suddenly far from where the puck was
+ * drawn (`from`), the puck travels there from where it was at CATCH_UP_SPEED instead of jumping (3 m in an eighth of
+ * a second).
  */
 export function stepCarry(b: CarryBlend, carried: boolean, enginePuck: IcePoint, bladeWorld: IcePoint, dt: number): { blend: CarryBlend; drawn: IcePoint } {
   const h = Math.max(0, fin(dt));
   const w0 = clamp01(fin(b.w));
-  let w = carried ? w0 + h / CARRY_ON : w0 - h / CARRY_OFF;
-  if (w >= 1 - 1e-9) w = 1; else if (w <= 1e-9) w = 0;
-  let drawn: IcePoint;
-  if (w === 0) drawn = { x: enginePuck.x, z: enginePuck.z };
-  else if (w === 1) drawn = { x: bladeWorld.x, z: bladeWorld.z };
-  else {
-    const k = smooth(w);
-    drawn = { x: enginePuck.x + (bladeWorld.x - enginePuck.x) * k, z: enginePuck.z + (bladeWorld.z - enginePuck.z) * k };
+  const w = snapW(carried ? w0 + h / CARRY_ON : w0 - h / CARRY_OFF);
+  let drawn = blendAt(enginePuck, bladeWorld, w);
+  if (carried && Number.isFinite(b.from?.x) && Number.isFinite(b.from?.z)) {
+    // Where the blend, with the ends where they are now, says the puck was: it was drawn at `from`.
+    const was = blendAt(enginePuck, bladeWorld, snapW(w0));
+    const gx = b.from.x - was.x, gz = b.from.z - was.z, gap = Math.hypot(gx, gz);
+    if (gap > CATCH_UP_SLACK + CARRIER_SPEED * h) {
+      const keep = Math.max(0, gap - CATCH_UP_SPEED * h) / gap;
+      drawn = { x: drawn.x + gx * keep, z: drawn.z + gz * keep };
+    }
   }
   return { blend: { w, from: drawn }, drawn };
 }

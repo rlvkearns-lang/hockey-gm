@@ -140,15 +140,17 @@ export const GAIT = {
   strideRawMin: -0.5,
   /**
    * A stride becomes a sprint at speed (m/s) and smoothed acceleration (m/s^2) above the enter pair (not while
-   * shoved). The sprint drops back to a stride when his speed falls below sprintSpeedExit while he still drives, and
-   * to a glide when his acceleration falls below sprintAccExit (unless he is braking hard, when it holds until the stop
-   * starts). The engine's top speeds are 7.6 to 9.2 m/s and a skater at his top speed has no acceleration, so the
-   * sprint is the hard end of a rush up to top speed and the half second or so after it. See the task 1 report.
+   * shoved). The engine's top speeds are 7.6 to 9.2 m/s and a skater holding his top speed has no acceleration (the
+   * engine has no friction on an upright skater: he slows only by easing off toward a lower speed, at up to his full
+   * acceleration), so once flat out he stays in the sprint while he holds speed: it ends when his speed falls below
+   * sprintSpeedExit (to a stride if he still drives, else a glide), when his smoothed acceleration falls below
+   * sprintAccExit (he has eased off: about 1 m/s shed at the engine's 8 m/s^2 takes it there), when he is shoved, or when
+   * a stop, crossover or fall takes over. Braking hard holds it until the stop starts. See the task 1 report.
    */
   sprintSpeedEnter: 7.0,
   sprintSpeedExit: 6.5,
   sprintAccEnter: 2.0,
-  sprintAccExit: 0.6,
+  sprintAccExit: -0.8,
   /** Height (m) of the blade heel when he sprints with the stick in his top hand only. */
   sprintBladeUp: 0.22,
   /** Seconds for his hands and stick to go over to carrying the puck, or back. */
@@ -271,10 +273,11 @@ function classify(cur: Style, m: Motion, acc: number, turn: number, passive: boo
     && Math.abs(turn) > (inCross ? G.crossTurnExit : G.crossTurnEnter) && (inCross || (canStart && acc > G.crossTurnMinAcc));
   if (sideways || hardTurn) return 'crossover';
   if (cur === 'sprint') {
-    // Flat out until he slows (back to a stride) or eases off (straight to a glide: a stride for a moment between
-    // would be one more change); braking hard holds it until the stop takes over, rather than blending through a glide.
-    if (acc > G.sprintAccExit) return sp > G.sprintSpeedExit ? 'sprint' : 'stride';
-    return raw < G.stopRawMax && !passive && sp > G.sprintSpeedExit ? 'sprint' : 'glide';
+    // Flat out for as long as he holds his speed. Braking hard holds it until the stop takes over, rather than blending
+    // through a glide; easing off goes straight to a glide (a stride for a moment between would be one more change).
+    const fast = sp > G.sprintSpeedExit;
+    if (fast && !passive && (acc > G.sprintAccExit || raw < G.stopRawMax)) return 'sprint';
+    return !passive && acc > G.strideEnter && !fast ? 'stride' : 'glide';
   }
   if (!pushing) return 'glide';
   // Flat out: only from a stride, and never while carried along by a shove.

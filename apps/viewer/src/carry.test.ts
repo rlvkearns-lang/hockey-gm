@@ -44,8 +44,9 @@ describe('carry', () => {
       let r = stepCarry(b, false, eng, blade, 1 / hz); expect(r.drawn).toEqual(eng); b = r.blend;
       for (let t = 0; t < 0.15 - 1e-9; t += 1 / hz) { r = stepCarry(b, true, eng, blade, 1 / hz); b = r.blend; }
       expect(r.drawn).toEqual(blade);
-      // A moving blade is followed exactly once the blend is done.
-      r = stepCarry(b, true, eng, { x: 4, z: -1 }, 1 / hz); b = r.blend; expect(r.drawn).toEqual({ x: 4, z: -1 });
+      // A blade moving with a carrier at 10 m/s is followed exactly once the blend is done.
+      const moved = { x: blade.x + 10 / hz, z: blade.z };
+      r = stepCarry(b, true, eng, moved, 1 / hz); b = r.blend; expect(r.drawn).toEqual(moved);
       for (let t = 0; t < 0.1 - 1e-9; t += 1 / hz) { r = stepCarry(b, false, { x: 4.5, z: -1 }, blade, 1 / hz); b = r.blend; }
       expect(r.drawn).toEqual({ x: 4.5, z: -1 });
       expect(b.w).toBe(0);
@@ -65,6 +66,25 @@ describe('carry', () => {
     expect(worst).toBeLessThan(0.2);
     const r = stepCarry({ w: NaN, from: { x: NaN, z: 0 } }, true, { x: 1, z: 1 }, { x: 2, z: 2 }, NaN);
     expect(Number.isFinite(r.drawn.x + r.drawn.z + r.blend.w)).toBe(true);
+  });
+  it('a new carrier (the blade jumping 3 m while still carried) eases the drawn puck across rather than jumping', () => {
+    const eng = { x: 5, z: 2 }, oldBlade = { x: 5.4, z: 1.8 }, newBlade = { x: 8.4, z: 1.8 };
+    let r = stepCarry({ w: 1, from: oldBlade }, true, eng, oldBlade, 1 / 60);
+    expect(r.drawn).toEqual(oldBlade);
+    let last = r.drawn, b = r.blend, reached = -1, worst = 0;
+    for (let i = 1; i <= 30; i++) {
+      r = stepCarry(b, true, { x: 8, z: 2 }, newBlade, 1 / 60);
+      worst = Math.max(worst, Math.hypot(r.drawn.x - last.x, r.drawn.z - last.z));
+      if (reached < 0 && r.drawn.x === newBlade.x && r.drawn.z === newBlade.z) reached = i / 60;
+      b = r.blend; last = r.drawn;
+    }
+    expect(worst).toBeLessThan(0.6);
+    expect(worst).toBeGreaterThan(0); // it did move
+    expect(reached).toBeGreaterThan(0); expect(reached).toBeLessThanOrEqual(0.15 + 1e-9);
+    expect(last).toEqual(newBlade);
+    // The same when a caller forgets to reset the blend after a seek to a moment someone carries it far away.
+    r = stepCarry({ w: 1, from: { x: -20, z: 0 } }, true, { x: 10, z: 5 }, { x: 10.5, z: 4.6 }, 1 / 60);
+    expect(Math.hypot(r.drawn.x + 20, r.drawn.z)).toBeLessThan(0.6);
   });
   it('stickhandling slows and narrows as he speeds up, and is still at a sprint', () => {
     // How wide it goes, how often it turns, and how far the blade travels in 4 s.

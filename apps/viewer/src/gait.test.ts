@@ -481,6 +481,31 @@ describe('sprint', () => {
       expect(s.has('sprint'), `v0=${v0} ${hz} Hz saw ${[...s]}`).toBe(false);
     }
   });
+  it('a sprint holds while he holds top speed, ends for a glide once he eases off, and a hard brake from it is a stop', () => {
+    // Into the sprint: up to 8.5 m/s at an engine-like 8 m/s^2.
+    const rush = (t: number): Motion => { const v = Math.min(8.5, 0.5 + 8 * t); return m({ speed: v, forward: v, accelAlong: v < 8.5 ? 8 : 0 }); };
+    for (const hz of RATES) {
+      const into = (g0 = initialGait()) => { let g = g0; for (let i = 0; i < Math.round(1.5 * hz); i++) g = stepGait(g, rush(i / hz), 1 / hz); return g; };
+      let g = into();
+      expect(g.style, `${hz} Hz`).toBe('sprint');
+      // Holding 8.5 m/s with no acceleration for 3 s: still flat out.
+      for (let i = 0; i < 3 * hz; i++) { g = stepGait(g, m({ speed: 8.5, forward: 8.5 }), 1 / hz); expect(g.style, `${hz} Hz hold`).toBe('sprint'); }
+      // Easing off as the engine does (no friction: he sheds 1 m/s at 8 m/s^2, then holds the lower speed): a glide
+      // within about half a second.
+      let left = -1;
+      for (let i = 0; i < hz; i++) {
+        const t = i / hz, v = Math.max(7.5, 8.5 - 8 * t);
+        g = stepGait(g, m({ speed: v, forward: v, accelAlong: v > 7.5 ? -8 : 0 }), 1 / hz);
+        if (left < 0 && g.style !== 'sprint') { left = t; expect(g.style).toBe('glide'); }
+      }
+      expect(left, `${hz} Hz`).toBeGreaterThan(0); expect(left, `${hz} Hz`).toBeLessThan(0.6);
+      // A hard brake from the sprint goes to the stop, with nothing between.
+      g = into();
+      const seen: Style[] = [];
+      for (let i = 0; i < hz; i++) { const v = Math.max(1, 8.5 - 9 * (i / hz)); g = stepGait(g, m({ speed: v, forward: v, accelAlong: -9 }), 1 / hz); if (seen[seen.length - 1] !== g.style) seen.push(g.style); }
+      expect(seen, `${hz} Hz`).toEqual(['sprint', 'stop']);
+    }
+  });
   it('the sprint pushes harder: longer pushes, deeper knees and a bigger arm drive than the stride at the same speed', () => {
     const mo = m({ speed: 8.5, forward: 8.5, accelAlong: 3 });
     let sReach = 0, tReach = 0, sArm = 0, tArm = 0;
