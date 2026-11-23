@@ -74,3 +74,10 @@ Proposed shape **[my call]**:
 - In gear, with helmet and visor, most of the face is covered, so a simple head with the right skin tone, hair showing at the back and any beard is enough. That removes the hardest art problem from the project for now.
 - Prospects and unsigned players wear a neutral or junior-team jersey; ageing shows in build rather than face.
 - Reuses the viewer's skater model and poses, so it costs little beyond the 3D viewer work itself.
+
+## Around the game (owner, 2026-11-23)
+
+- Before: a short pre-game screen that can be skipped (line-ups, starting goalies, injured and scratched players, recent form **[contents my call]**).
+- Intermissions: a quick summary that can be skipped.
+- After: a proper post-game (three stars, final box score, injuries, goal replays to rewatch **[contents my call]**).
+- The post-game can lead into a media scrum for players or coaches when there is drama or something important; otherwise it is skipped. (The scrum itself belongs to the people stage; the viewer only needs a place for it after the post-game.)
