@@ -26,3 +26,8 @@ Working notes from conversation with the owner on 2026-11-23, to be folded into 
 - Owner: use discretion. A 230 lb player hitting a 165 lb winger at high speed should win most of the time (near the 90% cap is right). Only ordinary mismatches should sit lower.
 
 Mockup of the watch screen layout: https://claude.ai/artifact/8zAg7iarbD54vTWYPKJUGH
+
+## Player faces (for the league and GM stages, and the 3D heads)
+- Owner dislikes EA NHL's grey placeholder faces for generated players.
+- Owner dislikes FHM's generated faces not matching age: an 18-year-old with a full beard who looks 36.
+- [my call] Every generated player gets a face built from a seed stored with him, so it is the same face for his whole career. Age drives how it is drawn: an 18-year-old looks 18 (no heavy beard, full hairline), and the same face matures year by year (facial hair options open up, hairline, grey, lines). Drawn portraits, not photo-real. The 3D head in the viewer takes its skin tone, hair and beard from the same face so the two match.
