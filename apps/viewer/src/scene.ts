@@ -37,6 +37,8 @@ export type GameScene = {
   puckWorld(target?: THREE.Vector3): THREE.Vector3;
   /** A figure's place (world, on the ice), facing (engine radians) and whether he is on the ice; read-only. */
   figure(id: string): FigureView | undefined;
+  /** How large the puck is drawn, as a multiple of a real puck (default PUCK_SCALE); its shadow scales with it. */
+  setPuckScale(k: number): void;
   dispose(): void;
 };
 export type FigureView = { readonly position: THREE.Vector3; readonly facing: number; readonly onIce: boolean };
@@ -131,6 +133,11 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
   puckShadow.scale.setScalar(PUCK_R * 1.8);
   puck.add(disc, puckShadow);
   root.add(puck);
+  function setPuckScale(k: number): void {
+    const f = Number.isFinite(k) && k > 0 ? k / PUCK_SCALE : 1;
+    disc.scale.setScalar(f);
+    puckShadow.scale.setScalar(PUCK_R * 1.8 * f);
+  }
 
   // ---- Real-time shadows on `high`: figures and the puck cast them, the rink takes them.
   if (quality === 'high') {
@@ -350,6 +357,7 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     reset,
     puckWorld: (target = new THREE.Vector3()) => target.copy(drawn),
     figure: (id) => byId.get(id)?.view,
+    setPuckScale,
     dispose,
   };
 }

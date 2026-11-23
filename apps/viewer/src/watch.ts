@@ -26,6 +26,7 @@ const fpsEl = $('fps');
 const slowEl = $('slow');
 const summaryEl = $('summary');
 const benchNote = $('benchNote');
+const problemEl = $('problem');
 
 if (__SKATING_LINK__) { const a = $<HTMLAnchorElement>('skatingLink'); a.href = 'skating.html'; a.hidden = false; }
 
@@ -40,7 +41,16 @@ const FOCUS_TAU = 0.22;
 const SLOW_FPS = 20, SLOW_SECONDS = 3;
 /** A camera target that moves this far (m) in one frame is cut to, not eased to. */
 const CUT_JUMP = 6;
-let lastTarget: Vec3 | null = null;
+/** Goal marks closer than this (px) on the time line are stacked. */
+const MARK_PX = 15;
+let lastTarget: CameraPose | null = null, lastTargetName: CameraName | null = null;
+/** Below this picture width (CSS px) the broadcast camera frames the play tighter: 29 degrees / 1.7, about 17. */
+const NARROW_PX = 700, NARROW_ZOOM = 1.7;
+/**
+ * The puck is drawn at least PUCK_MIN_PX across on screen (CSS px), from true size (1x) up close to at most
+ * PUCK_MAX_SCALE times a real puck from the far cameras; 7.62 cm is a real puck's width.
+ */
+const PUCK_MIN_PX = 9, PUCK_MAX_SCALE = 4, PUCK_WIDTH = 0.0762;
 
 // ---------------------------------------------------------------------------------------------------------------
 // Renderer, scene and camera. Quality: Low (no antialiasing, the light scene, pixel ratio up to 1.5) or High
@@ -77,7 +87,7 @@ function fit(): void {
   camera.updateProjectionMatrix();
   dirty = true;
 }
-new ResizeObserver(() => fit()).observe(stage);
+new ResizeObserver(() => { fit(); if (game) drawTimeline(); }).observe(stage);
 
 // ---------------------------------------------------------------------------------------------------------------
 // The game
@@ -160,7 +170,11 @@ function aimCamera(dt: number): void {
   lastAttack = attack; lastPhase = f.next.phase;
   focus = snap ? puck : easePoint(focus, puck, dt, FOCUS_TAU);
   const a = f.alpha, pp = f.prev.puck.vel, pn = f.next.puck.vel;
-  const input: CameraInput = { puck: focus, puckVel: { x: pp.x + (pn.x - pp.x) * a, y: 0, z: pp.y + (pn.y - pp.y) * a }, attackingRight: attack === 1 };
+  const input: CameraInput = {
+    puck: focus, puckVel: { x: pp.x + (pn.x - pp.x) * a, y: 0, z: pp.y + (pn.y - pp.y) * a }, attackingRight: attack === 1,
+    zoom: stage.clientWidth < NARROW_PX ? NARROW_ZOOM : 1,
+    current: lastTargetName === cameraName && lastTarget ? lastTarget : undefined,
+  };
   const fv = followId ? gs.figure(followId) : undefined;
   const followOn = !!fv && fv.onIce;
   if (followOn && fv) {
@@ -172,8 +186,8 @@ function aimCamera(dt: number): void {
   const target = cameraTarget(cameraName, input);
   // An angle that jumps to the other side of the play (ice level as the puck crosses centre along its boards) cuts
   // there, as a director would, rather than swinging the camera through the players.
-  if (lastTarget && Math.hypot(target.pos.x - lastTarget.x, target.pos.z - lastTarget.z) > CUT_JUMP) snap = true;
-  lastTarget = target.pos;
+  if (lastTarget && Math.hypot(target.pos.x - lastTarget.pos.x, target.pos.z - lastTarget.pos.z) > CUT_JUMP) snap = true;
+  lastTarget = target; lastTargetName = cameraName;
   const anchor = cameraName === 'follow' ? input.followed?.pos : undefined;
   if (anchor && !snap) {
     // Behind a skater at full speed: ease the camera's place relative to him, so it keeps up instead of trailing.
@@ -187,6 +201,10 @@ function aimCamera(dt: number): void {
   camera.position.set(cam.pos.x, cam.pos.y, cam.pos.z);
   camera.lookAt(cam.look.x, cam.look.y, cam.look.z);
   if (camera.fov !== cam.fov) { camera.fov = cam.fov; camera.updateProjectionMatrix(); }
+  // Draw the puck large enough to find from far away, and true to size up close.
+  const d = camera.position.distanceTo(puckV);
+  const pxPerM = Math.max(1, stage.clientHeight || 1) / (2 * Math.max(d, 0.5) * Math.tan((cam.fov * Math.PI) / 360));
+  gs.setPuckScale(Math.min(PUCK_MAX_SCALE, Math.max(1, PUCK_MIN_PX / (pxPerM * PUCK_WIDTH))));
   // The overhead camera hangs above the scoreboard; it would hide centre ice.
   if (game.scoreboard) game.scoreboard.visible = cameraName !== 'overhead';
   const off = cameraName === 'follow' && !followOn;
@@ -267,15 +285,24 @@ function drawTimeline(): void {
     start = end;
   });
   periods.replaceChildren(...parts);
+  // Goals close together stack upward, so each mark can be seen and clicked.
+  const width = Math.max(1, $('goals').clientWidth);
+  let lastX = -Infinity, level = 0, maxLevel = 0;
   $('goals').replaceChildren(...goals.map((g) => {
+    const x = (g.tick / total) * width;
+    level = x - lastX < MARK_PX ? level + 1 : 0;
+    if (level === 0) lastX = x;
+    maxLevel = Math.max(maxLevel, level);
     const b = document.createElement('button');
     b.className = g.side;
     b.style.left = pct(g.tick);
+    b.style.top = `${-1 - level * MARK_PX}px`;
     b.title = g.text;
     b.setAttribute('aria-label', `${g.text}. Watch it from just before.`);
     b.addEventListener('click', () => { seekTo(g.tick - GOAL_LEAD / DT); setPlaying(true); });
     return b;
   }));
+  $('timeline').style.marginTop = `${14 + maxLevel * MARK_PX}px`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -307,6 +334,8 @@ function setSpeed(v: number): void {
 
 function setCamera(name: CameraName): void {
   cameraName = name;
+  // The picker shows the followed player only while following him, so picking him again is a change that follows him.
+  followSel.value = name === 'follow' ? followId : '';
   document.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.camera === name)));
   snap = true;
   aimCamera(0);
@@ -323,32 +352,72 @@ function setFollow(id: string): void {
 const nextPaint = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
 let busy = false;
+/** For the screenshot script: make the next New game or quality change fail, to check the page survives it. */
+let failNext: 'game' | 'quality' | null = null;
+const maybeFail = (what: 'game' | 'quality'): void => { if (failNext === what) { failNext = null; throw new Error(`test failure: ${what}`); } };
+/** Turn the controls on or off. Without a game only Seed and New game work (the rest need one). */
 const setControls = (on: boolean): void => {
-  document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('main button, main input, main select').forEach((b) => { b.disabled = !on; });
+  document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('main button, main input, main select').forEach((b) => {
+    b.disabled = !on || (game === null && b !== seedInput && b.id !== 'newGame');
+  });
 };
+/** A plain message under the picture (the current game stays as it was), or the picture's own message without one. */
+function showProblem(message: string): void {
+  if (game) {
+    loading.hidden = true;
+    problemEl.textContent = message;
+    problemEl.hidden = false;
+  } else {
+    loading.textContent = message;
+    loading.hidden = false;
+    problemEl.hidden = true;
+  }
+}
+
+const showQuality = (q: ArenaQuality): void =>
+  document.querySelectorAll<HTMLButtonElement>('[data-quality]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.quality === q)));
+
+/** Replace the renderer and the game scene for quality `q`, staying at the same moment of the game. */
+function rebuild(q: ArenaQuality, at: number): void {
+  quality = q;
+  showQuality(q);
+  if (game && game.gs.root.parent) dropScene(game.gs);
+  makeRenderer();
+  if (game) {
+    game.gs = buildScene(game.setup);
+    game.scoreboard = game.gs.root.getObjectByName('scoreboard');
+    seekTo(at);
+  }
+}
 
 async function setQuality(q: ArenaQuality): Promise<void> {
   if (busy || q === quality) return;
   busy = true;
-  quality = q;
-  document.querySelectorAll<HTMLButtonElement>('[data-quality]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.quality === q)));
+  const before = quality, at = posNow();
   slowEl.hidden = true;
+  problemEl.hidden = true;
   slowSeconds = 0;
   const wasPlaying = playing;
   setPlaying(false);
   setControls(false);
   try {
     await nextPaint();
-    if (game) dropScene(game.gs);
-    makeRenderer();
-    if (game) {
-      game.gs = buildScene(game.setup);
-      game.scoreboard = game.gs.root.getObjectByName('scoreboard');
-      seekTo(posNow());
+    rebuild(q, at);
+    maybeFail('quality');
+  } catch (e) {
+    console.error(e);
+    // Go back to the quality that worked; if even that fails, there is no picture to show.
+    try {
+      rebuild(before, at);
+      showProblem(`Sorry, quality ${q === 'high' ? 'High' : 'Low'} could not be set up on this computer. Staying on ${before === 'high' ? 'High' : 'Low'}.`);
+    } catch (e2) {
+      console.error(e2);
+      game = null;
+      showProblem('Sorry, the picture could not be set up on this computer. Try reloading the page.');
     }
   } finally {
-    setControls(true);
     busy = false;
+    setControls(true);
     setPlaying(wasPlaying);
   }
 }
@@ -356,7 +425,11 @@ async function setQuality(q: ArenaQuality): Promise<void> {
 function fillFollow(setup: GameSetup): void {
   const order = { G: 0, C: 1, LW: 2, RW: 3, LD: 4, RD: 5 } as const;
   const posName = { G: 'Goalie', C: 'Centre', LW: 'Left wing', RW: 'Right wing', LD: 'Defence', RD: 'Defence' } as const;
-  followSel.replaceChildren();
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = 'Choose a player…';
+  none.disabled = true;
+  followSel.replaceChildren(none);
   for (const side of ['home', 'away'] as const) {
     const team = setup[side];
     const group = document.createElement('optgroup');
@@ -373,27 +446,38 @@ function fillFollow(setup: GameSetup): void {
   }
 }
 
-/** Play a new game up front. One at a time; a failure is shown in plain words and the controls come back. */
+/**
+ * Play a new game up front. One at a time. Everything for the new game is made before the old one is let go, so if
+ * anything fails the game on screen stays as it was (and usable), with a plain message under it.
+ */
 async function newGame(): Promise<void> {
   if (busy) return;
   busy = true;
   const seed = Math.trunc(Number(seedInput.value)) || 0;
+  const wasPlaying = playing;
   setPlaying(false);
   setControls(false);
+  problemEl.hidden = true;
   loading.hidden = false;
   loading.textContent = 'Simulating…';
+  let ok = false;
   try {
     await nextPaint();
     const setup: GameSetup = { home: generateTeam(seed * 2 + 1, 'Harbour City', 'HBR'), away: generateTeam(seed * 2 + 2, 'Northern Peaks', 'NPK'), seed, chemistry: [] };
     const t0 = performance.now();
     const playback = createPlayback(setup);
-    simulateMs = performance.now() - t0;
+    const ms = performance.now() - t0;
     const defs = new Map<string, PlayerDef>();
     for (const t of [setup.home, setup.away]) for (const p of t.players) defs.set(p.id, p);
-    if (game) dropScene(game.gs);
-    game = null;
+    const index = indexEvents(playback.events, defs, setup);
+    maybeFail('game');
     const gs = buildScene(setup);
-    game = { setup, playback, gs, defs, ...indexEvents(playback.events, defs, setup), scoreboard: gs.root.getObjectByName('scoreboard') };
+    // Made: let the old game go.
+    const old = game;
+    game = { setup, playback, gs, defs, ...index, scoreboard: gs.root.getObjectByName('scoreboard') };
+    if (old) dropScene(old.gs);
+    simulateMs = ms;
+    lastTarget = null; lastTargetName = null;
     text($('bugHome'), setup.home.abbr);
     text($('bugAway'), setup.away.abbr);
     const title = $('title');
@@ -403,18 +487,18 @@ async function newGame(): Promise<void> {
     title.replaceChildren(h, v, a);
     fillFollow(setup);
     followId = setup.home.lines.forwards[0]?.[1] ?? '';
-    followSel.value = followId;
     drawTimeline();
+    setCamera(cameraName);
     seekTo(0);
     loading.hidden = true;
+    ok = true;
   } catch (e) {
     console.error(e);
-    if (game) { dropScene(game.gs); game = null; }
-    loading.hidden = false;
-    loading.textContent = `Sorry, this game could not be set up (seed ${seed}). Try another seed and press New game.`;
+    showProblem(`Sorry, this game could not be set up (seed ${seed}). Try another seed and press New game.`);
   } finally {
-    setControls(true);
     busy = false;
+    setControls(true);
+    if (!ok && game) setPlaying(wasPlaying);
   }
 }
 let simulateMs = 0;
@@ -527,6 +611,7 @@ const hook = {
     const a = project(f.position.x, 0, f.position.z), b = project(f.position.x, 1.8, f.position.z);
     return { ...a, px: Math.abs(a.y - b.y) * (canvas?.height ?? 0) };
   },
+  failNext: (what: 'game' | 'quality'): void => { failNext = what; },
   hud: () => ({ bug: $('bug').innerText, when: $('when').textContent, summary: summaryEl.hidden ? null : summaryEl.textContent }),
 };
 (window as unknown as { __watch: typeof hook }).__watch = hook;

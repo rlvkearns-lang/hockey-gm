@@ -7,11 +7,11 @@ import type { RigColors } from './rig';
  * The arena round the rink (three.js, nothing imported): stands rising behind the boards with a still crowd of
  * coloured blocks (one merged mesh; a share dressed in each team's colours), glass above the boards, a scoreboard
  * hanging over centre ice, a crest at centre ice, the benches and penalty boxes, lights under the roof and the
- * lighting. The page clears to ARENA_BACKGROUND for the dark roof and walls beyond the stands.
+ * lighting, all closed in by an upper bowl, back walls and a dark roof (no camera sees out of the building).
  *
  * The benches are on the side of the bench doors (engine y < 0, world z < 0). The far side and the ends have a tall
  * bowl; the side opposite the benches, where a broadcast camera sits high up, has only a few low rows so nothing
- * stands between that camera and the ice.
+ * stands between that camera and the ice, and its upper bowl rises gently to a wall behind that camera.
  *
  * `low` has no glass, no real-time shadows (blob shadows only) and about a quarter of the crowd blocks; `high` adds the
  * glass and a shadow-casting key light (the page must turn on renderer.shadowMap; userData.shadows says so).
@@ -114,6 +114,53 @@ function standsMesh(): THREE.Group {
   };
   g.add(mk(slope, STANDS, 'stands'), mk(front, FRONT, 'standsFront'));
   return g;
+}
+
+/** The enclosure: the upper bowl, the back walls and the roof (one mesh, unlit, vertex colours). */
+const FASCIA_H = 1.3, ROOF_Y = 34;
+/** The upper bowl climbs this far back (m) behind the stands at the ends and the far side, to this height above them. */
+const UPPER_BACK = 7, UPPER_RISE = 5.5;
+/** On the near side it climbs from the low stands to a back wall `NEAR_WALL` m behind the boards, this high, behind the broadcast camera. */
+const NEAR_WALL = 31.6, NEAR_UPPER_Y = 14;
+const FASCIA = 0x3a414c, UPPER_LOW = 0x34292f, UPPER_HIGH = 0x221d22, WALL = 0x1b1e24, ROOF = 0x16191e;
+
+/**
+ * Closes the arena so that no camera sees past it: a fascia along the top of the stands, an upper bowl rising behind
+ * them to a back wall all the way round (on the side opposite the benches it starts from the low stands and rises
+ * gently far behind the broadcast camera, which still sees over it), and a dark roof over everything. A few thousand
+ * triangles in one draw; unlit, since it is backdrop.
+ */
+function enclosure(): THREE.Mesh {
+  const n = 240, p = { x: 0, y: 0, nx: 0, ny: 0 };
+  const pos: number[] = [], col: number[] = [], idx: number[] = [];
+  const c = new THREE.Color();
+  const push = (x: number, y: number, z: number, hex: number): void => { pos.push(x, y, z); c.setHex(hex); col.push(c.r, c.g, c.b); };
+  const RINGS = 5; // fascia bottom, fascia top, upper bowl foot, upper bowl top, wall top
+  for (let i = 0; i < n; i++) {
+    around(STANDS_FROM, (i / n) * perimeter(STANDS_FROM), p);
+    const k = nearness(p.ny), d = depthAt(p.ny), top = topAt(p.ny);
+    const offU = (d + UPPER_BACK) + (NEAR_WALL - STANDS_FROM - d - UPPER_BACK) * k;
+    const yU = (top + FASCIA_H + UPPER_RISE) + (NEAR_UPPER_Y - top - FASCIA_H - UPPER_RISE) * k;
+    const at = (off: number, y: number, hex: number): void => push(p.x + p.nx * off, y, p.y + p.ny * off, hex);
+    at(d, top - 0.05, FASCIA);
+    at(d, top + FASCIA_H, FASCIA);
+    at(d, top + FASCIA_H, UPPER_LOW);
+    at(offU, yU, UPPER_HIGH);
+    at(offU, ROOF_Y + 0.5, WALL);
+    const a = RINGS * i, b = RINGS * ((i + 1) % n);
+    for (const r of [0, 2, 3]) idx.push(a + r, b + r, a + r + 1, b + r, b + r + 1, a + r + 1);
+  }
+  // The roof: one quad over the whole arena.
+  const v = pos.length / 3, X = RINK.halfLength + 60, Z = RINK.halfWidth + 60;
+  for (const [x, z] of [[-X, -Z], [X, -Z], [X, Z], [-X, Z]] as const) push(x, ROOF_Y, z, ROOF);
+  idx.push(v, v + 1, v + 2, v, v + 2, v + 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setIndex(idx);
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  m.name = 'enclosure';
+  return m;
 }
 
 /** Deterministic pseudo-random numbers (the crowd looks the same every time). */
@@ -357,10 +404,7 @@ function lights(quality: ArenaQuality): THREE.Group {
   return g;
 }
 
-/**
- * Rows of lights under the roof (one mesh). There is no roof or wall mesh: the page clears to a dark background
- * (ARENA_BACKGROUND), which costs nothing, where a box round everything would cost a full screen of drawing.
- */
+/** Rows of lights under the roof (one mesh); the roof itself is part of the enclosure. */
 function roofLights(): THREE.Mesh {
   const parts: THREE.BufferGeometry[] = [];
   for (const x of [-30, -15, 0, 15, 30]) for (const z of [-22, -8, 8, 22]) parts.push(new THREE.BoxGeometry(6, 0.2, 0.6).translate(x, 30, z));
@@ -393,7 +437,7 @@ export function buildArena(quality: ArenaQuality = 'high', teams: ArenaTeams = D
   const g = new THREE.Group();
   g.name = 'arena';
   g.userData.shadows = quality === 'high';
-  g.add(lights(quality), roofLights(), floorRing(), standsMesh(), crowd(teams, quality === 'high' ? 1 : 2), crest(teams), scoreboard(teams), benches(teams));
+  g.add(lights(quality), roofLights(), floorRing(), standsMesh(), enclosure(), crowd(teams, quality === 'high' ? 1 : 2), crest(teams), scoreboard(teams), benches(teams));
   if (quality === 'high') g.add(glass());
   return g;
 }

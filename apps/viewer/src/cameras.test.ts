@@ -104,6 +104,43 @@ describe('cameras', () => {
     expect(a.fov).toBeLessThan(40); expect(a.fov).toBeGreaterThan(30);
     expect(easeCamera(from, to, 0, false)).toEqual(from);
   });
+
+  it('the net cameras aim at the play and zoom in on it as it moves away, with their net in front when play is near', () => {
+    for (const attackingRight of [true, false]) {
+      const goalX = (attackingRight ? -1 : 1) * RINK.goalLineX; // the net home defends
+      const near = cameraTarget('netHome', { ...input(goalX * 0.8, 3), attackingRight });
+      const far = cameraTarget('netHome', { ...input(-goalX * 0.85, -6), attackingRight });
+      expect(far.fov).toBeLessThan(near.fov - 20);
+      expect(Math.hypot(far.look.x - -goalX * 0.85, far.look.z - -6)).toBeLessThan(4);
+      // Near play: the crease is inside the picture (the angle down to it is within the lower half of the view).
+      const toCrease = Math.atan2(near.pos.y, Math.abs(near.pos.x - goalX) + 1);
+      const toLook = Math.atan2(near.pos.y - near.look.y, Math.hypot(near.pos.x - near.look.x, near.pos.z - near.look.z));
+      expect((toCrease - toLook) * 180 / Math.PI).toBeLessThan(near.fov / 2);
+      // A puck behind the net: the camera still looks out from behind its net, not straight down.
+      const behind = cameraTarget('netHome', { ...input(goalX * 1.08, 0), attackingRight });
+      expect(Math.sign(behind.look.x - behind.pos.x)).toBe(attackingRight ? 1 : -1);
+    }
+  });
+  it('ice level stands at one of a few rinkside spots, keeps its spot while the view stays good, and is never on top of the puck', () => {
+    let cur: CameraPose | undefined;
+    const used = new Set<number>();
+    let switches = 0;
+    for (let x = -28; x <= 28; x += 0.25) {
+      const c = cameraTarget('iceLevel', { ...input(x, 11.5), current: cur });
+      expect(Math.hypot(c.pos.x - x, c.pos.z - 11.5)).toBeGreaterThan(7);
+      if (cur && cur.pos.x !== c.pos.x) switches++;
+      used.add(c.pos.x); cur = c;
+    }
+    expect(used.size).toBeLessThanOrEqual(4);
+    expect(switches).toBeLessThanOrEqual(6); // about one cut per 10 m of play along the boards
+  });
+  it('the broadcast camera can zoom in for a small picture without moving, following the puck closer', () => {
+    const a = cameraTarget('broadcast', input(5, 2)), b = cameraTarget('broadcast', { ...input(5, 2), zoom: 1.7 });
+    expect(b.fov).toBeCloseTo(a.fov / 1.7, 5); expect(b.pos).toEqual(a.pos);
+    // Tight, it follows the puck across the ice, so a puck on the near boards stays in the picture.
+    const n = cameraTarget('broadcast', { ...input(5, 12.5), zoom: 1.7 });
+    expect(Math.abs(n.look.z - 12.5)).toBeLessThan(3);
+  });
   it('easePoint follows a point smoothly without overshoot', () => {
     let p = { x: 0, y: 0, z: 0 };
     for (let i = 0; i < 120; i++) { const n = easePoint(p, { x: 10, y: 0, z: -4 }, 1 / 60, 0.25); expect(n.x).toBeGreaterThanOrEqual(p.x); expect(n.x).toBeLessThanOrEqual(10); p = n; }

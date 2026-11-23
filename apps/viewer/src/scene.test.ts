@@ -4,6 +4,7 @@ import { generateTeam, type GameSetup } from '@hockey/engine';
 import { createPlayback, type Playback } from './playback';
 import { createGameScene } from './scene';
 import { buildArena } from './arena';
+import { buildRink } from './rink';
 
 const setup = (seed: number): GameSetup => {
   const home = generateTeam(seed * 2 + 1, 'Harbour City', 'HBR');
@@ -213,6 +214,16 @@ describe('game scene', () => {
     pb.seek(3000); b.reset(); expect(() => b.update(pb.frame(), 1 / 60)).not.toThrow();
     b.dispose();
   });
+  it('the page can set how large the puck is drawn; its shadow scales with it', () => {
+    const sc = createGameScene(game);
+    const disc = sc.root.getObjectByName('puckDisc')!;
+    const before = disc.scale.x;
+    sc.setPuckScale(3);
+    expect(disc.scale.x).toBeCloseTo(before * 2, 6); // 3x a real puck is twice the default 1.5x
+    sc.setPuckScale(1);
+    expect(disc.scale.x).toBeCloseTo(before / 1.5, 6);
+    sc.dispose();
+  });
 });
 
 describe('arena', () => {
@@ -244,5 +255,25 @@ describe('arena', () => {
       const hits = ray.intersectObjects(blockers, false);
       expect(hits.map((h) => h.object.name)).toEqual([]);
     }
+  });
+  it('is closed in: from every camera place, every direction meets the building (no view out into nothing)', () => {
+    const g = new THREE.Group();
+    const rink = buildRink();
+    rink.getObjectByName('floor')!.visible = false; // as the scene: the arena lays its own floor
+    g.add(buildArena('low'), rink);
+    g.updateMatrixWorld(true);
+    const solid: THREE.Object3D[] = [];
+    g.traverse((o) => { if (o instanceof THREE.Mesh && o.visible && o.name !== 'glass') solid.push(o); });
+    const ray = new THREE.Raycaster();
+    const places = [new THREE.Vector3(0, 15.5, 29), new THREE.Vector3(18, 15.5, 29), new THREE.Vector3(-30.2, 6, 0), new THREE.Vector3(30.2, 6, -2),
+      new THREE.Vector3(6.5, 1.8, 10.75), new THREE.Vector3(-19, 1.8, 10.75), new THREE.Vector3(10, 28, 0.6), new THREE.Vector3(5, 3, -9)];
+    let misses = 0;
+    for (const from of places) for (let i = 0; i < 24; i++) for (let j = 0; j < 12; j++) {
+      const yaw = (i / 24) * 2 * Math.PI, pitch = -1.2 + (j / 11) * 2.4;
+      ray.set(from, new THREE.Vector3(Math.cos(pitch) * Math.cos(yaw), Math.sin(pitch), Math.cos(pitch) * Math.sin(yaw)));
+      ray.far = 400;
+      if (ray.intersectObjects(solid, false).length === 0) misses++;
+    }
+    expect(misses).toBe(0);
   });
 });

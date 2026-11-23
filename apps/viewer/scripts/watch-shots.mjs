@@ -18,6 +18,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pageFile = resolve(here, '../dist-single/index.html');
 const out = resolve(process.argv[2] ?? join(process.cwd(), 'watch-shots'));
 const seed = Number(process.argv[3] ?? 42);
+const prefix = process.env.PREFIX ?? ''; // e.g. PREFIX=fix1-
 const only = process.env.ONLY ? process.env.ONLY.split(',') : null; // e.g. ONLY=moments,pages,fps
 const cams = process.env.CAMS ? process.env.CAMS.split(',') : ['broadcast', 'overhead', 'netHome', 'netAway', 'iceLevel', 'follow'];
 if (!existsSync(pageFile)) throw new Error(`build first: ${pageFile} is missing`);
@@ -45,7 +46,7 @@ async function open(opts) {
   }
   return { ctx, p };
 }
-const save = (name, dataUrl) => writeFileSync(join(out, name), Buffer.from(dataUrl.split(',')[1], 'base64'));
+const save = (name, dataUrl) => writeFileSync(join(out, prefix + name), Buffer.from(dataUrl.split(',')[1], 'base64'));
 
 // ---- Moments, from the event log and the state.
 const { ctx, p } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light' });
@@ -173,16 +174,63 @@ if (want('pages')) {
     await p.evaluate(() => window.__watch.setManual(false)); // the page's own loop draws the picture (paused)
     await p.waitForTimeout(400);
     const name = `page-${w}-${scheme}.png`;
-    await p.screenshot({ path: join(out, name), fullPage: true });
+    await p.screenshot({ path: join(out, prefix + name), fullPage: true });
     const scroll = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     log.pages.push({ name, horizontalOverflowPx: scroll });
     if (w === 1280 && scheme === 'light') {
       await p.click('#toEnd');
       await p.waitForTimeout(400);
-      await p.screenshot({ path: join(out, 'page-end.png'), fullPage: true });
+      await p.screenshot({ path: join(out, prefix + 'page-end.png'), fullPage: true });
     }
     await ctx.close();
   }
+}
+
+// ---- The broadcast view on a phone (390 px): how tall the players and the puck are drawn, in CSS pixels.
+if (want('phone')) {
+  const { ctx, p } = await open({ viewport: { width: 390, height: 844 }, colorScheme: 'light', deviceScaleFactor: 2 });
+  log.phone = [];
+  for (const m of ['rush', 'battle', 'faceoff']) {
+    const mo = moments[m]; if (!mo) continue;
+    const r = await p.evaluate((mo) => {
+      const w = window.__watch; w.setManual(true); w.setCamera('broadcast'); w.seek(mo.tick); w.step(1.2);
+      const c = document.querySelector('.stage canvas'), k = c.clientHeight / c.height;
+      const s = w.state();
+      const near = s.skaters.filter((x) => x.onIce).map((x) => ({ id: x.id, d: Math.hypot(x.pos.x - s.puck.pos.x, x.pos.y - s.puck.pos.y) })).sort((a, b) => a.d - b.d)[0];
+      const f = near ? w.figureOnScreen(near.id) : null;
+      return { url: w.grab(), playerCssPx: f ? Math.round(f.px * k) : null, puck: w.puckOnScreen() };
+    }, mo);
+    save(`phone-${m}-broadcast.png`, r.url);
+    await p.evaluate(() => { window.__watch.setManual(false); });
+    await p.waitForTimeout(300);
+    await p.screenshot({ path: join(out, prefix + `page-390-${m}.png`) });
+    log.phone.push({ moment: m, playerCssPx: r.playerCssPx, puck: r.puck });
+  }
+  console.log('phone', JSON.stringify(log.phone));
+  await ctx.close();
+}
+
+// ---- A New game or a quality change that fails leaves the game on screen usable, with a plain message.
+if (want('safety')) {
+  const { ctx, p } = await open({ viewport: { width: 1280, height: 900 }, colorScheme: 'light' });
+  const before = await p.evaluate(() => ({ title: document.getElementById('title').textContent, total: window.__watch.info().totalTicks }));
+  await p.evaluate(() => window.__watch.failNext('game'));
+  await p.fill('#seed', '7');
+  await p.click('#newGame');
+  await p.waitForFunction(() => window.__watch.ready(), null, { timeout: 90000 });
+  const afterGame = await p.evaluate(() => ({ title: document.getElementById('title').textContent, total: window.__watch.info().totalTicks,
+    problem: document.getElementById('problem').hidden ? null : document.getElementById('problem').textContent,
+    overlay: !document.getElementById('loading').hidden, playDisabled: document.getElementById('play').disabled }));
+  await p.click('#play'); await p.waitForTimeout(1200); await p.click('#play');
+  const ticked = await p.evaluate(() => window.__watch.info().tick);
+  await p.evaluate(() => window.__watch.failNext('quality'));
+  await p.click('[data-quality="high"]');
+  await p.waitForFunction(() => window.__watch.ready(), null, { timeout: 90000 });
+  const afterQuality = await p.evaluate(() => ({ quality: window.__watch.info().quality, problem: document.getElementById('problem').textContent, pressed: document.querySelector('[data-quality="low"]').getAttribute('aria-pressed') }));
+  await p.screenshot({ path: join(out, prefix + 'page-failed.png'), fullPage: true });
+  log.safety = { before, afterGame, tickAfterPlay: ticked, afterQuality };
+  console.log('safety', JSON.stringify(log.safety));
+  await ctx.close();
 }
 
 // ---- Frame rate: real time at 1x with all figures, each quality, at a 1280 x 720 picture; and per-frame cost.
@@ -203,14 +251,14 @@ if (want('fps')) {
       return (performance.now() - t0) / 60;
     });
     log.fps[q] = { canvas: size, realTimeFps: Math.round(fps * 10) / 10, steppedMsPerFrame: Math.round(ms * 10) / 10, slowLineShown: slowShown };
-    if (q === 'high') await p.screenshot({ path: join(out, 'page-high-slow.png'), fullPage: false });
+    if (q === 'high') await p.screenshot({ path: join(out, prefix + 'page-high-slow.png'), fullPage: false });
     console.log('fps', q, JSON.stringify(log.fps[q]));
     await ctx.close();
   }
 }
 
 await browser.close();
-writeFileSync(join(out, 'log.json'), JSON.stringify(log, null, 1));
+writeFileSync(join(out, prefix + 'log.json'), JSON.stringify(log, null, 1));
 console.log('errors', log.errors.length, log.errors.slice(0, 10));
 console.log('network', log.network.length);
 console.log('pages', JSON.stringify(log.pages));

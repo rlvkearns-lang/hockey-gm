@@ -73,7 +73,7 @@ header a { color: var(--muted); font-size: 14px; }
 
 .line { margin: 6px 0; padding: 8px 12px; border-radius: 8px; }
 #summary { background: var(--panel); border: 1px solid var(--line); font-weight: 600; }
-#slow { background: var(--warn-bg); color: var(--warn-text); }
+#slow, #problem { background: var(--warn-bg); color: var(--warn-text); }
 #slow button { margin-left: 8px; padding: 3px 10px; }
 .line[hidden] { display: none; }
 
@@ -124,7 +124,7 @@ kbd { font: inherit; font-size: 12px; border: 1px solid var(--line); border-bott
     <div id="loading">Simulating…</div>
   </div>
 
-  <div class="timeline">
+  <div class="timeline" id="timeline">
     <div class="track">
       <div class="periods" id="periods"></div>
       <div class="goals" id="goals"></div>
@@ -133,6 +133,7 @@ kbd { font: inherit; font-size: 12px; border: 1px solid var(--line); border-bott
     <span class="when" id="when">1st · 20:00</span>
   </div>
   <p class="line" id="summary" hidden></p>
+  <p class="line" id="problem" role="alert" hidden></p>
   <p class="line" id="slow" hidden>The picture is running slowly on this computer. Quality Low will be smoother.<button id="toLow">Switch to Low</button></p>
 
   <div class="controls">

@@ -22,6 +22,10 @@ export type CameraInput = {
   followed?: { pos: Vec3; facing: number; vel: Vec3 };
   /** The home team attacks toward +x (periods 1 and 3); it defends the net at -x. */
   attackingRight: boolean;
+  /** How much tighter the broadcast camera frames the play (1 normally; more on a small picture, such as a phone). */
+  zoom?: number;
+  /** The angle's last target, if it is the same angle: ice level keeps its spot while the view from it stays good. */
+  current?: CameraPose;
 };
 /** Where the camera is, the point it looks at (world) and its vertical field of view (degrees). */
 export type CameraPose = { pos: Vec3; look: Vec3; fov: number };
@@ -60,10 +64,18 @@ function insideBoards(x: number, z: number, inset: number): { x: number; z: numb
 const BROADCAST = { height: 15.5, back: 29, fov: 29, maxLook: 21, follow: 0.55, lead: 0.45, maxLead: 4, zFollow: 0.35, nearBias: 1.2 };
 /** Overhead: under the roof lights, over the puck's half; it stops where the end boards are still in the picture. */
 const OVERHEAD = { height: 28, maxLook: 18.5, zFollow: 0.45, fov: 62 };
-/** Behind a net: inside the end boards above the net, so the glass is behind it and the net below the picture. */
-const NET = { fromGoalLine: 3.05, height: 6, fov: 55, near: 1, far: 21, reach: 0.6, zFollow: 0.35 };
-/** Ice level: a rinkside camera just inside the near boards, at eye height of a seated fan, kept a few metres off the puck. */
-const ICE = { inset: 2.2, height: 1.8, minDist: 9, maxX: RINK.halfLength - RINK.cornerRadius, halfView: 5 };
+/**
+ * Behind a net: inside the end boards, above and behind the net (the glass is behind it, the net below its line of
+ * sight). It aims at the play and zooms with its distance: wide with the net, goalie and crease in front when play is
+ * near, tight on the play when it is at the other end. It never looks less than `minOut` up the ice from the goal line.
+ */
+const NET = { fromGoalLine: 3.05, height: 6, farRise: 5, farLift: 0.08, minOut: 2.5, halfView: 6.5, minFov: 16, maxFov: 58 };
+/**
+ * Ice level: rinkside cameras at a few fixed spots just inside the near boards, at the eye height of a fan by the
+ * glass. It takes the spot whose distance to the puck is nearest `ideal` (never under `minDist`) and keeps it while
+ * the puck stays between `minDist` and `maxDist` from it, so it cuts between spots now and then rather than sliding.
+ */
+const ICE = { inset: 2.2, height: 1.8, spots: [-19, -6.5, 6.5, 19], minDist: 8, ideal: 12, maxDist: 25, halfView: 5 };
 /** Follow: behind and above him along his travel, as in the skating test, a little higher to see the play round him. */
 const FOLLOW = { back: 6, height: 3.1, ahead: 2.5, lookY: 0.8, fov: 50, turnSpeed: 1.2 };
 
@@ -71,8 +83,11 @@ function broadcast(input: CameraInput): CameraPose {
   const { puck, puckVel } = input;
   const lead = puckVel ? clamp(puckVel.x * BROADCAST.lead, -BROADCAST.maxLead, BROADCAST.maxLead) : 0;
   const lx = clamp(puck.x + lead, -BROADCAST.maxLook, BROADCAST.maxLook);
-  const lz = NEAR * BROADCAST.nearBias + clamp(NEAR * puck.z * BROADCAST.zFollow, -4, 1.8) * NEAR; // toward the near boards only a little: the near stands would fill the bottom
-  return { pos: v3(lx * BROADCAST.follow, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, lz), fov: BROADCAST.fov };
+  const zoom = Math.max(1, input.zoom ?? 1);
+  // Toward the near boards only a little in the wide view (the near stands would fill the bottom); a tight view
+  // (zoom) follows the puck across the ice, or a puck on the near boards would drop out of the bottom of the picture.
+  const lz = zoom > 1 ? clamp(puck.z * 0.8, -10, 11) : NEAR * BROADCAST.nearBias + clamp(NEAR * puck.z * BROADCAST.zFollow, -4, 1.8) * NEAR;
+  return { pos: v3(lx * BROADCAST.follow, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, lz), fov: BROADCAST.fov / zoom };
 }
 
 function overhead(input: CameraInput): CameraPose {
@@ -82,34 +97,39 @@ function overhead(input: CameraInput): CameraPose {
   return { pos: v3(lx, OVERHEAD.height, lz + NEAR * 0.6), look: v3(lx, 0, lz), fov: OVERHEAD.fov };
 }
 
+const fovFor = (halfView: number, dist: number, lo: number, hi: number): number =>
+  clamp((2 * Math.atan(halfView / Math.max(dist, 0.5)) * 180) / Math.PI, lo, hi);
+
 function behindNet(input: CameraInput, home: boolean): CameraPose {
   // The net a team defends: home defends -x while it attacks toward +x.
   const end = (home === input.attackingRight ? -1 : 1);
   const goal = end * RINK.goalLineX;
   const { puck } = input;
-  // How far up the ice it looks: toward the puck, but always far enough to see the slot, never past centre.
-  const upIce = clamp((goal - puck.x) * end * NET.reach + 2.5, NET.near, NET.far);
-  return {
-    pos: v3(goal + end * NET.fromGoalLine, NET.height, clamp(puck.z * 0.15, -2, 2)),
-    look: v3(goal - end * upIce, 0.5, clamp(puck.z * NET.zFollow, -6, 6)),
-    fov: NET.fov,
-  };
+  const out = Math.max(NET.minOut, (goal - puck.x) * end);
+  // Far play: a little higher, and the play put in the lower part of the picture, so the long stretch of empty ice
+  // between this net and the play does not fill the bottom half.
+  const far = clamp((out - 10) / 30, 0, 1);
+  const pos = v3(goal + end * NET.fromGoalLine, NET.height + NET.farRise * far, clamp(puck.z * 0.15, -2, 2));
+  const flat = Math.hypot(out + NET.fromGoalLine, puck.z - pos.z);
+  const fov = fovFor(NET.halfView, Math.hypot(flat, pos.y), NET.minFov, NET.maxFov);
+  const lift = flat * Math.tan((fov * NET.farLift * far * Math.PI) / 180);
+  return { pos, look: v3(goal - end * out, 0.6 + lift, puck.z), fov };
 }
 
 function iceLevel(input: CameraInput): CameraPose {
   const { puck } = input;
-  // Slide along the near boards toward centre ice until it is at least minDist from the puck.
-  const base = clamp(puck.x, -ICE.maxX, ICE.maxX);
   const zb = NEAR * (RINK.halfWidth - ICE.inset);
-  const dz = Math.abs(zb - puck.z);
-  const dx = Math.sqrt(Math.max(0, ICE.minDist * ICE.minDist - dz * dz));
-  let cx = base - (puck.x >= 0 ? 1 : -1) * dx;
-  if (Math.abs(cx) > ICE.maxX) cx = base + (puck.x >= 0 ? 1 : -1) * dx; // the other way when centre ice is too far
-  cx = clamp(cx, -ICE.maxX, ICE.maxX);
-  const dist = Math.hypot(puck.x - cx, puck.z - zb);
+  const dist = (sx: number): number => Math.hypot(puck.x - sx, puck.z - zb);
+  const cur = input.current?.pos;
+  let cx: number;
+  if (cur && Math.abs(cur.z - zb) < 1e-6 && ICE.spots.includes(cur.x) && dist(cur.x) >= ICE.minDist && dist(cur.x) <= ICE.maxDist) cx = cur.x;
+  else {
+    const ok = ICE.spots.filter((sx) => dist(sx) >= ICE.minDist);
+    const pool = ok.length > 0 ? ok : ICE.spots;
+    cx = pool.reduce((best, sx) => (Math.abs(dist(sx) - ICE.ideal) < Math.abs(dist(best) - ICE.ideal) ? sx : best), pool[0]!);
+  }
   // Zoom in so the play round the puck fills about 10 m of the picture's height.
-  const fov = clamp((2 * Math.atan(ICE.halfView / Math.max(dist, 1)) * 180) / Math.PI, 32, 52);
-  return { pos: v3(cx, ICE.height, zb), look: v3(puck.x, 1.0, puck.z), fov };
+  return { pos: v3(cx, ICE.height, zb), look: v3(puck.x, 1.0, puck.z), fov: fovFor(ICE.halfView, dist(cx), 24, 52) };
 }
 
 function follow(input: CameraInput): CameraPose {
