@@ -170,3 +170,10 @@ Proposed shape **[my call]**:
 - Fictional league: made-up teams, cities and players. Also the fallback if real roster data proves hard to get.
 - Unemployed GM: start with no team and wait for an offer; pairs with owner mode.
 - Not included: historical seasons (each needs its own roster data).
+
+## Tournaments, events and awards (owner agreed, 2026-11-23)
+
+- Core to the league stage: end-of-season awards (voted with some of real voting's bias; they feed contract demands, fan opinion and the hall of fame) and the World Juniors (the scouting showcase; prospects play for their countries; a strong tournament moves a draft-eligible player's stock; the GM's own prospects can be watched in 3D).
+- Lighter additions afterwards: Olympics and other international play (stars leave, come back tired, hurt or riding high; players care about selection), prospect tournaments and development camp.
+- All-Star weekend: the owner does not care about it. Leave it out, or at most a line in the news **[my call]**.
+- Tournaments are simulated with the generated-player system rather than as full leagues **[my call]**.
