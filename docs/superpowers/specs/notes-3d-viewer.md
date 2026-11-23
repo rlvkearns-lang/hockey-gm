@@ -92,3 +92,19 @@ Proposed shape **[my call]**:
 
 - Sprint: when a skater is at high effort and near top speed, a deeper forward lean, head down, longer and harder pushes, bigger arm drive, with the stick carried in one hand when he does not have the puck.
 - Puck on the stick: the engine keeps the carried puck at a point close to the carrier. The viewer draws a carried puck on the blade, out in front and to his forehand side, moving with his stickhandling, and brings it back to the engine's exact position as it is released (pass, shot, loss), so nothing about the game changes. If the engine's own carry point proves too close to the body for battles and poke checks to look right, moving it is an engine change for round 2.
+
+## Owner's feedback on milestone 3 (2026-11-24)
+
+"Looks pretty good." His observations:
+
+- A few players stand around too much and watch the puck. (Engine: goes to engine round 2 with the other play items.)
+- The camera angles are a bit wonky.
+- The overhead camera is dizzying.
+- The broadcast camera moves too much.
+
+What follows **[my call]**:
+
+- Broadcast: behave like a television camera on a fixed platform. It pans to follow the play rather than chasing the puck: a wide dead zone in the middle of the frame so small puck movements do not move it, a slower and smoother pan, no pan reversals on a quick pass back and forth, zoom changes only for real events (a board battle, a goal) and eased slowly, a steady height and tilt.
+- Overhead: stop it moving with the puck. Either a fixed view of the whole rink, or a view of one zone that changes only when play has clearly moved to another zone and stayed there, with a slow slide between them. No rotation, north always the same way.
+- The other angles get the same treatment: the camera's job is to be calm; the players move, not the frame.
+- Check every angle by counting how far and how often the frame moves over a period, and set limits.
