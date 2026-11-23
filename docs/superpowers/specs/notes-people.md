@@ -136,3 +136,16 @@ Proposed shape **[my call, not yet agreed]**, with a caution:
 - Owner agreed to the media shape above (2026-11-23), and added: the media should ask tough, specific questions drawn from what is actually happening, for example "why has X had reduced ice time over the past few days?"
 
 Proposed shape **[my call]**: questions are generated from real recent facts the game already tracks (a drop in a player's ice time, a healthy scratch, a slump, a quiet deadline, a rumour, a broken promise, a contract stalemate). Sharper reporters notice more and ask harder. The honest answer, a cover story and "no comment" each have consequences: the player hears what was said about him, and a cover story can be caught out later.
+
+## The GM and the coach (owner, 2026-11-23)
+
+- The GM cannot control what players or coaches say in post-game media scrums.
+- In general the GM can talk to the coach and ask for things: hide how bad an injury is, not explain why the star is getting fewer minutes, play the rookie more.
+- Line-ups are normally the coach's job, but the owner wants a way to set them himself.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Requests, not orders: the coach has his own personality and views. He may agree, agree grudgingly, ignore it, or push back; a coach who trusts the GM does more of what is asked. Asking a lot, or asking for things he thinks hurt the team, wears on the relationship, and a proud coach may say so publicly.
+- Requests can backfire in the open: a hidden injury that comes out, a reporter noticing the rookie's sudden minutes and asking who decided it.
+- Line-ups, a setting with three levels: coach decides (default; the GM makes requests such as "more minutes for the rookie"); GM sets them but the coach has feelings about it (overruling him often costs trust, and players know who benched them); full manual control with no relationship cost, for players who just want to set lines.
+- The coach's choices come from his style and what he values (veterans over kids, defence first, rides his top line), which is why hiring the right coach matters.
