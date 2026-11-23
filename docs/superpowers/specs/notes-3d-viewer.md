@@ -120,3 +120,9 @@ Asked whether to bring the per-player look forward, the owner said "Whatever you
   - Weight in the movement: heavier players take longer to start and stop, lean harder into turns, and move less when hit; lighter players are quicker on their edges. The animation reads the player's mass, it does not change the engine's result.
   - Per-player look: skin tone, hair and beards showing under the helmet, stick tape, number and name, generated crest.
 - Still code-built figures (no imported models), so the style stays clean rather than photo-real. If the pass falls short of what the owner wants, the next step up is hand-made models, which is a bigger decision to raise with him then.
+
+## Broadcast camera, second feedback (owner, 2026-11-24)
+
+After the calmer cameras: "Broadcast is a bit slow to follow the action, make it like a real broadcast; right now on some entries I can't see the far end, it's too zoomed in or too late."
+
+- The broadcast camera stays on a fixed platform but must behave like a real TV operator: lead the play (aim ahead of the puck), keep up with rushes and long passes, frame about a zone and a half so the attacked net is in view before the puck arrives, and tighten only for settled battles and goals.
