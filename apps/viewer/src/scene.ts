@@ -1,12 +1,13 @@
 import * as THREE from 'three';
-import { DT, type GameSetup, type GameState, type PlayerDef, type Side, type SkaterState } from '@hockey/engine';
+import { DT, type GameEvent, type GameSetup, type GameState, type PlayerDef, type Side, type SkaterState } from '@hockey/engine';
 import { buildArena, TEAM_COLORS as ARENA_TEAM_COLORS, type ArenaQuality } from './arena';
 import { bodyDims, type BodyDims } from './body';
 import { carryPoint, stepCarry, stickhandle, type CarryBlend, type IcePoint } from './carry';
-import { initialGait, poseOf, stepGait, type GaitState, type Motion, type PoseOptions, type Vec3 } from './gait';
+import { emptyProbe, goalieJumped, isCut, lastCutAtOrBefore, probeOf, puckJumped, skaterJumped } from './cuts';
+import { initialGait, poseOf, stepGait, type GaitState, type Motion, type PoseOptions, type SkaterPose, type Vec3 } from './gait';
 import { goalieMotion, goaliePoseOf, initialGoalieGait, stepGoalie, type GoalieGait } from './goalie-pose';
 import { createGoalieRig, type GoalieRig } from './goalie-rig';
-import { lerpAngle, type Frame } from './playback';
+import { lerpAngle, type Frame, type Playback } from './playback';
 import { createRigKit, createSkaterRig, isSharedTexture, type RigColors, type SkaterRig } from './rig';
 import { buildRink } from './rink';
 
@@ -25,6 +26,14 @@ import { buildRink } from './rink';
  * follows the blade, stickhandled; when he lets it go (a pass, a shot, a check, a poke) it slides from his blade back
  * onto the engine's puck within that same tick, so from the first tick nobody has it, it is exactly the engine's puck.
  * A puck in the air is drawn at the engine's height.
+ *
+ * Engine cuts (cuts.ts): across a tick in which the engine moves something discontinuously (the puck put on the dot
+ * at a whistle, the goalies changing ends at a period start, anything moving further than it can), the earlier tick
+ * is drawn for the whole tick, so nothing streaks across the ice; on the frame the picture cuts, whatever jumped
+ * starts afresh (its gait, a goalie's gait, the carry) and cutNow() says so, for the camera to cut on the same frame.
+ *
+ * A fresh gait starts in the style his motion shows (no blend in from the standing pose); seekScene() also plays the
+ * last moments before a seek through, so every figure is shown as it would be had play reached that moment.
  */
 
 export type GameScene = {
@@ -37,11 +46,17 @@ export type GameScene = {
   puckWorld(target?: THREE.Vector3): THREE.Vector3;
   /** A figure's place (world, on the ice), facing (engine radians) and whether he is on the ice; read-only. */
   figure(id: string): FigureView | undefined;
+  /** Whether the latest update cut across an engine teleport (the picture jumped; a camera should cut with it). */
+  cutNow(): boolean;
   /** How large the puck is drawn, as a multiple of a real puck (default PUCK_SCALE); its shadow scales with it. */
   setPuckScale(k: number): void;
   dispose(): void;
 };
-export type FigureView = { readonly position: THREE.Vector3; readonly facing: number; readonly onIce: boolean };
+/**
+ * `hipY` is the drawn pelvis height (m). `pose` is a skater's drawn pose in his body frame before the mirror for a
+ * right shot (null for a goalie, or before he is first drawn).
+ */
+export type FigureView = { readonly position: THREE.Vector3; readonly facing: number; readonly onIce: boolean; readonly hipY: number; readonly pose: Readonly<SkaterPose> | null };
 
 /** Team colours until the league stage brings real ones: home in a dark red jersey, away in white with blue trim. */
 export const TEAM_COLORS: Record<Side, RigColors> = ARENA_TEAM_COLORS;
@@ -54,7 +69,7 @@ const CROUCH_DOT = 1.3;
 /** Seconds to sink into (or come out of) the faceoff crouch. */
 const CROUCH_TAU = 0.35;
 
-type MutableView = { position: THREE.Vector3; facing: number; onIce: boolean };
+type MutableView = { position: THREE.Vector3; facing: number; onIce: boolean; hipY: number; pose: SkaterPose | null };
 
 type SkaterFig = {
   id: string; def: PlayerDef; right: boolean; dims: BodyDims; rig: SkaterRig;
@@ -67,13 +82,33 @@ type SkaterFig = {
   /** Where the puck sits on his blade this frame (world x, z). */
   blade: IcePoint;
 };
-type GoalieFig = { id: string; dims: BodyDims; rig: GoalieRig; gait: GoalieGait; fresh: boolean; side: Side; view: MutableView };
+type GoalieFig = {
+  id: string; dims: BodyDims; rig: GoalieRig; gait: GoalieGait; fresh: boolean; side: Side; view: MutableView;
+  /** His saves from the event log (tick and where the puck was), in order. */
+  saves: { tick: number; x: number; y: number }[];
+};
+/** A save event older than this (s) no longer says which side a pad save goes to. */
+const SAVE_SIDE_SECONDS = 1.5;
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const smooth = (t: number): number => { const u = t < 0 ? 0 : t > 1 ? 1 : t; return u * u * (3 - 2 * u); };
 const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
-export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality } = {}): GameScene {
+/**
+ * A gait started afresh on the motion he has now, in the style that motion shows at once: no blend in from the
+ * standing pose (a man who is down is drawn down, a skater moving is drawn moving).
+ */
+function freshGait(m: Motion, carrying: boolean): GaitState {
+  const g: GaitState = { ...stepGait(initialGait(), m, 0, carrying) };
+  delete g.from; delete g.blendT; delete g.blendDur;
+  return g;
+}
+
+/**
+ * `events`, when given, is the game's event log: a pad save then kicks out the pad on the side the engine's own save
+ * event puts the puck, rather than the side the drawn puck happens to be on.
+ */
+export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality; events?: readonly GameEvent[] } = {}): GameScene {
   const quality: ArenaQuality = opts.quality ?? 'low';
   const root = new THREE.Group();
   root.name = 'game';
@@ -103,7 +138,7 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
       const fig: SkaterFig = {
         id: def.id, def, right: def.shoots === 'R', dims: bodyDims(def.heightCm, def.weightKg), rig,
         gait: initialGait(), crouch: 0, fresh: true, idx: skaters.length,
-        view: { position: new THREE.Vector3(), facing: 0, onIce: false }, blade: { x: 0, z: 0 },
+        view: { position: new THREE.Vector3(), facing: 0, onIce: false, hipY: 0, pose: null }, blade: { x: 0, z: 0 },
       };
       skaters.push(fig);
       byId.set(def.id, fig);
@@ -114,11 +149,17 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
       figures.add(rig.root);
       const fig: GoalieFig = {
         id: gDef.id, dims: bodyDims(gDef.heightCm, gDef.weightKg), rig, gait: initialGoalieGait(), fresh: true, side,
-        view: { position: new THREE.Vector3(), facing: 0, onIce: true },
+        view: { position: new THREE.Vector3(), facing: 0, onIce: true, hipY: 0, pose: null },
+        saves: [],
       };
       goalies.push(fig);
       byId.set(gDef.id, fig);
     }
+  }
+
+  for (const e of opts.events ?? []) {
+    if (e.type !== 'save' || !e.playerId) continue;
+    goalies.find((g) => g.id === e.playerId)?.saves.push({ tick: e.tick, x: e.pos.x, y: e.pos.y });
   }
 
   // ---- The puck: a short black disc with a light rim, and a small shadow.
@@ -159,6 +200,10 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
   const pickup = { id: '', ox: 0, oz: 0 };
   const anchor: IcePoint = { x: 0, z: 0 };
   const drawn = new THREE.Vector3();
+  /** The earlier tick last drawn (for cuts between frames), a scratch probe, and whether the latest update cut. */
+  const shown = emptyProbe(), scratchProbe = emptyProbe();
+  let cut = false;
+  const drawFrame: Frame = { prev: null as unknown as GameState, next: null as unknown as GameState, alpha: 0, tick: 0 };
 
   const findSkater = (list: readonly SkaterState[], fig: SkaterFig): SkaterState | undefined => {
     const s = list[fig.idx];
@@ -209,7 +254,7 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     if (fresh) {
       // Settle a fresh gait on the motion he has now, without a turn-rate or acceleration spike from the cut.
       m.accelAlong = 0; m.turnRate = 0;
-      fig.gait = stepGait(initialGait(), m, 0, carrying);
+      fig.gait = freshGait(m, carrying);
       fig.fresh = false;
     } else if (dt > 0) fig.gait = stepGait(fig.gait, m, dt, carrying);
 
@@ -225,6 +270,8 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     const pose = poseOf(fig.gait, m, fig.dims, poseOpts);
     fig.rig.apply(pose, x, z, facing);
     fig.rig.root.visible = true;
+    view.pose = pose;
+    view.hipY = pose.hipY;
 
     // Where the puck sits on his blade, in the world (mirrored for a right shot, as the rig mirrors the pose).
     const cp = carryPoint(pose);
@@ -241,7 +288,9 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     const x = lerp(p.pos.x, n.pos.x, a), z = lerp(p.pos.y, n.pos.y, a), facing = lerpAngle(p.facing, n.facing, a);
     const input = goalieMotion(n);
     // Which side of him the puck is (+1 his right): a pad save kicks out the pad on that side.
-    const toRight = (engine.x - x) * -Math.sin(facing) + (engine.z - z) * Math.cos(facing);
+    const save = latestSave(fig, next.tick);
+    const sx = save ? save.x : engine.x, sz = save ? save.y : engine.z;
+    const toRight = (sx - x) * -Math.sin(facing) + (sz - z) * Math.cos(facing);
     input.side = toRight >= 0 ? 1 : -1;
     if (fig.fresh) {
       const pose = n.poseT > 0 ? n.pose : 'stance';
@@ -249,9 +298,20 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
       fig.fresh = false;
     } else if (dt > 0) fig.gait = stepGoalie(fig.gait, input, dt);
     // The engine's goalies all catch with the left hand.
-    fig.rig.apply(goaliePoseOf(fig.gait, fig.dims, 'L'), x, z, facing);
+    const gp = goaliePoseOf(fig.gait, fig.dims, 'L');
+    fig.rig.apply(gp, x, z, facing);
+    fig.view.hipY = gp.hipY;
     fig.view.position.set(x, 0, z);
     fig.view.facing = facing;
+  }
+
+  /** His latest save at or before `tick`, if recent enough to say where the puck was. */
+  function latestSave(fig: GoalieFig, tick: number): { x: number; y: number } | null {
+    const list = fig.saves;
+    let lo = 0, hi = list.length;
+    while (lo < hi) { const k = (lo + hi) >> 1; if (list[k]!.tick <= tick) lo = k + 1; else hi = k; }
+    const s = lo > 0 ? list[lo - 1]! : null;
+    return s && (tick - s.tick) * DT <= SAVE_SIDE_SECONDS ? s : null;
   }
 
   function updatePuck(frame: Frame, dt: number): void {
@@ -315,8 +375,27 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     disc.position.y = drawn.y;
   }
 
-  function update(frame: Frame, dt: number): void {
-    const { prev, next, alpha: a } = frame;
+  function update(input: Frame, dt: number): void {
+    const prev = input.prev;
+    // A tick the engine cuts in is drawn as its earlier side for the whole tick.
+    const next = input.next !== prev && isCut(probeOf(prev, scratchProbe), input.next) ? prev : input.next;
+    const a = input.alpha;
+    const frame = drawFrame;
+    frame.prev = prev; frame.next = next; frame.alpha = a; frame.tick = input.tick;
+    // The picture moved on to a later tick across a cut (possibly skipping ticks): what jumped starts afresh.
+    cut = false;
+    if (shown.tick >= 0 && prev.tick !== shown.tick) {
+      if (isCut(shown, prev)) {
+        cut = true;
+        if (puckJumped(shown, prev)) { puckFresh = true; release.active = false; }
+        for (const g of goalies) if (goalieJumped(shown, prev, g.side)) g.fresh = true;
+        for (const f of skaters) {
+          findSkater(prev.skaters, f);
+          if (skaterJumped(shown, prev, f.idx)) f.fresh = true;
+        }
+      }
+    }
+    if (prev.tick !== shown.tick) probeOf(prev, shown);
     const h = Number.isFinite(dt) && dt > 0 ? dt : 0;
     const t = (frame.tick + a) * DT;
     engine.x = lerp(prev.puck.pos.x, next.puck.pos.x, a);
@@ -331,6 +410,8 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     for (const g of goalies) { g.fresh = true; g.gait = initialGoalieGait(); }
     puckFresh = true;
     release.active = false;
+    shown.tick = -1;
+    cut = false;
   }
 
   function dispose(): void {
@@ -340,6 +421,8 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     puckGeo.dispose(); black.dispose(); rim.dispose();
     for (const part of [rink, arena]) {
       part.traverse((o) => {
+        // High quality's key light owns a shadow map (a render target) that the renderer keeps until it is freed.
+        if (o instanceof THREE.Light && o.shadow) o.shadow.dispose();
         if (!(o instanceof THREE.Mesh)) return;
         o.geometry.dispose();
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -357,7 +440,34 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     reset,
     puckWorld: (target = new THREE.Vector3()) => target.copy(drawn),
     figure: (id) => byId.get(id)?.view,
+    cutNow: () => cut,
     setPuckScale,
     dispose,
   };
+}
+
+/** Seconds of play run through before a seek's moment, so every pose, the crouch and the carry have settled. */
+export const PREROLL_SECONDS = 1.5;
+/** The step (s of game time) of that run-through. */
+export const PREROLL_STEP = 1 / 30;
+
+/**
+ * Seek `pb` to `tick` and show it in `sc` as if play had reached it: the playback is put PREROLL_SECONDS earlier
+ * (never before the game's start or the latest engine cut at or before `tick`, where everything starts afresh
+ * anyway), the scene is reset there and stepped through to `tick` at PREROLL_STEP without drawing. A man who is down
+ * is then drawn down, a skater mid-stride mid-stride, a goalie in a save in the save, and the carried puck on the
+ * blade. `preroll` 0 is a plain seek (reset and one update).
+ */
+export function seekScene(pb: Playback, sc: GameScene, tick: number, preroll = PREROLL_SECONDS): void {
+  const target = Math.min(Math.max(Number.isFinite(tick) ? tick : 0, 0), pb.totalTicks);
+  const start = Math.max(0, target - Math.max(0, preroll) / DT, lastCutAtOrBefore(pb.cuts, Math.floor(target)));
+  pb.seek(start);
+  sc.reset();
+  sc.update(pb.frame(), 0);
+  const span = (target - start) * DT;
+  const n = Math.ceil(span / PREROLL_STEP - 1e-9);
+  for (let i = 1; i <= n; i++) {
+    pb.seek(i === n ? target : start + ((target - start) * i) / n);
+    sc.update(pb.frame(), span / n);
+  }
 }
