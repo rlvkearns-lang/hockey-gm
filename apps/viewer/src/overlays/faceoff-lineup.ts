@@ -197,3 +197,28 @@ function drawPose(raw: RawPose, s: SkaterSample, ctx: AnimContext, turn: number,
   const k = smooth(((ctx.tick + ctx.alpha - fo.tick) * DT) / DRAW_SWEEP);
   return bladeAt(raw, { x: dot.x + (SWEEP_TO.x - dot.x) * k, y: 0, z: dot.z + (SWEEP_TO.z - dot.z) * k });
 }
+
+/** Seconds before the drop up to which a centre's blade is held by the dot over any stick action (a shot off the draw). */
+export const HOLD_TO_DROP = 0.2;
+
+/**
+ * A centre's blade held by the dot through the setup, over the stick actions (registered after them): a centre who
+ * shoots straight off the draw would otherwise start his wind-up (overlays/stick.ts, from the event log) before the puck
+ * is dropped. It lets go over the last HOLD_TO_DROP seconds before the drop (the next `faceoff` event), so a shot's
+ * wind-up starts no earlier than that.
+ */
+export const faceoffStickHold: Overlay = {
+  id: 'faceoffStickHold',
+  weight(anim, sample, ctx) {
+    if (ctx.state.phase !== 'faceoffSetup' || sample.state.slot !== 'C') return 0;
+    const s = slotOf<LineupSlot>(anim, 'faceoffLineup');
+    if (!s || s.role !== 'C' || !s.aim) return 0;
+    const fo = ctx.timeline.next('faceoff', ctx.tick - 1, Math.ceil(10 / DT));
+    const left = fo ? (fo.tick - (ctx.tick + ctx.alpha)) * DT : Infinity;
+    return s.level * smooth(left / HOLD_TO_DROP);
+  },
+  apply(raw, anim, _sample, _ctx, dims) {
+    const s = slotOf<LineupSlot>(anim, 'faceoffLineup')!;
+    return bladeAt(raw, s.aim!, dims);
+  },
+};

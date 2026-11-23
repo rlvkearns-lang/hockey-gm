@@ -8,9 +8,9 @@ import type { Timeline } from './timeline';
  * - the goal light behind the net scored on: lit from the goal's tick for GOAL_LIGHT_SECONDS;
  * - the score bug: the score as of the moment (the timeline's scoreAt), the scoring side's half flashing its colour
  *   for GOAL_FLASH_SECONDS, and a GOAL tag naming the scorer and the assists for GOAL_TAG_SECONDS;
- * - the camera's hold on the net and the scorer for GOAL_HOLD_SECONDS, easing back to the play over GOAL_HOLD_EASE
- *   (it starts easing on GOAL_HOLD_LEAD before the goal, which the log shows is coming, so the camera is there when the
- *   puck goes in);
+ * - the camera's hold on the net and the scorer from the goal's tick (on with time constant GOAL_HOLD_IN; nothing
+ *   about the camera before the goal depends on whether the shot goes in, so the camera gives nothing away) for
+ *   GOAL_HOLD_SECONDS, easing back to the play over GOAL_HOLD_EASE;
  * - a save: the shots number pulses for SAVE_PULSE_SECONDS (nothing else; no words over the ice).
  */
 
@@ -20,11 +20,13 @@ export const GOAL_TAG_SECONDS = 5;
 export const GOAL_HOLD_SECONDS = 3;
 /** Seconds the camera's hold takes to let go of the net once GOAL_HOLD_SECONDS are over. */
 export const GOAL_HOLD_EASE = 1;
-/** Seconds before the goal the camera's hold starts easing in, and before the goal it is fully on. */
-export const GOAL_HOLD_LEAD = 1, GOAL_HOLD_SET = 0.35;
+/** Time constant (s) of the camera's hold coming on at the goal's tick. */
+export const GOAL_HOLD_IN = 0.06;
 export const SAVE_PULSE_SECONDS = 0.6;
 /** How often (s) the flash on the score bug pulses. */
 const FLASH_PERIOD = 0.6;
+/** Seconds of the score digits' pop. */
+const POP_SECONDS = 0.8;
 
 const LONGEST = Math.max(GOAL_LIGHT_SECONDS, GOAL_FLASH_SECONDS, GOAL_TAG_SECONDS, GOAL_HOLD_SECONDS + GOAL_HOLD_EASE);
 
@@ -37,6 +39,8 @@ export type GoalShow = {
   light: 1 | -1 | null;
   /** The side whose half of the score bug flashes, and how bright the flash is now (0..1, pulsing). */
   flash: Side | null; flashK: number;
+  /** How much the scoring side's score digits pop (0..1, a single swell over POP_SECONDS from the goal). */
+  pop: number;
   /** The GOAL tag's goal (scorer and assists), or null. */
   tag: GameEventOf<'goal'> | null;
   /** The camera's hold on the net scored on (null when none): the net (world, on the goal line) and its weight (0..1). */
@@ -65,25 +69,20 @@ export function goalShow(tl: Timeline, time: number): GoalShow {
   const show: GoalShow = {
     score: tl.scoreAt(tick),
     goal: live ? goal : null, since: live ? since : Infinity,
-    light: null, flash: null, flashK: 0, tag: null, hold: null,
+    light: null, flash: null, flashK: 0, pop: 0, tag: null, hold: null,
     savePulse: saveSince >= 0 && saveSince < SAVE_PULSE_SECONDS ? 1 - smooth(saveSince / SAVE_PULSE_SECONDS) : 0,
   };
-  if (!live || !goal) {
-    // A goal about to go in: the camera's hold eases in ahead of it.
-    const coming = tl.next('goal', tick - 1, Math.ceil(GOAL_HOLD_LEAD / DT) + 1);
-    const ahead = coming ? (coming.tick - t) * DT : Infinity;
-    if (coming && ahead > 0 && ahead < GOAL_HOLD_LEAD) show.hold = { net: goalNet(coming), k: smooth((GOAL_HOLD_LEAD - ahead) / (GOAL_HOLD_LEAD - GOAL_HOLD_SET)), scorerId: coming.playerId };
-    return show;
-  }
+  if (!live || !goal) return show;
   if (since < GOAL_LIGHT_SECONDS) show.light = goalEnd(goal);
   if (since < GOAL_FLASH_SECONDS && goal.side) {
     show.flash = goal.side;
-    // Pulsing between bright and half, fading out over its last half second.
-    show.flashK = (0.75 + 0.25 * Math.cos((2 * Math.PI * since) / FLASH_PERIOD)) * (1 - smooth((since - (GOAL_FLASH_SECONDS - 0.5)) / 0.5));
+    // Full at the goal, pulsing, fading out over the 3 s; the score digits pop as it goes up.
+    show.flashK = (0.85 + 0.15 * Math.cos((2 * Math.PI * since) / FLASH_PERIOD)) * (1 - smooth((since - 1) / (GOAL_FLASH_SECONDS - 1)));
+    show.pop = since < POP_SECONDS ? Math.sin((Math.PI * since) / POP_SECONDS) : 0;
   }
   if (since < GOAL_TAG_SECONDS) show.tag = goal;
   if (since < GOAL_HOLD_SECONDS + GOAL_HOLD_EASE) {
-    show.hold = { net: goalNet(goal), k: 1 - smooth((since - GOAL_HOLD_SECONDS) / GOAL_HOLD_EASE), scorerId: goal.playerId };
+    show.hold = { net: goalNet(goal), k: (1 - Math.exp(-since / GOAL_HOLD_IN)) * (1 - smooth((since - GOAL_HOLD_SECONDS) / GOAL_HOLD_EASE)), scorerId: goal.playerId };
   }
   return show;
 }

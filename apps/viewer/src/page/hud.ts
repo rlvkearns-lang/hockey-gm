@@ -74,6 +74,8 @@ export function createHud(): Hud {
       text($('bugAwayScore'), String(sh.score.away));
       setVar(teamEl.home, '--flash', sh.flash === 'home' ? sh.flashK : 0);
       setVar(teamEl.away, '--flash', sh.flash === 'away' ? sh.flashK : 0);
+      setVar(teamEl.home, '--pop', sh.flash === 'home' ? sh.pop : 0);
+      setVar(teamEl.away, '--pop', sh.flash === 'away' ? sh.pop : 0);
       setVar(shotsEl, '--pulse', sh.savePulse);
       if (sh.tag !== tagOf) {
         tagOf = sh.tag;

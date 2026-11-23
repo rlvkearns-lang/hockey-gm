@@ -65,6 +65,8 @@ export type OperatorInput = Omit<CameraInput, 'current' | 'battle' | 'goal'> & {
 
 /** On a goal the camera watches the net, moved toward the scorer by half his distance from it, at most HOLD_REACH m. */
 export const HOLD_REACH = 1.5;
+/** On a goal's hold the camera's own time constants are this much shorter (at full hold), so it is on the net at once. */
+export const HOLD_QUICK = 0.75;
 
 /** The point a goal's hold watches: the net, toward the scorer (if any) by half his distance, at most HOLD_REACH. */
 export function holdPoint(net: Vec3, scorer: Vec3 | null | undefined): Vec3 {
@@ -164,6 +166,6 @@ export function stepOperator(op: CameraOperator, input: OperatorInput, dt: numbe
       look: { x: p.look.x + s * anchor.x, y: p.look.y, z: p.look.z + s * anchor.z }, fov: p.fov,
     });
     cam = rel(easeCamera(rel(op.cam, -1), rel(target, -1), h, false), 1);
-  } else cam = easeCamera(op.cam, target, h, snap);
+  } else cam = easeCamera(op.cam, target, h, snap, 1 - HOLD_QUICK * holdK);
   return { state: { camera: op.camera, cam, focus, lastTarget: target, followOn, pending: false, clock, trail, battleK, battleSpot }, pose: cam, cut: snap };
 }

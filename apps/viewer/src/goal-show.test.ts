@@ -55,6 +55,14 @@ describe('what shows round a goal', () => {
         const mid = goalShow(tl, g.tick + ticks(1));
         expect(mid.flash).toBe(g.side);
         expect(mid.flashK).toBeGreaterThan(0.4);
+        // A clear flash at the goal, fading over the 3 s; the score digits pop once.
+        expect(goalShow(tl, g.tick).flashK).toBeGreaterThan(0.95);
+        expect(goalShow(tl, g.tick + ticks(2.9)).flashK).toBeLessThan(0.05);
+        expect(goalShow(tl, g.tick + ticks(3)).flash).toBeNull();
+        expect(goalShow(tl, g.tick + ticks(0.4)).pop).toBeGreaterThan(0.95);
+        expect(goalShow(tl, g.tick + ticks(1)).pop).toBe(0);
+        expect(goalShow(tl, g.tick + ticks(1)).hold!.k).toBeGreaterThan(0.99);
+        expect(goalShow(tl, g.tick - 1).hold).toBeNull();
         expect(mid.tag).toBe(g);
         expect(goalShow(tl, g.tick + ticks(GOAL_TAG_SECONDS) - 1).tag).toBe(g);
         expect(goalShow(tl, g.tick + ticks(GOAL_TAG_SECONDS) + 1).tag).toBeNull();

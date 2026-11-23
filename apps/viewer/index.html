@@ -40,10 +40,12 @@ h1 .home { color: var(--home-ink); } h1 .away { color: var(--away-ink); } h1 .vs
 .bug-row { display: flex; align-items: stretch; border-radius: 0.35em; overflow: hidden; background: rgba(14, 17, 22, 0.86); }
 .bug .team { position: relative; display: flex; align-items: center; gap: 0.45em; padding: 0.3em 0.6em 0.3em 0; }
 /* A goal: the scoring side's half of the bug flashes its colour (--flash, 0..1, set each frame). */
-.bug .team::before { content: ''; position: absolute; inset: 0; background: var(--flash-col); opacity: var(--flash, 0); pointer-events: none; }
+.bug .team::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, var(--flash-hi), var(--flash-col)); opacity: var(--flash, 0); box-shadow: 0 0 calc(var(--flash, 0) * 0.9em) var(--flash-hi); pointer-events: none; }
 .bug .team > * { position: relative; }
-.bug .team.home { --flash-col: var(--home); }
-.bug .team.away { --flash-col: var(--away-trim); }
+.bug .team .n { display: inline-block; transform: scale(calc(1 + var(--pop, 0) * 0.45)); transform-origin: center; }
+/* Bright, so the flash reads on the dark bug in both schemes (the same in light and dark: the bug is always dark). */
+.bug .team.home { --flash-col: #e8182e; --flash-hi: #ff6b7a; }
+.bug .team.away { --flash-col: #1f6fff; --flash-hi: #7fb2ff; }
 .bug-top { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.35em; }
 .bug-goal { display: flex; align-items: center; flex-wrap: wrap; gap: 0.15em 0.55em; padding: 0.25em 0.7em 0.25em 0.25em; border-radius: 0.35em; background: rgba(14, 17, 22, 0.86); max-width: 26em; }
 .bug-goal[hidden] { display: none; }

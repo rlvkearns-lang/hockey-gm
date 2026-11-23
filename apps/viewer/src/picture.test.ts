@@ -47,9 +47,12 @@ import { sharedPlayback } from './test/game';
 // glove save): 42: 571a0213d51808a7 before, which this code gives with the tilt off (HELD_TILT_FROM Infinity in
 // scene.ts); with that and faceoffLineup out, cad81dcc00ac9916 as before Task 6. The goal lights and the puck marker are
 // not in the hash (neither is a figure or the puck).
+// Re-pinned by Task 6's fix round 1 (a centre's blade held by the dot over the stick actions until 0.2 s before the
+// drop, overlays/faceoff-lineup.ts faceoffStickHold): 42: d320c1950eefa9b2 before (1434304), which this code still gives
+// with faceoffStickHold taken out of OVERLAYS. (The puck eased into the net after a goal is outside both windows.)
 const PICTURE_HASH: Record<number, string> = {
   5: '303e6178dfc64315',
-  42: 'd320c1950eefa9b2',
+  42: '306b8fd4fe697692',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */

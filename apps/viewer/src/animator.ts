@@ -7,7 +7,7 @@ import { fitGoalie, goalieMotion, goalieRaw, initialGoalieGait, mixGoalieRaw, st
 import { BATTLE_OVERLAYS } from './overlays/battles';
 import { CONTACT_OVERLAYS, contactBodyPass } from './overlays/contact';
 import { faceoffCrouch } from './overlays/faceoff';
-import { faceoffLineup } from './overlays/faceoff-lineup';
+import { faceoffLineup, faceoffStickHold } from './overlays/faceoff-lineup';
 import { GOALIE_CATCHES, goalieReach, goalieTrack } from './overlays/goalie';
 import { beatenGoalie, blockOverlay, celebrateOverlay } from './overlays/reactions';
 import { STICK_OVERLAYS } from './overlays/stick';
@@ -34,7 +34,7 @@ export { GOALIE_CATCHES, goalieHeldPuck } from './overlays/goalie';
  */
 
 /** The registered overlays, in the order they are applied (later ones see the earlier ones' result). */
-export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, faceoffLineup as Overlay, ...STICK_OVERLAYS, blockOverlay as Overlay, celebrateOverlay as Overlay, ...CONTACT_OVERLAYS, ...BATTLE_OVERLAYS];
+export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, faceoffLineup as Overlay, ...STICK_OVERLAYS, faceoffStickHold, blockOverlay as Overlay, celebrateOverlay as Overlay, ...CONTACT_OVERLAYS, ...BATTLE_OVERLAYS];
 
 export function initialSkaterAnim(): SkaterAnim {
   return { gait: initialGait(), fresh: true, carrying: false, slots: {} };

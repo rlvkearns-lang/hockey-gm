@@ -140,7 +140,7 @@ function aimCamera(dt: number, snap = false, displayDt = 0): void {
   // Draw the puck large enough to find from far away, and true to size up close.
   gs.setPuckScale(renderer.puckScaleAt(puckV));
   // The puck marker, decided from what this camera sees.
-  gs.updateMarker(camPose.pos, markerMode, displayDt, snap || dt === 0 && displayDt === 0);
+  gs.updateMarker(camPose.pos, markerMode, displayDt, snap || (dt === 0 && displayDt === 0), { fov: camPose.fov, heightPx: Math.max(1, stage.clientHeight) });
   // The overhead camera hangs above the scoreboard; it would hide centre ice.
   if (g.scoreboard) g.scoreboard.visible = operator.camera !== 'overhead';
   const off = operator.camera === 'follow' && !followOn;

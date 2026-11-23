@@ -16,7 +16,7 @@ import { goalShow } from './goal-show';
 import type { GoalieFigurePose } from './goalie-pose';
 import { createGoalieRig, type GoalieRig } from './goalie-rig';
 import { lerpAngle, type Frame, type Playback } from './playback';
-import { battleHighlight, initialMarker, stepMarker, type MarkerBody, type MarkerMode, type MarkerState } from './puck-marker';
+import { battleHighlight, initialMarker, MARKER_PX, markerRadius, stepMarker, type MarkerBody, type MarkerMode, type MarkerState } from './puck-marker';
 import { createRigKit, createSkaterRig, isSharedTexture, type RigColors, type SkaterRig } from './rig';
 import { buildRink } from './rink';
 import { buildTimeline, type Timeline } from './timeline';
@@ -68,7 +68,7 @@ export type GameScene = {
    * The puck marker for this frame (puck-marker.ts), seen from a camera at `cam` (world), with the page's setting;
    * `dt` is display time since the last frame, `snap` (a seek) shows it as it should be at once. Call after update().
    */
-  updateMarker(cam: { x: number; y: number; z: number }, mode: MarkerMode, dt: number, snap?: boolean): void;
+  updateMarker(cam: { x: number; y: number; z: number }, mode: MarkerMode, dt: number, snap?: boolean, view?: { fov: number; heightPx: number }): void;
   /** How much the marker shows (0..1), the highlight under the man who came away with the puck (0..1), and why. */
   marker(): Readonly<MarkerState> & { highlight: number };
   dispose(): void;
@@ -124,6 +124,11 @@ const smooth01 = (t: number): number => { const u = t < 0 ? 0 : t > 1 ? 1 : t; r
 const MARKER_SKATER = { r: 0.28, h: 1.75 }, MARKER_GOALIE = { r: 0.45, h: 1.5 };
 /** How opaque the marker ring is when fully shown. */
 const MARKER_OPACITY = 0.8;
+/**
+ * After a goal the puck is eased into the net over `seconds`: to `fromBack` m short of the net's back and at least
+ * `fromSide` m inside its sides, while the stopped play after the goal lasts (the goal within `within` ticks).
+ */
+const NET_REST = { seconds: 0.45, fromBack: 0.2, fromSide: 0.2, within: 120 };
 /** A held puck is tilted from this height (m) over this much more: in the glove, not under it on the ice. */
 const HELD_TILT_FROM = 0.12, HELD_TILT_OVER = 0.2;
 /** The way a puck held in the glove faces: up the ice, up a little, and toward the broadcast side (unnormalised). */
@@ -221,12 +226,12 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     const f = Number.isFinite(k) && k > 0 ? k / PUCK_SCALE : 1;
     disc.scale.setScalar(f);
     puckShadow.scale.setScalar(PUCK_R * 1.8 * f);
-    markerScale = Math.sqrt(f);
   }
 
   // ---- The puck marker: a thin light ring on the ice under the puck (puck-marker.ts). Drawn after the opaque figures
   // and depth-tested against them, so a body standing over it covers it; it never writes depth.
-  const MARKER_R = 0.3, MARKER_W = 0.045;
+  // A unit ring (scaled to markerRadius each frame), its line MARKER_PX.width / MARKER_PX.radius of its radius.
+  const MARKER_R = 1, MARKER_W = MARKER_PX.width / MARKER_PX.radius;
   const markerMat = new THREE.MeshBasicMaterial({
     color: 0xffd84a, transparent: true, opacity: 0, depthWrite: false, depthTest: true, toneMapped: false,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
@@ -237,7 +242,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
   marker.renderOrder = 2;
   marker.visible = false;
   root.add(marker);
-  let markerState: MarkerState = initialMarker(), markerHighlight = 0, markerScale = 1;
+  let markerState: MarkerState = initialMarker(), markerHighlight = 0;
   const markerCam = { x: 0, y: 0, z: 0 }, markerPuck = { x: 0, y: 0, z: 0 };
 
   // ---- Real-time shadows on `high`: figures and the puck cast them, the rink takes them.
@@ -399,8 +404,19 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     puckDraw = stepPuckDraw(puckDraw, pi, dt);
     const d = puckDraw.drawn;
     drawn.set(d.x, d.y, d.z);
-    puck.position.set(d.x, 0, d.z);
-    disc.position.set(0, d.y, 0);
+    // After a goal, in the stopped play until the faceoff setup (a ruled exception): the puck, which the engine rests
+    // on the goal line, is eased into the back of the net on the side it went in.
+    if (prev.phase === 'stopped' && next.phase === 'stopped') {
+      const g = timeline.last('goal', prev.tick, NET_REST.within);
+      if (g) {
+        const k = smooth01(((frame.tick + a - g.tick) * DT) / NET_REST.seconds), end = g.pos.x >= 0 ? 1 : -1;
+        const tx = end * (RINK.goalLineX + RINK.netDepth - NET_REST.fromBack);
+        const tz = Math.max(-(RINK.netHalfWidth - NET_REST.fromSide), Math.min(RINK.netHalfWidth - NET_REST.fromSide, g.pos.y));
+        drawn.set(d.x + (tx - d.x) * k, d.y * (1 - k), d.z + (tz - d.z) * k);
+      }
+    }
+    puck.position.set(drawn.x, 0, drawn.z);
+    disc.position.set(0, drawn.y, 0);
     // A puck a goalie holds up in his glove: tilted so its face shows, toward up the ice and the broadcast side
     // (lying flat it was seen edge-on in the pocket); turned about its own middle. Flat on the ice under his glove.
     const holder = heldBy as GoalieFig | null;
@@ -477,7 +493,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
   const markerBodies: readonly MarkerBody[] = [...markerSkaters, ...markerGoalies];
   const markerColor = new THREE.Color(), MARKER_COLOR = new THREE.Color(0xffd84a), MARKER_HIGH = new THREE.Color(0xfff6c8);
 
-  function updateMarker(cam: { x: number; y: number; z: number }, mode: MarkerMode, dt: number, snap = false): void {
+  function updateMarker(cam: { x: number; y: number; z: number }, mode: MarkerMode, dt: number, snap = false, view = { fov: 30, heightPx: 720 }): void {
     for (let i = 0; i < skaters.length; i++) {
       const v = skaters[i]!.view, b = markerSkaters[i]!;
       b.x = v.position.x; b.z = v.position.z; b.on = v.onIce;
@@ -496,7 +512,8 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     if (!marker.visible) return;
     markerMat.opacity = Math.max(MARKER_OPACITY * markerState.k, 0.95 * markerHighlight);
     markerMat.color.copy(markerColor.copy(MARKER_COLOR).lerp(MARKER_HIGH, markerHighlight));
-    marker.scale.setScalar(markerScale * (1 + 0.35 * markerHighlight));
+    const dist = Math.hypot(drawn.x - cam.x, drawn.y - cam.y, drawn.z - cam.z);
+    marker.scale.setScalar(markerRadius(dist, view.fov, view.heightPx) * (1 + 0.35 * markerHighlight));
     marker.position.set(drawn.x, 0.012, drawn.z);
   }
 

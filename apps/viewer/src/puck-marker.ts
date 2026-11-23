@@ -6,7 +6,8 @@ import type { Timeline } from './timeline';
  * The puck marker (pure: no three.js, no DOM): a thin light ring on the ice under the puck, shown when the puck is hard
  * to find from where the camera is (a body between the camera and the puck: a cheap test against an upright capsule
  * per figure, no reading back of the picture) or when it lies in a board battle or a net-front scrum; never while it
- * is plainly visible in open ice. It fades in over MARKER_IN and out over MARKER_OUT. The page's "Puck marker" setting
+ * is plainly visible in open ice (once it has faded out). It fades in over MARKER_IN and out over MARKER_OUT. It is
+ * drawn about the same size in the picture whatever the camera's distance: markerSize. The page's "Puck marker" setting
  * is On (always), Auto (as above) or Off (never).
  *
  * When a board battle or a net-front battle ends and a man has the puck (the engine's carrier: the man it gave the puck
@@ -80,9 +81,8 @@ export function stepMarker(st: MarkerState, input: MarkerInput, dt: number, snap
   const scrum = inScrum(input.puck, input.contests);
   const open = !hidden && inOpenIce(input.puck, input.skaters);
   if (input.mode === 'on') return { k: 1, hidden, scrum, open };
-  // Plainly visible in open ice: never shown, not even fading out.
-  if (open) return { k: 0, hidden, scrum, open };
-  const want = hidden || scrum ? 1 : 0, h = Number.isFinite(dt) && dt > 0 ? dt : 0;
+  // Plainly visible in open ice: not shown (fading out over MARKER_OUT if it was).
+  const want = !open && (hidden || scrum) ? 1 : 0, h = Number.isFinite(dt) && dt > 0 ? dt : 0;
   const k = snap ? want : want > st.k ? Math.min(want, st.k + h / MARKER_IN) : Math.max(want, st.k - h / MARKER_OUT);
   return { k, hidden, scrum, open };
 }
@@ -102,4 +102,19 @@ export function battleHighlight(tl: Timeline, time: number, carrierId: string | 
   if (t < 0 || t >= HIGHLIGHT_SECONDS) return 0;
   const u = (t - (HIGHLIGHT_SECONDS - 0.25)) / 0.25;
   return u <= 0 ? 1 : 1 - u * u * (3 - 2 * u);
+}
+
+/** The ring's radius and line width in the picture (CSS pixels; `heightPx` is the picture's CSS height). */
+export const MARKER_PX = { radius: 12, width: 3 };
+/** Its radius on the ice is kept within these (m): near the camera never smaller than a puck's surroundings. */
+export const MARKER_RADIUS: readonly [number, number] = [0.22, 2.5];
+
+/**
+ * The ring's radius on the ice (m) for MARKER_PX.radius pixels in a picture `heightPx` tall from a camera `dist` metres
+ * away with vertical field of view `fovDeg`, within MARKER_RADIUS. Its line is MARKER_PX.width / MARKER_PX.radius of it.
+ */
+export function markerRadius(dist: number, fovDeg: number, heightPx: number): number {
+  const ppm = heightPx / (2 * Math.max(dist, 0.1) * Math.tan((fovDeg * Math.PI) / 360));
+  const r = MARKER_PX.radius / ppm;
+  return Math.min(MARKER_RADIUS[1], Math.max(MARKER_RADIUS[0], Number.isFinite(r) ? r : MARKER_RADIUS[0]));
 }

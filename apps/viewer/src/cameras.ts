@@ -204,10 +204,12 @@ export function easePoint(p: Vec3, target: Vec3, dt: number, tau: number): Vec3 
 
 /**
  * The camera moved toward `target` over `dt` seconds: an exponential ease (frame-rate independent, never past the
- * target), or straight to it when `snap` (a new angle, a seek, a new game).
+ * target), or straight to it when `snap` (a new angle, a seek, a new game); `quick` scales its time constants.
  */
-export function easeCamera(current: CameraPose, target: CameraPose, dt: number, snap: boolean): CameraPose {
+export function easeCamera(current: CameraPose, target: CameraPose, dt: number, snap: boolean, quick = 1): CameraPose {
   if (snap) return { pos: { ...target.pos }, look: { ...target.look }, fov: target.fov };
-  const k = (tau: number): number => (dt > 0 ? 1 - Math.exp(-dt / tau) : 0);
+  // `quick` (0..1] shortens every time constant (a goal's hold swings straight onto the net).
+  const q = quick > 0 && quick <= 1 ? quick : 1;
+  const k = (tau: number): number => (dt > 0 ? 1 - Math.exp(-dt / (tau * q)) : 0);
   return { pos: easeVec(current.pos, target.pos, k(TAU.pos)), look: easeVec(current.look, target.look, k(TAU.look)), fov: toward(current.fov, target.fov, k(TAU.fov)) };
 }

@@ -664,13 +664,17 @@ if (only && only.includes('task6')) {
     r.shots.forEach((s2, i) => save(`${name}-${i + 1}.png`, s2.url));
     console.log('t6 seq', name, r.shots.map((s2) => `${s2.tick}${s2.marker && s2.marker.k > 0 ? `(m${s2.marker.k.toFixed(1)}${s2.marker.highlight > 0 ? 'h' : ''})` : ''}`).join(' '));
   };
-  const goalOffsets = [-24, -9, 0, 6, 15, 30, 45, 60, 90, 120];
+  const goalOffsets = process.env.T6_GOAL_WIDE ? [-60, -45, -30, -15, -6, 0, 12, 30, 60, 120] : [-24, -9, 0, 6, 15, 30, 45, 60, 90, 120];
   for (const [i, gl] of found.goals.entries()) {
     const behind = await tp.evaluate((x) => { const s = window.__watch.state(); const homeNetX = s.attackDir.home === 1 ? -1 : 1; return Math.sign(x) === homeNetX ? 'netHome' : 'netAway'; }, gl.x);
     await sequence(`t6-goal${i + 1}-broadcast`, gl.tick, goalOffsets, { camera: 'broadcast' });
     await sequence(`t6-goal${i + 1}-behind`, gl.tick, goalOffsets, { camera: behind });
   }
   const saveOffsets = [-9, -3, 0, 3, 6, 10, 20, 30, 43, 60];
+  const parts = (process.env.T6_PARTS ?? 'goals,saves,faceoffs,battles').split(',');
+  if (!parts.includes('saves')) found.saves.length = 0;
+  if (!parts.includes('faceoffs')) found.faceoffs.length = 0;
+  if (!parts.includes('battles')) found.battles.length = 0;
   for (const [i, sv] of found.saves.entries()) {
     const sx = Math.sign(sv.x);
     const front = { pos: { x: sv.x - sx * 4, y: 1.7, z: sv.y + NEAR * 2.2 }, look: { x: sv.x - sx * 0.3, y: 0.8, z: sv.y }, fov: 30 };
