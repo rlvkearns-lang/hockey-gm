@@ -14,6 +14,7 @@ The owner's words that drive it:
 - "a few players standing around too much and puck watching"
 - "players on a breakaway passing back to the point"; "passing diagonally back to the point, but the D can't collect, which goes offside"
 - "not too many shot attempts, like no rebounds"
+- "no one really goes into Gretzky's office, and the players without puck just stand around, they don't try to get open, and opposing players do the same, don't try to block passing lanes"
 - "more cycling of the puck in the o-zone, dump and chase, depending on coach and player style... point shots, tips"
 - "I'd want to know what is happening, how they're battling instead of one player just getting the puck and skating away"
 - "the power forward doesn't ALWAYS beat the two way guy"
@@ -60,6 +61,9 @@ Each skater always holds one named job, chosen from the situation, his position,
 - Breaking out: the retriever; the outlet on the boards; the centre curling low; the far winger stretching.
 - Without the puck: first forechecker pressures; second takes away the pass or the body; third stays high; in the defensive zone each man covers a man or a lane (wingers on the points, centre low, defencemen at the net and the corner); backcheckers pick up a man.
 - A job always has a moving part: get open (move into a lane the carrier can reach), stay between a man and the net, close a gap, go to the bench. Nobody's job is "stand here and look at the puck".
+- Getting open is active: an attacker without the puck keeps moving to a spot the carrier can actually pass to (out of a defender's shadow, into space), and moves again when he is covered.
+- Taking lanes away is active: a defender without the puck puts his body or stick in the passing lane between the carrier and the most dangerous option near him, as well as staying with his man; a stick in the lane makes that pass less likely to be tried and more likely to be picked off or deflected.
+- Behind the net ("Gretzky's office") is a real place to play from: the carrier can take the puck there or receive a cycle pass there, hold it with the net as protection, pass out to the slot or to either side, or wrap around. Defenders have to choose whether to chase him behind the net or hold the front; the goalie has to follow post to post.
 - Jobs are handed out so that two men never hold the same one, and they stick (A1).
 
 ### A3. Decisions with the puck
