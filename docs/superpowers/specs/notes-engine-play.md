@@ -93,3 +93,8 @@ Consequences and proposed shape **[my call]**:
 - Commands take effect the way they would on a real bench: at the next change or whistle, not instantly.
 - It interacts with the line-up setting: under "coach decides", stepping in overrules the coach and he notices; under full manual control there is no cost.
 - Friends league: a game between two human GMs is simmed once for both, so live coaching there needs both online together (the watch-party case) or is switched off; to settle when that stage is designed.
+
+## Seen in 3D: players do not commit (Claude, 2026-11-23, for engine round 2)
+
+- On a 3D body the engine's motion looks busy: a skater's style changes about every 0.8 s, "stops" only brake to a jog before he turns away, backward skating reaches 7 m/s, and sprints last under a second (about 5% of skating time) because players trim speed or turn almost as soon as they reach top speed. The engine re-decides where to go five times a second and brakes as hard as it accelerates.
+- Proposed **[my call]**: in engine round 2, players commit to a direction and a speed for longer (re-decide less often unless something changes, coast and glide more, brake less hard, hold speed through the neutral zone on a rush), followed by the re-tune that round already needs. The owner judges how much it matters after watching a whole game in 3D.
