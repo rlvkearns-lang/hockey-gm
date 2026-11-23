@@ -10,7 +10,13 @@ const setup = (seed: number): GameSetup => {
 
 describe('playback', () => {
   let shared: Playback;
-  beforeAll(() => { shared = createPlayback(setup(3)); });
+  const seen: number[] = [];
+  beforeAll(() => { shared = createPlayback(setup(3), { onStep: (s) => { seen.push(s.tick); } }); });
+
+  it('onStep sees every tick of the first run once, in order', () => {
+    expect(seen.length).toBe(shared.totalTicks + 1);
+    expect(seen.every((t, i) => t === i)).toBe(true);
+  });
 
   it('reaches the same final score as an unwatched sim', () => {
     const r = simulateGame(setup(3));

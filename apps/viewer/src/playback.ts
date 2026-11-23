@@ -25,9 +25,10 @@ const clone = <T>(v: T): T => structuredClone(v);
 /**
  * Plays the whole game once up front (on the calling thread), keeping a deep-copied snapshot every
  * `snapshotEverySeconds` and the full event log. Seeking restores the nearest earlier snapshot and steps forward;
- * the viewer never decides anything about the game.
+ * the viewer never decides anything about the game. `onStep`, if given, sees the state of every tick of that first run
+ * (tick 0 included), read-only and only during the call (the state is changed in place by the next step).
  */
-export function createPlayback(setup: GameSetup, opts: { snapshotEverySeconds?: number } = {}): Playback {
+export function createPlayback(setup: GameSetup, opts: { snapshotEverySeconds?: number; onStep?: (state: Readonly<GameState>) => void } = {}): Playback {
   const every = Math.max(1, Math.round((opts.snapshotEverySeconds ?? 5) / DT));
   const events: GameEvent[] = [];
   const snapshots: Snapshot[] = [];
@@ -38,9 +39,11 @@ export function createPlayback(setup: GameSetup, opts: { snapshotEverySeconds?: 
     snapshots.push({ tick: g.state.tick, state: clone(g.state), eventCount: events.length });
   };
   snap(first);
+  opts.onStep?.(first.state);
   while (!first.done) {
     first.step();
     if (first.state.tick % every === 0) snap(first);
+    opts.onStep?.(first.state);
   }
   events.push(...first.drainEvents());
   const result = first.result();
