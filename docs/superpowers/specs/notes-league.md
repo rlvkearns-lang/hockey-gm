@@ -12,3 +12,14 @@ Working notes from conversation with the owner on 2026-11-23, to be folded into 
 
 ## Open
 - Where real data comes from (rosters, ratings derived from real statistics, contracts, draft picks, prospects): being researched.
+
+## Data source research (2026-11-23, mostly second-hand: the session's network blocked every host except github.com, so no live endpoint or terms page was checked)
+- Rosters, bio, per-season stats, game logs, each team's prospect list, draft results and rankings: the NHL's own unofficial, undocumented web API (api-web.nhle.com, api.nhle.com/stats). Community endpoint reference: github.com/Zmalski/NHL-API-Reference (MIT, fetched and read). No key. Terms unclear; treat as personal use, cache locally, fetch slowly.
+- Bulk statistics for deriving ratings: MoneyPuck downloadable CSVs (skaters, goalies, lines, shot-level from 2007), free for non-commercial use with credit (per search snippet). Hits, blocks, faceoffs, takeaways, zone starts would come from NHL play-by-play (unconfirmed).
+- AHL: HockeyTech feeds behind theahl.com (undocumented JSON with a public client key); roster and stat views unconfirmed.
+- Junior and European prospects: weakest area. Elite Prospects' API is paid and its terms reportedly exclude consumer use. CHL probably HockeyTech (unconfirmed). Nothing found for NCAA or European leagues.
+- Contracts, clauses, retained salary: no confirmed free bulk source since CapFriendly closed in 2024. PuckPedia appears to have a keyed developer API (pricing and terms unconfirmed); CapWages and Spotrac show the data on their sites.
+- Future draft pick ownership: no source found beyond those sites' pages.
+- Community practice: fan-made roster files (ZenGM Hockey on Reddit, FHM mods on the OOTP forums). FHM itself is NHL-licensed.
+- Gaps and fallbacks: contracts and pick ownership entered by hand, imported from a community file, or via a paid key; junior/European prospects' ratings derived from draft position and rankings with generated stat lines; the draft-eligible class generated.
+- To do before designing the importer: re-run this research with the hosts allowed so endpoints and terms are verified first-hand.
