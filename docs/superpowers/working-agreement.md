@@ -13,11 +13,14 @@ Agreed with the owner on 2026-11-23.
 
 ## Order of work
 
-1. Finish the engine fix round (final review of `engine-core`), then republish the debug view.
-2. 3D viewer (stage 1, part 2), starting with the skating test.
-3. Engine round 2: penalties, power plays, pulled goalie, tactics, cycling, dump and chase, point shots, tips, condensed viewing.
-4. Engine round 3: injuries that match the play, stingers, overtime, shootout, scrums, fights.
-5. League, then GM job, then people, then friends league.
+Updated 2026-11-24 after the owner watched a full game in 3D and agreed this order.
+
+1. Done: the engine's first step (merged to `main`), and viewer milestones 1 and 2 (skating test; the whole game on the ice).
+2. Now: viewer milestone 3 (passes, shots, saves, hits, board battles), plus a task making goals unmistakable and faceoffs line up.
+3. Next: engine round 2, led by how the players play: decisions with the puck (a breakaway attacks the net; passes to the point only when the defenceman can take them), shot volume and rebounds, committing to a direction and coasting, defencemen shooting, the puck on the blade, goalies' catching hand, tactics, cycling, dump and chase, point shots and tips; then penalties, power plays, pulled goalie; with one re-tune. See `docs/superpowers/specs/notes-engine-play.md`.
+4. Then: viewer milestone 4 (auto director, replays, on-screen information, pre-game, intermission and post-game) and milestone 5 (player card).
+5. Then: engine round 3 (injuries that match the play, stingers, overtime, shootout, scrums, fights, game temperature).
+6. Then: league, GM job, people, friends league.
 
 ## Where things are recorded
 
