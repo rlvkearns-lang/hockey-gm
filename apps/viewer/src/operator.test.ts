@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { BENCH_DOORS, RINK } from '@hockey/engine';
-import { BOARD_TOP } from './cameras';
+import { BOARD_TOP, type CameraName } from './cameras';
+import { cutKind, emptyProbe, isCut, probeOf, type CutKind } from './cuts';
+import { goalShow } from './goal-show';
 import { initialOperator, stepOperator, withCamera } from './operator';
+import { createCursor } from './playback';
+import { recorded, testSetup } from './test/game';
+import { buildTimeline } from './timeline';
 
 describe('camera operator', () => {
   it('eases on a jump cut and hard-cuts on a restart or a change of ends', () => {
@@ -131,5 +136,52 @@ describe('camera operator', () => {
       for (let i = 0; i < 240; i++) { const r = stepOperator(st, { puck: { x: 0, y: 0, z }, attackingRight: true, zoom: 1, battle: null }, 1 / 60); expect(r.cut).toBe(false); st = r.state; last = r.pose; }
       expect(Math.abs(last.fov - settle(0, z, false).fov)).toBeLessThan(0.5);
     });
+  });
+
+  it('after a goal holds on the net scored on for 3 s (no cut to the restart), then eases to the restart with at most one cut', () => {
+    const cams: CameraName[] = ['broadcast', 'overhead', 'netHome', 'netAway', 'iceLevel'];
+    let checked = 0;
+    for (const seed of [5, 42]) {
+      const rec = recorded(seed), tl = buildTimeline(rec.events), pb = createCursor(testSetup(seed), rec);
+      for (const g of tl.goals) {
+        const net = { x: Math.sign(g.pos.x) * RINK.goalLineX, z: 0 };
+        for (const cam of cams) {
+          let st = withCamera(initialOperator(cam), cam);
+          const shown = emptyProbe();
+          let worst = 0, cutsAfter = 0, cutsDuring = 0, lastLook = { x: 0, z: 0 };
+          const t0 = g.tick - 60, hold = g.tick + 90, end = g.tick + 165;
+          for (let i = 0; t0 + i / 2 <= end; i++) {
+            const t = t0 + i / 2; // 60 Hz of game time
+            pb.seek(t);
+            const f = pb.frame(), prev = f.prev;
+            const next = isCut(probeOf(prev), f.next) ? prev : f.next;
+            let cut: CutKind | null = null;
+            if (shown.tick >= 0 && prev.tick !== shown.tick) cut = cutKind(shown, prev);
+            if (prev.tick !== shown.tick) probeOf(prev, shown);
+            const a = next === prev ? 0 : f.alpha;
+            const puck = { x: prev.puck.pos.x + (next.puck.pos.x - prev.puck.pos.x) * a, y: 0, z: prev.puck.pos.y + (next.puck.pos.y - prev.puck.pos.y) * a };
+            const show = goalShow(tl, t);
+            const scorer = show.hold && show.hold.scorerId ? next.skaters.find((s) => s.id === show.hold!.scorerId) : undefined;
+            const r = stepOperator(st, {
+              puck, attackingRight: prev.attackDir.home === 1, cut, snap: i === 0,
+              goal: show.hold ? { net: show.hold.net, k: show.hold.k, scorer: scorer && scorer.onIce ? { x: scorer.pos.x, y: 0, z: scorer.pos.y } : null } : null,
+            }, i === 0 ? 0 : 1 / 60);
+            st = r.state;
+            if (t >= g.tick && t <= hold) {
+              worst = Math.max(worst, Math.hypot(r.pose.look.x - net.x, r.pose.look.z - net.z));
+              if (r.cut && t > g.tick) cutsDuring++;
+            } else if (t > hold && r.cut) cutsAfter++;
+            lastLook = { x: r.pose.look.x, z: r.pose.look.z };
+          }
+          expect(worst, `${seed} goal ${g.tick} ${cam}`).toBeLessThan(6);
+          expect(cutsDuring, `${seed} goal ${g.tick} ${cam} cuts in the hold`).toBe(0);
+          expect(cutsAfter, `${seed} goal ${g.tick} ${cam} cuts after`).toBeLessThanOrEqual(1);
+          // By 5.5 s the broadcast camera watches the restart at centre ice.
+          if (cam === 'broadcast') expect(Math.abs(lastLook.x), `${seed} goal ${g.tick}`).toBeLessThan(6);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(40);
   });
 });

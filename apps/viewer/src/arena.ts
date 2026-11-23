@@ -433,11 +433,69 @@ function floorRing(): THREE.Mesh {
   return m;
 }
 
+/** The goal lights' lamp: radius, height, and how high its middle is above the boards' top; the glow's size (m). */
+const LAMP = { r: 0.24, h: 0.4, up: 0.45, glow: 3.2 };
+const LAMP_OFF = 0x3a0d0d, LAMP_ON = 0xff2414;
+
+/**
+ * The red goal light behind each net: a lamp on a post on top of the end boards, straight behind the net, dark until
+ * setGoalLight lights it (its lens turns bright red and a red glow round it pulses like a turning beacon). Named
+ * goalLightE (the net at +x) and goalLightW; `userData.lit` is how lit it is (0..1).
+ */
+function goalLights(): THREE.Group {
+  const g = new THREE.Group();
+  g.name = 'goalLights';
+  const glowMap = canvasTexture(128, 128, (c) => {
+    const grad = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, 'rgba(255,120,90,1)'); grad.addColorStop(0.25, 'rgba(255,40,20,0.75)'); grad.addColorStop(1, 'rgba(255,0,0,0)');
+    c.fillStyle = grad; c.fillRect(0, 0, 128, 128);
+  });
+  const housing = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
+  for (const end of [1, -1] as const) {
+    const lamp = new THREE.Group();
+    lamp.name = end === 1 ? 'goalLightE' : 'goalLightW';
+    lamp.position.set(end * (RINK.halfLength + 0.12), BOARD_H, 0);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, LAMP.up, 6).translate(0, LAMP.up / 2, 0), housing);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(LAMP.r * 1.1, LAMP.r * 1.1, 0.08, 16).translate(0, LAMP.up - LAMP.h / 2 - 0.04, 0), housing);
+    const lens = new THREE.Mesh(new THREE.CylinderGeometry(LAMP.r * 0.85, LAMP.r, LAMP.h, 16).translate(0, LAMP.up, 0), new THREE.MeshBasicMaterial({ color: LAMP_OFF }));
+    lens.name = 'goalLightLens';
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      ...(glowMap ? { map: glowMap } : {}), color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0,
+    }));
+    glow.name = 'goalLightGlow';
+    glow.position.y = LAMP.up;
+    glow.scale.setScalar(LAMP.glow);
+    glow.visible = false;
+    lamp.add(post, base, lens, glow);
+    lamp.userData.lit = 0;
+    g.add(lamp);
+  }
+  return g;
+}
+
+/**
+ * Light the goal light behind the net at `end` (sign of world x) by `k` (0 dark .. 1 lit); `time` (s) turns its beacon.
+ * Cheap when nothing changes.
+ */
+export function setGoalLight(arena: THREE.Object3D, end: 1 | -1, k: number, time: number): void {
+  const lamp = arena.getObjectByName(end === 1 ? 'goalLightE' : 'goalLightW');
+  if (!lamp) return;
+  const lit = k > 0 ? Math.min(1, k) : 0;
+  if (lit === 0 && lamp.userData.lit === 0) return;
+  lamp.userData.lit = lit;
+  const lens = lamp.getObjectByName('goalLightLens') as THREE.Mesh, glow = lamp.getObjectByName('goalLightGlow') as THREE.Sprite;
+  (lens.material as THREE.MeshBasicMaterial).color.setHex(lit > 0 ? LAMP_ON : LAMP_OFF);
+  glow.visible = lit > 0;
+  const beacon = 0.7 + 0.3 * Math.cos(time * Math.PI * 3);
+  (glow.material as THREE.SpriteMaterial).opacity = lit * beacon;
+  glow.scale.setScalar(LAMP.glow * (0.85 + 0.15 * beacon));
+}
+
 export function buildArena(quality: ArenaQuality = 'high', teams: ArenaTeams = DEFAULT_TEAMS): THREE.Group {
   const g = new THREE.Group();
   g.name = 'arena';
   g.userData.shadows = quality === 'high';
-  g.add(lights(quality), roofLights(), floorRing(), standsMesh(), enclosure(), crowd(teams, quality === 'high' ? 1 : 2), crest(teams), scoreboard(teams), benches(teams));
+  g.add(lights(quality), roofLights(), floorRing(), standsMesh(), enclosure(), crowd(teams, quality === 'high' ? 1 : 2), crest(teams), scoreboard(teams), benches(teams), goalLights());
   if (quality === 'high') g.add(glass());
   return g;
 }

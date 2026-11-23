@@ -14,6 +14,11 @@ import type { Vec3 } from './pose-mix';
  * changing spot, the follow camera swinging round as he turns about): more than CUT_JUMP within one engine tick of
  * game time. Across the scene's other cuts ('jump': the engine moving the puck in the middle of play)
  * it eases.
+ *
+ * After a goal (input `goal`, from goal-show.ts: weight 1 for GOAL_HOLD_SECONDS, then easing to 0) it holds on the net
+ * scored on and the scorer instead of the puck: the engine's restart (the puck put on the centre dot) does not cut the
+ * camera while it holds, and as the hold lets go the camera eases to the play (an angle may still cut once by its
+ * own rule, as ice level changing spot). The broadcast camera tightens a little on the goal.
  */
 
 /** Time constant (s) of the point the cameras watch, chasing the drawn puck: smooths passes and rebounds. */
@@ -52,7 +57,21 @@ export type CameraOperator = {
  * tighter the broadcast camera should frame (a small picture), the player followed (when he is on the ice), the
  * scene's cut on this frame, if any, and `snap` for a seek or a new game.
  */
-export type OperatorInput = Omit<CameraInput, 'current' | 'battle'> & { cut?: CutKind | null | undefined; snap?: boolean; battle?: Vec3 | null };
+export type OperatorInput = Omit<CameraInput, 'current' | 'battle' | 'goal'> & {
+  cut?: CutKind | null | undefined; snap?: boolean; battle?: Vec3 | null;
+  /** A goal's hold (goal-show.ts GoalShow.hold): the net scored on (world), the scorer if on the ice, and its weight. */
+  goal?: { net: Vec3; scorer?: Vec3 | null; k: number } | null;
+};
+
+/** On a goal the camera watches the net, moved toward the scorer by half his distance from it, at most HOLD_REACH m. */
+export const HOLD_REACH = 1.5;
+
+/** The point a goal's hold watches: the net, toward the scorer (if any) by half his distance, at most HOLD_REACH. */
+export function holdPoint(net: Vec3, scorer: Vec3 | null | undefined): Vec3 {
+  if (!scorer) return { x: net.x, y: 0, z: net.z };
+  const dx = (scorer.x - net.x) / 2, dz = (scorer.z - net.z) / 2, d = Math.hypot(dx, dz), k = d > HOLD_REACH ? HOLD_REACH / d : 1;
+  return { x: net.x + dx * k, y: 0, z: net.z + dz * k };
+}
 
 /** Seconds the camera takes to ease onto a board battle (and off it when it ends), and to follow its spot. */
 export const BATTLE_EASE = 0.6, BATTLE_SPOT_TAU = 0.4;
@@ -94,8 +113,16 @@ function placeAgo(trail: readonly { t: number; x: number; z: number }[], t: numb
 /** Point the camera for one frame; `dt` is the game time just played (0 when paused). */
 export function stepOperator(op: CameraOperator, input: OperatorInput, dt: number): { state: CameraOperator; pose: CameraPose; cut: boolean } {
   const h = Number.isFinite(dt) && dt > 0 ? dt : 0;
-  let snap = op.pending || input.snap === true || input.cut === 'restart' || input.cut === 'ends';
-  const focus = snap ? { ...input.puck } : easePoint(op.focus, input.puck, h, FOCUS_TAU);
+  // A goal's hold: the camera watches the net (and the scorer) and does not cut to the engine's restart.
+  const gl = input.goal, holdK = gl && gl.k > 0 ? Math.min(1, gl.k) : 0;
+  let snap = op.pending || input.snap === true || (holdK === 0 && (input.cut === 'restart' || input.cut === 'ends'));
+  let watch = input.puck;
+  if (gl && holdK > 0) {
+    const p = holdPoint(gl.net, gl.scorer);
+    watch = { x: input.puck.x + (p.x - input.puck.x) * holdK, y: input.puck.y * (1 - holdK), z: input.puck.z + (p.z - input.puck.z) * holdK };
+  }
+  // (The hold's own ease is smooth, so the watched point follows it closely as it comes on.)
+  const focus = snap ? { ...watch } : easePoint(op.focus, watch, h, Math.max(0.02, FOCUS_TAU * (1 - holdK)));
   // A board battle: eased on and off (never a cut), its spot followed smoothly.
   const bt = input.battle ?? null, want = bt ? 1 : 0;
   const battleK = snap ? want : Math.min(1, Math.max(0, op.battleK + Math.max(-h / BATTLE_EASE, Math.min(h / BATTLE_EASE, want - op.battleK))));
@@ -105,7 +132,8 @@ export function stepOperator(op: CameraOperator, input: OperatorInput, dt: numbe
     current: op.lastTarget ?? undefined,
   };
   if (battleK > 0) camInput.battle = { spot: battleSpot, k: battleK * battleK * (3 - 2 * battleK) };
-  if (input.puckVel) camInput.puckVel = input.puckVel;
+  if (holdK > 0) camInput.goal = { k: holdK };
+  if (input.puckVel) camInput.puckVel = holdK > 0 ? { x: input.puckVel.x * (1 - holdK), y: 0, z: input.puckVel.z * (1 - holdK) } : input.puckVel;
   if (input.zoom !== undefined) camInput.zoom = input.zoom;
   if (input.followed) camInput.followed = input.followed;
   const followOn = input.followed !== undefined;

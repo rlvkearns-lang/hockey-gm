@@ -32,6 +32,11 @@ export type CameraInput = {
    * more steeply so the bodies are seen over the boards.
    */
   battle?: { spot: Vec3; k: number };
+  /**
+   * A goal's hold (0..1): the cameras look right up to the net (the puck, as the operator gives it, is then the net
+   * and the scorer), and the broadcast camera frames it a little tighter.
+   */
+  goal?: { k: number };
 };
 /** Where the camera is, the point it looks at (world) and its vertical field of view (degrees). */
 export type CameraPose = { pos: Vec3; look: Vec3; fov: number };
@@ -76,6 +81,8 @@ const BROADCAST = { height: 15.5, back: 29, fov: 29, maxLook: 21, follow: 0.55, 
 const BATTLE_VIEW = { zoom: 2.3, rise: 3, closer: 6.5, nearFrom: 4 };
 /** Height (m) of the boards' top edge (arena.ts BOARD_H). */
 export const BOARD_TOP = 1.07;
+/** On a goal's hold the broadcast and overhead cameras may look this much further toward the end (m), and the broadcast one frames this many times tighter. */
+const GOAL_VIEW = { reach: 4.5, overheadReach: 7, zoom: 1.35 };
 /** Overhead: under the roof lights, over the puck's half; it stops where the end boards are still in the picture. */
 const OVERHEAD = { height: 28, maxLook: 18.5, zFollow: 0.45, fov: 62 };
 /**
@@ -96,12 +103,15 @@ const FOLLOW = { back: 6, height: 3.1, ahead: 2.5, lookY: 0.8, fov: 50, turnSpee
 function broadcast(input: CameraInput): CameraPose {
   const { puck, puckVel } = input;
   const lead = puckVel ? clamp(puckVel.x * BROADCAST.lead, -BROADCAST.maxLead, BROADCAST.maxLead) : 0;
-  const lx = clamp(puck.x + lead, -BROADCAST.maxLook, BROADCAST.maxLook);
-  const zoom = Math.max(1, input.zoom ?? 1);
+  const gk = clamp(input.goal?.k ?? 0, 0, 1), maxLook = BROADCAST.maxLook + GOAL_VIEW.reach * gk;
+  const lx = clamp(puck.x + lead, -maxLook, maxLook);
+  const zoom = Math.max(1, input.zoom ?? 1) * (1 + (GOAL_VIEW.zoom - 1) * gk);
   // Toward the near boards only a little in the wide view (the near stands would fill the bottom); a tight view
   // (zoom) follows the puck across the ice, or a puck on the near boards would drop out of the bottom of the picture.
-  const lz = zoom > 1 ? clamp(puck.z * 0.8, -10, 11) : NEAR * BROADCAST.nearBias + clamp(NEAR * puck.z * BROADCAST.zFollow, -4, 1.8) * NEAR;
-  const pose = { pos: v3(lx * BROADCAST.follow, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, lz), fov: BROADCAST.fov / zoom };
+  const wide = NEAR * BROADCAST.nearBias + clamp(NEAR * puck.z * BROADCAST.zFollow, -4, 1.8) * NEAR;
+  const lz = zoom > 1 ? clamp(puck.z * 0.8, -10, 11) : wide;
+  // On a goal's hold it looks at the net itself.
+  const pose = { pos: v3(lx * BROADCAST.follow, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, toward(lz, puck.z, gk)), fov: BROADCAST.fov / zoom };
   const b = input.battle;
   if (!b || !(b.k > 0)) return pose;
   // A board battle: closer in on its spot; on the near boards, higher and steeper over them.
@@ -115,7 +125,8 @@ function broadcast(input: CameraInput): CameraPose {
 }
 
 function overhead(input: CameraInput): CameraPose {
-  const lx = clamp(input.puck.x, -OVERHEAD.maxLook, OVERHEAD.maxLook);
+  const maxLook = OVERHEAD.maxLook + GOAL_VIEW.overheadReach * clamp(input.goal?.k ?? 0, 0, 1);
+  const lx = clamp(input.puck.x, -maxLook, maxLook);
   const lz = input.puck.z * OVERHEAD.zFollow;
   // A hair toward the broadcast side, so "up" in the picture is the far side (as from the broadcast camera).
   return { pos: v3(lx, OVERHEAD.height, lz + NEAR * 0.6), look: v3(lx, 0, lz), fov: OVERHEAD.fov };

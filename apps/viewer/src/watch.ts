@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { DT, type GameState } from '@hockey/engine';
 import type { ArenaQuality } from './arena';
 import type { CameraName, CameraPose } from './cameras';
+import { goalShow } from './goal-show';
 import { forgetTarget, initialOperator, stepOperator, withCamera, type OperatorInput } from './operator';
 import { createControls } from './page/controls';
 import { $, createHud } from './page/hud';
@@ -121,6 +122,12 @@ function aimCamera(dt: number, snap = false): void {
     // A board battle under way (the one nearest the puck): the broadcast camera closes in on it.
     battle: battleSpot(f.next, puckV.x, puckV.z),
   };
+  // After a goal: hold on the net scored on and the scorer (goal-show.ts), not the restart.
+  const hold = goalShow(g.timeline, f.tick + f.alpha).hold;
+  if (hold) {
+    const sv = hold.scorerId ? gs.figure(hold.scorerId) : undefined;
+    input.goal = { net: hold.net, k: hold.k, scorer: sv && sv.onIce ? { x: sv.position.x, y: 0, z: sv.position.z } : null };
+  }
   if (followOn && fv) input.followed = { pos: { x: fv.position.x, y: 0, z: fv.position.z }, facing: fv.facing, vel: velocityOf(f.prev, f.next, a, followId) };
   const r = stepOperator(operator, input, dt);
   operator = r.state;
@@ -158,7 +165,7 @@ function updateHud(): void {
   const { playback } = g;
   const f = playback.frame();
   const atEnd = f.tick >= playback.totalTicks;
-  const ph = hud.update({ setup: g.setup, timeline: g.timeline, result: playback.result, prev: f.prev, next: f.next, atEnd });
+  const ph = hud.update({ setup: g.setup, timeline: g.timeline, result: playback.result, prev: f.prev, next: f.next, atEnd, show: goalShow(g.timeline, f.tick + f.alpha) });
   timebar.show(posNow(), playback.totalTicks, ph);
   if (atEnd && playing) setPlaying(false);
 }

@@ -38,7 +38,19 @@ h1 .home { color: var(--home-ink); } h1 .away { color: var(--away-ink); } h1 .vs
 #loading[hidden] { display: none; }
 .bug { position: absolute; left: 2.2%; top: 3.5%; display: flex; flex-direction: column; font-size: clamp(10px, 1.45vw, 16px); color: #fff; font-variant-numeric: tabular-nums; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35)); pointer-events: none; }
 .bug-row { display: flex; align-items: stretch; border-radius: 0.35em; overflow: hidden; background: rgba(14, 17, 22, 0.86); }
-.bug .team { display: flex; align-items: center; gap: 0.45em; padding: 0.3em 0.6em 0.3em 0; }
+.bug .team { position: relative; display: flex; align-items: center; gap: 0.45em; padding: 0.3em 0.6em 0.3em 0; }
+/* A goal: the scoring side's half of the bug flashes its colour (--flash, 0..1, set each frame). */
+.bug .team::before { content: ''; position: absolute; inset: 0; background: var(--flash-col); opacity: var(--flash, 0); pointer-events: none; }
+.bug .team > * { position: relative; }
+.bug .team.home { --flash-col: var(--home); }
+.bug .team.away { --flash-col: var(--away-trim); }
+.bug-top { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0.35em; }
+.bug-goal { display: flex; align-items: center; flex-wrap: wrap; gap: 0.15em 0.55em; padding: 0.25em 0.7em 0.25em 0.25em; border-radius: 0.35em; background: rgba(14, 17, 22, 0.86); max-width: 26em; }
+.bug-goal[hidden] { display: none; }
+.bug-goal.home { --goal-col: var(--home); } .bug-goal.away { --goal-col: var(--away-trim); }
+.bug-goal .word { font-weight: 800; letter-spacing: 0.1em; padding: 0.1em 0.45em; border-radius: 0.2em; background: var(--goal-col); }
+.bug-goal .who { font-weight: 700; }
+.bug-goal .assists { color: #c9d0da; font-size: 0.86em; }
 .bug .chip { display: block; width: 0.4em; align-self: stretch; }
 .bug .chip.home { background: linear-gradient(90deg, var(--home) 60%, var(--home-trim) 60%); }
 .bug .chip.away { background: linear-gradient(90deg, var(--away) 60%, var(--away-trim) 60%); }
@@ -46,6 +58,8 @@ h1 .home { color: var(--home-ink); } h1 .away { color: var(--away-ink); } h1 .vs
 .bug .n { font-weight: 800; min-width: 1em; text-align: right; font-size: 1.12em; }
 .bug .time { display: flex; align-items: center; gap: 0.5em; padding: 0.3em 0.7em; background: rgba(255, 255, 255, 0.12); font-weight: 600; }
 .bug-sub { align-self: flex-start; margin-top: 0.2em; padding: 0.15em 0.6em; border-radius: 0.3em; background: rgba(14, 17, 22, 0.72); font-size: 0.82em; color: #d9dee6; }
+/* A save: the shots number pulses (--pulse, 0..1, set each frame). */
+.bug-sub { transform: scale(calc(1 + var(--pulse, 0) * 0.1)); transform-origin: left center; box-shadow: 0 0 0 calc(var(--pulse, 0) * 0.18em) rgba(255, 255, 255, 0.6); }
 .over { position: absolute; font-size: clamp(10px, 1.2vw, 13px); color: #fff; background: rgba(14, 17, 22, 0.72); border-radius: 6px; padding: 3px 8px; pointer-events: none; }
 #fps { right: 1.5%; bottom: 2.5%; font-variant-numeric: tabular-nums; }
 #benchNote { left: 2.2%; bottom: 2.5%; }
@@ -111,10 +125,13 @@ kbd { font: inherit; font-size: 12px; border: 1px solid var(--line); border-bott
   </header>
   <div class="stage" id="stage">
     <div class="bug" id="bug" aria-label="Score">
-      <div class="bug-row">
-        <span class="team"><i class="chip home"></i><span class="abbr" id="bugHome">HOME</span><span class="n" id="bugHomeScore">0</span></span>
-        <span class="team"><i class="chip away"></i><span class="abbr" id="bugAway">AWAY</span><span class="n" id="bugAwayScore">0</span></span>
-        <span class="time"><span id="bugPeriod">1st</span><span id="bugClock">20:00</span></span>
+      <div class="bug-top">
+        <div class="bug-row">
+          <span class="team home" id="bugHomeTeam"><i class="chip home"></i><span class="abbr" id="bugHome">HOME</span><span class="n" id="bugHomeScore">0</span></span>
+          <span class="team away" id="bugAwayTeam"><i class="chip away"></i><span class="abbr" id="bugAway">AWAY</span><span class="n" id="bugAwayScore">0</span></span>
+          <span class="time"><span id="bugPeriod">1st</span><span id="bugClock">20:00</span></span>
+        </div>
+        <div class="bug-goal" id="bugGoal" hidden><span class="word">GOAL</span><span class="who" id="bugGoalWho"></span><span class="assists" id="bugGoalAssists"></span></div>
       </div>
       <div class="bug-sub" id="bugShots">Shots 0 – 0</div>
     </div>

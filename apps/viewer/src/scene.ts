@@ -6,11 +6,12 @@ import {
   type AnimContext, type BodyPass, type DrawnBody, type GoalieAnim, type GoalieOverlay, type GoalieSample, type Overlay, type SkaterAnim,
   type SkaterSample,
 } from './animator';
-import { buildArena, TEAM_COLORS as ARENA_TEAM_COLORS, type ArenaQuality } from './arena';
+import { buildArena, setGoalLight, TEAM_COLORS as ARENA_TEAM_COLORS, type ArenaQuality } from './arena';
 import { bodyDims, type BodyDims } from './body';
 import { carryPoint, initialPuckDraw, stepPuckDraw, type IcePoint, type PuckDraw, type PuckDrawInput } from './carry';
 import { cutKind, emptyProbe, goalieJumped, isCut, lastCutAtOrBefore, probeOf, puckJumped, skaterJumped, type CutKind } from './cuts';
 import type { SkaterPose } from './gait';
+import { goalShow } from './goal-show';
 import type { GoalieFigurePose } from './goalie-pose';
 import { createGoalieRig, type GoalieRig } from './goalie-rig';
 import { lerpAngle, type Frame, type Playback } from './playback';
@@ -412,6 +413,10 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     for (const fig of skaters) drawSkater(fig);
     for (const fig of goalies) drawGoalie(fig);
     updatePuck(frame, h);
+    // The goal light behind the net scored on (goal-show.ts: a function of the moment and the timeline).
+    const show = goalShow(timeline, frame.tick + a);
+    setGoalLight(arena, 1, show.light === 1 ? 1 : 0, ctx.time);
+    setGoalLight(arena, -1, show.light === -1 ? 1 : 0, ctx.time);
   }
 
   function reset(): void {
@@ -432,6 +437,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
       part.traverse((o) => {
         // High quality's key light owns a shadow map (a render target) that the renderer keeps until it is freed.
         if (o instanceof THREE.Light && o.shadow) o.shadow.dispose();
+        if (o instanceof THREE.Sprite) { (o.material.map)?.dispose(); o.material.dispose(); return; }
         if (!(o instanceof THREE.Mesh)) return;
         o.geometry.dispose();
         for (const m of Array.isArray(o.material) ? o.material : [o.material]) {

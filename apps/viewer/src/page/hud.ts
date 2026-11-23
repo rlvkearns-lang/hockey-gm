@@ -1,8 +1,10 @@
-import type { GameSetup, GameState, PlayerDef } from '@hockey/engine';
+import type { GameEventOf, GameSetup, GameState, PlayerDef } from '@hockey/engine';
+import { goalTagText, type GoalShow } from '../goal-show';
 import type { Timeline } from '../timeline';
 
 /**
- * The watch page's words on screen (DOM only, no three.js): the score bug, the period and clock under the time bar,
+ * The watch page's words on screen (DOM only, no three.js): the score bug (with a goal's flash and GOAL tag and a
+ * save's pulse on the shots, goal-show.ts), the period and clock under the time bar,
  * the final summary, the bench note of the follow camera, the title, the frame counter and the messages (loading,
  * a problem, a new game being prepared, the slow-picture hint). Plain functions over the page's elements.
  */
@@ -27,6 +29,8 @@ export type HudFrame = {
   setup: GameSetup; timeline: Timeline; result: { score: { home: number; away: number }; tied: boolean };
   /** The frame's earlier state, its later one, and whether the frame is the game's end. */
   prev: GameState; next: GameState; atEnd: boolean;
+  /** What shows round a goal or a save at this moment (goal-show.ts goalShow). */
+  show: GoalShow;
 };
 
 export type Hud = {
@@ -54,17 +58,38 @@ export type Hud = {
 export function createHud(): Hud {
   const loadingEl = $('loading'), problemEl = $('problem'), preparingEl = $('preparing');
   const summaryEl = $('summary'), benchEl = $('benchNote'), fpsEl = $('fps'), slowEl = $('slow');
+  const goalEl = $('bugGoal'), shotsEl = $('bugShots');
+  const teamEl = { home: $('bugHomeTeam'), away: $('bugAwayTeam') };
+  /** Set a CSS number on an element only when it changes. */
+  const setVar = (el: HTMLElement, name: string, v: number): void => {
+    const s = v > 0.005 ? v.toFixed(2) : '0';
+    if (el.style.getPropertyValue(name) !== s) el.style.setProperty(name, s);
+  };
+  let tagOf: GameEventOf<'goal'> | null = null;
   return {
     update(f) {
-      const st = f.prev;
+      const st = f.prev, sh = f.show;
       const ph = phaseLabel(f.atEnd ? f.next : st);
-      text($('bugHomeScore'), String(st.score.home));
-      text($('bugAwayScore'), String(st.score.away));
+      text($('bugHomeScore'), String(sh.score.home));
+      text($('bugAwayScore'), String(sh.score.away));
+      setVar(teamEl.home, '--flash', sh.flash === 'home' ? sh.flashK : 0);
+      setVar(teamEl.away, '--flash', sh.flash === 'away' ? sh.flashK : 0);
+      setVar(shotsEl, '--pulse', sh.savePulse);
+      if (sh.tag !== tagOf) {
+        tagOf = sh.tag;
+        goalEl.hidden = !tagOf;
+        if (tagOf) {
+          const words = goalTagText(tagOf, f.setup);
+          text($('bugGoalWho'), words.scorer);
+          text($('bugGoalAssists'), words.assists);
+          goalEl.className = `bug-goal ${tagOf.side ?? ''}`;
+        }
+      }
       text($('bugPeriod'), ph.period);
       text($('bugClock'), ph.clock);
       $('bugClock').hidden = ph.clock === '';
-      const sh = f.timeline.shotsAt(st.tick);
-      text($('bugShots'), `Shots ${sh.home} – ${sh.away}`);
+      const shots = f.timeline.shotsAt(st.tick);
+      text($('bugShots'), `Shots ${shots.home} – ${shots.away}`);
       text($('when'), ph.clock ? `${ph.period} · ${ph.clock}` : ph.period);
       summaryEl.hidden = !f.atEnd;
       if (f.atEnd) {
