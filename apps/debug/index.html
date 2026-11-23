@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hockey debug view</title>
 <style>
-:root { --bg:#f3f5f8; --panel:#fff; --text:#1b2330; --muted:#5b6575; --line:#c9d0db; --ice:#eef6fb; --home:#d62839; --away:#1b64d6; --accent:#1b2330; --on-accent:#fff; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#12161d; --panel:#1b212b; --text:#e8ecf2; --muted:#9aa5b5; --line:#334055; --ice:#1d2a38; --home:#ff6b6b; --away:#5aa0ff; --accent:#e8ecf2; --on-accent:#12161d; } }
-:root[data-theme="dark"] { --bg:#12161d; --panel:#1b212b; --text:#e8ecf2; --muted:#9aa5b5; --line:#334055; --ice:#1d2a38; --home:#ff6b6b; --away:#5aa0ff; --accent:#e8ecf2; --on-accent:#12161d; }
+:root { --bg:#f3f5f8; --panel:#fff; --text:#1b2330; --muted:#5b6575; --line:#c9d0db; --home:#d62839; --away:#1b64d6; --accent:#1b2330; --on-accent:#fff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#12161d; --panel:#1b212b; --text:#e8ecf2; --muted:#9aa5b5; --line:#334055; --home:#ff5a5f; --away:#4d9bff; --accent:#e8ecf2; --on-accent:#12161d; } }
+:root[data-theme="dark"] { --bg:#12161d; --panel:#1b212b; --text:#e8ecf2; --muted:#9aa5b5; --line:#334055; --home:#ff5a5f; --away:#4d9bff; --accent:#e8ecf2; --on-accent:#12161d; }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body { background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 12px 16px 24px; overflow-x: hidden; }
@@ -31,10 +31,24 @@ input[type=number] { width: 9em; }
 section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-width: 0; }
 h2 { font-size: 14px; margin: 0 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 #events { height: 220px; overflow-y: auto; font-size: 13px; font-variant-numeric: tabular-nums; }
-#events div { padding: 1px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+#events div { padding: 2px 0 2px 6px; border-bottom: 1px solid var(--line); border-left: 4px solid transparent; overflow-wrap: anywhere; }
+#events.hide-pass .ev-pass, #events.hide-change .ev-lineChange { display: none; }
+#events .ev-goal { font-weight: 700; font-size: 14px; }
+#events .ev-goal.home { border-left-color: var(--home); }
+#events .ev-goal.away { border-left-color: var(--away); }
+.filters { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.filters label { display: flex; align-items: center; gap: 5px; }
+.filters input { padding: 0; }
 #box table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-#box th, #box td { text-align: right; padding: 2px 4px; }
+#box th, #box td, .players th, .players td { text-align: right; padding: 2px 4px; }
 #box th:first-child, #box td:first-child { text-align: left; }
+#players { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { #players { grid-template-columns: 1fr; } }
+.players { overflow-x: auto; }
+.players table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+.players th { color: var(--muted); font-weight: 600; }
+.players th:nth-child(2), .players td:nth-child(2), .players th:nth-child(3), .players td:nth-child(3) { text-align: left; }
+.players h2 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
 #status { color: var(--muted); font-size: 13px; margin-top: 6px; }
 </style>
 </head>
@@ -57,9 +71,12 @@ h2 { font-size: 14px; margin: 0 0 6px; color: var(--muted); text-transform: uppe
     <button id="restart">New game</button>
   </div>
   <div class="cols">
-    <section><h2>Events</h2><div id="events"></div></section>
+    <section><h2>Events</h2>
+      <div class="filters"><label><input type="checkbox" id="showPass"> Show passes</label><label><input type="checkbox" id="showChange"> Show line changes</label></div>
+      <div id="events" class="hide-pass hide-change"></div></section>
     <section id="box"><h2>Box score</h2><div id="boxBody"></div></section>
   </div>
+  <div id="players"><section class="players" id="homePlayers"></section><section class="players" id="awayPlayers"></section></div>
   <div id="status"></div>
 </main>
 <script type="module" src="/src/main.ts"></script>

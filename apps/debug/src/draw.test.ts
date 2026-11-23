@@ -53,4 +53,21 @@ describe('draw', () => {
     for (const s of onIce) expect(texts).toContain(String(defs.get(s.id)!.number));
     expect(texts.some((t) => t.startsWith('Hit'))).toBe(true);
   });
+
+  it('exaggerates skaters, keeps a minimum radius, and draws the puck last and large', () => {
+    const setup = { home: generateTeam(1, 'Harbour City', 'HBR'), away: generateTeam(2, 'Northern Peaks', 'NPK'), seed: 5, chemistry: [] };
+    const game = createGame(setup);
+    const defs = new Map<string, PlayerDef>();
+    for (const t of [setup.home, setup.away]) for (const p of t.players) defs.set(p.id, p);
+    const arcs: number[] = [];
+    const target = { fillText() {}, measureText: () => ({ width: 10 }), arc: (_x: number, _y: number, r: number) => { arcs.push(r); } } as Record<string, unknown>;
+    const ctx = new Proxy(target, { get: (t, k: string) => (k in t ? t[k] : () => {}), set: () => true }) as unknown as CanvasRenderingContext2D;
+    draw(ctx, game.state, defs, 2, { minRadiusPx: 8 });
+    const onIce = game.state.skaters.filter((s) => s.onIce).length;
+    const skaterArcs = arcs.filter((_r, i) => i >= arcs.length - 1 - onIce && i < arcs.length - 1);
+    expect(skaterArcs.length).toBe(onIce);
+    for (const r of skaterArcs) expect(r).toBeGreaterThanOrEqual(8 * 0.34 / 0.4);
+    // The last arc is the puck, larger than its true 0.05 m radius and at least half the minimum skater radius.
+    expect(arcs[arcs.length - 1]!).toBeGreaterThanOrEqual(4);
+  });
 });

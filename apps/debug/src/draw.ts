@@ -1,9 +1,32 @@
 import { bodyRadius, FACEOFF_DOTS, RINK, type ContestState, type GameState, type PlayerDef, type Side, type Vec2 } from '@hockey/engine';
 
 const MARGIN = 2;
-export const TEAM_COLOUR: Record<Side, string> = { home: '#d62839', away: '#1b64d6' };
-const ICE = '#eef6fb';
 const TIRED_BELOW = 0.45;
+/** Skaters are drawn this many times their true radius (at least `minRadiusPx`, scaled by body size) so numbers can be read. */
+const EXAGGERATE = 2.2;
+
+export type Palette = {
+  home: string; away: string; ice: string; boards: string; centreLine: string; blueLine: string; goalLine: string;
+  crease: string; net: string; contestLine: string; labelBg: string; labelText: string; outline: string; puck: string; puckRing: string;
+};
+
+export const LIGHT: Palette = {
+  home: '#d62839', away: '#1b64d6', ice: '#eef6fb', boards: '#7b8794', centreLine: '#d6404e', blueLine: '#3a74c9', goalLine: '#d6404e',
+  crease: 'rgba(80,150,230,0.35)', net: '#555', contestLine: '#1b2330', labelBg: 'rgba(255,255,255,0.92)', labelText: '#111',
+  outline: 'rgba(0,0,0,0.55)', puck: '#000', puckRing: '#fff',
+};
+
+export const DARK: Palette = {
+  home: '#ff5a5f', away: '#4d9bff', ice: '#1d2a38', boards: '#8fa0b5', centreLine: '#ff6b6b', blueLine: '#5aa0ff', goalLine: '#ff6b6b',
+  crease: 'rgba(90,160,255,0.30)', net: '#b8c4d4', contestLine: '#e8ecf2', labelBg: 'rgba(18,22,29,0.92)', labelText: '#e8ecf2',
+  outline: 'rgba(255,255,255,0.85)', puck: '#000', puckRing: '#fff',
+};
+
+export type DrawOptions = {
+  dark?: boolean;
+  /** Smallest skater radius in canvas pixels (for a 0.4 m skater); keeps numbers legible on a small canvas. */
+  minRadiusPx?: number;
+};
 
 const KIND_NAMES: Record<string, string> = {
   boardBattle: 'Board battle',
@@ -39,9 +62,9 @@ function rinkPath(ctx: CanvasRenderingContext2D, px: (x: number) => number, py: 
   ctx.closePath();
 }
 
-function drawRink(ctx: CanvasRenderingContext2D, px: (x: number) => number, py: (y: number) => number, scale: number): void {
+function drawRink(ctx: CanvasRenderingContext2D, px: (x: number) => number, py: (y: number) => number, scale: number, pal: Palette): void {
   rinkPath(ctx, px, py, scale);
-  ctx.fillStyle = ICE;
+  ctx.fillStyle = pal.ice;
   ctx.fill();
   ctx.save();
   rinkPath(ctx, px, py, scale);
@@ -54,17 +77,17 @@ function drawRink(ctx: CanvasRenderingContext2D, px: (x: number) => number, py: 
     ctx.lineTo(px(x), py(RINK.halfWidth));
     ctx.stroke();
   };
-  vline(0, '#d6404e', 0.3);
-  vline(-RINK.blueLineX, '#3a74c9', 0.3);
-  vline(RINK.blueLineX, '#3a74c9', 0.3);
-  vline(-RINK.goalLineX, '#d6404e', 0.1);
-  vline(RINK.goalLineX, '#d6404e', 0.1);
-  ctx.strokeStyle = '#3a74c9';
+  vline(0, pal.centreLine, 0.3);
+  vline(-RINK.blueLineX, pal.blueLine, 0.3);
+  vline(RINK.blueLineX, pal.blueLine, 0.3);
+  vline(-RINK.goalLineX, pal.goalLine, 0.1);
+  vline(RINK.goalLineX, pal.goalLine, 0.1);
+  ctx.strokeStyle = pal.blueLine;
   ctx.lineWidth = 0.1 * scale;
   ctx.beginPath();
   ctx.arc(px(0), py(0), 4.5 * scale, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.fillStyle = '#d6404e';
+  ctx.fillStyle = pal.centreLine;
   for (const d of [FACEOFF_DOTS.centre, ...FACEOFF_DOTS.neutral, ...FACEOFF_DOTS.end]) {
     ctx.beginPath();
     ctx.arc(px(d.x), py(d.y), (d === FACEOFF_DOTS.centre ? 0.3 : 0.25) * scale, 0, Math.PI * 2);
@@ -73,29 +96,34 @@ function drawRink(ctx: CanvasRenderingContext2D, px: (x: number) => number, py: 
   ctx.restore();
   for (const end of [1, -1]) {
     // Crease: half circle in front of the goal line.
-    ctx.fillStyle = 'rgba(80,150,230,0.35)';
+    ctx.fillStyle = pal.crease;
     ctx.beginPath();
     ctx.arc(px(end * RINK.goalLineX), py(0), RINK.creaseRadius * scale, end === 1 ? Math.PI / 2 : -Math.PI / 2, end === 1 ? (3 * Math.PI) / 2 : Math.PI / 2);
     ctx.closePath();
     ctx.fill();
     // Net frame behind the goal line.
-    ctx.strokeStyle = '#555';
+    ctx.strokeStyle = pal.net;
     ctx.lineWidth = 0.08 * scale;
     ctx.strokeRect(px(end === 1 ? RINK.goalLineX : -RINK.goalLineX - RINK.netDepth), py(-RINK.netHalfWidth), RINK.netDepth * scale, 2 * RINK.netHalfWidth * scale);
   }
   rinkPath(ctx, px, py, scale);
-  ctx.strokeStyle = '#7b8794';
+  ctx.strokeStyle = pal.boards;
   ctx.lineWidth = 0.2 * scale;
   ctx.stroke();
 }
 
 /** Draw the rink and everything on it. `scale` is pixels per metre; the canvas should be `rinkSize(scale)`. */
-export function draw(ctx: CanvasRenderingContext2D, state: GameState, defs: Map<string, PlayerDef>, scale: number): void {
+export function draw(ctx: CanvasRenderingContext2D, state: GameState, defs: Map<string, PlayerDef>, scale: number, opts: DrawOptions = {}): void {
+  const pal = opts.dark ? DARK : LIGHT;
+  const minR = opts.minRadiusPx ?? 0;
   const { w, h } = rinkSize(scale);
   const px = (x: number): number => w / 2 + x * scale;
   const py = (y: number): number => h / 2 + y * scale;
+  const teamColour = (side: Side): string => pal[side];
+  /** On-screen radius: exaggerated, never below minR (scaled by body size so light and heavy skaters still differ). */
+  const radiusPx = (trueR: number): number => Math.max(EXAGGERATE * trueR * scale, (minR * trueR) / 0.4);
   ctx.clearRect(0, 0, w, h);
-  drawRink(ctx, px, py, scale);
+  drawRink(ctx, px, py, scale, pal);
 
   const pos = new Map<string, Vec2>();
   for (const s of state.skaters) if (s.onIce) pos.set(s.id, s.pos);
@@ -107,8 +135,8 @@ export function draw(ctx: CanvasRenderingContext2D, state: GameState, defs: Map<
   ctx.lineCap = 'round';
   for (const c of state.contests) {
     const ps = c.participants.map((id) => pos.get(id)).filter((p): p is Vec2 => p !== undefined);
-    ctx.strokeStyle = '#1b2330';
-    ctx.lineWidth = 0.12 * scale;
+    ctx.strokeStyle = pal.contestLine;
+    ctx.lineWidth = Math.max(2, 0.12 * scale);
     for (let i = 0; i < ps.length; i++) {
       for (let j = i + 1; j < ps.length; j++) {
         ctx.beginPath();
@@ -119,46 +147,53 @@ export function draw(ctx: CanvasRenderingContext2D, state: GameState, defs: Map<
     }
   }
 
-  for (const g of [state.goalies.home, state.goalies.away]) {
-    const side: Side = g === state.goalies.home ? 'home' : 'away';
-    const r = 0.55;
-    ctx.fillStyle = TEAM_COLOUR[side];
-    ctx.fillRect(px(g.pos.x - r), py(g.pos.y - r), 2 * r * scale, 2 * r * scale);
+  for (const side of ['home', 'away'] as const) {
+    const g = state.goalies[side];
+    const half = Math.max(1.6 * 0.55 * scale, minR * 1.25);
+    ctx.fillStyle = teamColour(side);
+    ctx.fillRect(px(g.pos.x) - half, py(g.pos.y) - half, 2 * half, 2 * half);
+    ctx.strokeStyle = pal.outline;
+    ctx.lineWidth = Math.max(2, half * 0.22);
+    ctx.strokeRect(px(g.pos.x) - half, py(g.pos.y) - half, 2 * half, 2 * half);
     ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.max(9, 0.7 * scale)}px system-ui, sans-serif`;
+    ctx.font = `bold ${Math.round(half * 1.15)}px system-ui, sans-serif`;
     ctx.fillText(String(defs.get(g.id)?.number ?? ''), px(g.pos.x), py(g.pos.y));
   }
 
   for (const s of state.skaters) {
     if (!s.onIce) continue;
     const def = defs.get(s.id);
-    const r = bodyRadius(def?.weightKg ?? 85);
+    const r = radiusPx(bodyRadius(def?.weightKg ?? 85));
     const x = px(s.pos.x), y = py(s.pos.y);
     ctx.globalAlpha = s.energy < TIRED_BELOW ? 0.45 : 1;
-    ctx.fillStyle = TEAM_COLOUR[s.side];
+    ctx.fillStyle = teamColour(s.side);
     ctx.beginPath();
-    ctx.arc(x, y, r * scale, 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 0.08 * scale;
+    ctx.strokeStyle = pal.outline;
+    ctx.lineWidth = Math.max(1, r * 0.1);
+    ctx.stroke();
+    // Facing tick pokes out past the disc.
+    ctx.strokeStyle = pal.contestLine;
+    ctx.lineWidth = Math.max(2, r * 0.22);
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + Math.cos(s.facing) * r * 1.5 * scale, y + Math.sin(s.facing) * r * 1.5 * scale);
+    ctx.moveTo(x + Math.cos(s.facing) * r, y + Math.sin(s.facing) * r);
+    ctx.lineTo(x + Math.cos(s.facing) * r * 1.6, y + Math.sin(s.facing) * r * 1.6);
     ctx.stroke();
     if (s.id === state.carrierId) {
-      ctx.strokeStyle = '#111';
-      ctx.lineWidth = 0.18 * scale;
+      ctx.strokeStyle = pal.contestLine;
+      ctx.lineWidth = Math.max(2, r * 0.25);
       ctx.beginPath();
-      ctx.arc(x, y, (r + 0.25) * scale, 0, Math.PI * 2);
+      ctx.arc(x, y, r * 1.25, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.max(9, 0.8 * scale)}px system-ui, sans-serif`;
+    ctx.font = `bold ${Math.round(r * 1.2)}px system-ui, sans-serif`;
     ctx.fillText(String(def?.number ?? ''), x, y);
     if (s.downT > 0) {
-      ctx.strokeStyle = '#111';
-      ctx.lineWidth = 0.2 * scale;
-      const d = r * 0.9 * scale;
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = Math.max(2, r * 0.3);
+      const d = r * 0.9;
       ctx.beginPath();
       ctx.moveTo(x - d, y - d); ctx.lineTo(x + d, y + d);
       ctx.moveTo(x + d, y - d); ctx.lineTo(x - d, y + d);
@@ -167,21 +202,27 @@ export function draw(ctx: CanvasRenderingContext2D, state: GameState, defs: Map<
     ctx.globalAlpha = 1;
   }
 
+  // The puck goes on top of the players: bigger than life, black with a contrasting ring.
   const puck = state.puck;
-  ctx.fillStyle = '#111';
+  const pr = Math.max(0.4 * scale, minR * 0.5);
   ctx.beginPath();
-  ctx.arc(px(puck.pos.x), py(puck.pos.y) - puck.z * scale * 0.5, 0.22 * scale, 0, Math.PI * 2);
+  ctx.arc(px(puck.pos.x), py(puck.pos.y) - puck.z * scale * 0.5, pr, 0, Math.PI * 2);
+  ctx.fillStyle = pal.puck;
   ctx.fill();
+  ctx.strokeStyle = pal.puckRing;
+  ctx.lineWidth = Math.max(2, pr * 0.4);
+  ctx.stroke();
 
   for (const c of state.contests) {
     const text = labelFor(c, defs);
-    ctx.font = `${Math.max(10, 0.9 * scale)}px system-ui, sans-serif`;
+    const fs = Math.max(10, Math.round(Math.max(0.9 * scale, minR * 1.3)));
+    ctx.font = `${fs}px system-ui, sans-serif`;
     const tw = ctx.measureText(text).width;
     const lx = Math.min(w - tw / 2 - 4, Math.max(tw / 2 + 4, px(c.spot.x)));
-    const ly = py(c.spot.y) - 1.8 * scale;
-    ctx.fillStyle = 'rgba(255,255,255,0.88)';
-    ctx.fillRect(lx - tw / 2 - 3, ly - 0.7 * scale, tw + 6, 1.4 * scale);
-    ctx.fillStyle = '#111';
+    const ly = Math.max(fs, py(c.spot.y) - Math.max(1.8 * scale, minR * 2.2));
+    ctx.fillStyle = pal.labelBg;
+    ctx.fillRect(lx - tw / 2 - 3, ly - fs * 0.8, tw + 6, fs * 1.6);
+    ctx.fillStyle = pal.labelText;
     ctx.fillText(text, lx, ly);
   }
 }
