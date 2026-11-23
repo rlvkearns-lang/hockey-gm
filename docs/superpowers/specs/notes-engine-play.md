@@ -40,3 +40,4 @@ Proposed shape **[my call, not yet agreed]**:
 - A short-lived hesitation afterwards, sized by personality: a high-fortitude, high-compete player shrugs it off and blocks the next one; a timid one shies away for the rest of the game or a few games. It fades.
 - Kept small on purpose: it shades the odds of attempting a block or going into a corner, never removes them, and stays within the parity rule.
 - Longer term, the same idea covers a player coming back from a real injury who is tentative at first (already implied by the injury note).
+- Owner agreed to the stinger shape above, kept small (2026-11-23).
