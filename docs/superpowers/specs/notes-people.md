@@ -27,3 +27,15 @@ Proposed shape **[my call, not yet agreed]**:
 - Automatic check-ins: the coach and assistant GM make the rounds on a schedule, and report what they hear. How much they catch depends on their ability and on how open the player is. This uses the same delegation rules as the inbox.
 - The card ("what we know") lists each thing learned, who it came from, when, and how sure it is. Old items are marked as out of date rather than removed.
 - The GM is only told when something on a card changes or is serious. Talking to a player in person stays available and gets more than a second-hand report does, but is never required.
+
+## Word getting around (owner, 2026-11-23)
+
+- What the GM does to one player can reach others. Whether it does depends on the situation and on the player's personality.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- The player decides whether to talk: a private, loyal type keeps it to himself; a vocal or bitter one tells the room; some go to the press.
+- The situation decides how far it travels: a quiet broken promise may stay between two people; a public contract fight or a trade request is known by everyone.
+- It spreads along friendships first (close friends, linemates, then the room, then players on other teams through former teammates and shared agents), weaker and later at each step.
+- Listeners weigh it by who is telling it: a respected veteran is believed, a known complainer is not.
+- It works both ways: kept promises and fair treatment get around too, and build a reputation that helps with free agents.
