@@ -104,3 +104,14 @@ Proposed shape **[my call, not yet agreed]**:
 - Development then has something to aim at: the coach and development staff can focus a player on an attribute with room to grow; ice time, linemates, league level and personality (work ethic) decide how much of the gap closes; some potential is never reached, and late bloomers exist.
 - The prospect headline ("high ceiling, flashy") is derived from this picture rather than written separately.
 - Development focus (owner, 2026-11-23): either way. The GM can set a focus per player, or leave it to the development staff, who choose by default. Same hand-off rules as everything else.
+
+## After a playing career (owner, 2026-11-23)
+
+- A retiring player either leaves for good or, if he chooses, stays in the game (scout, coach, assistant GM, agent **[roles are my call]**), keeping his personality and his history with the GM.
+- Numbers are retired for all-time greats.
+
+Proposed shape **[my call]**:
+
+- Whether he stays, and as what, comes from his personality (a student of the game coaches; a well-connected talker becomes an agent; some want nothing more to do with hockey).
+- The GM decides whose number to retire, with fans and the owner having expectations about the obvious ones; snubbing a legend or honouring a marginal player is noticed. A retired number is unavailable from then on, with a banner in the arena.
+- Record books, award history and a hall of fame per team and league keep the long save's history.
