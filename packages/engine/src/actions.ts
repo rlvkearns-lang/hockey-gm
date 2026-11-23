@@ -125,7 +125,8 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
   const shade = goalieShade(state, s.side);
   const openSide = shade > 0 ? -1 : 1;
   const aimSide = rng.chance(clamp(0.5 + Math.abs(shade) * SHOT.openSidePull, 0.5, SHOT.openSideMax)) ? openSide : -openSide;
-  const aimY = aimSide * rng.range(SHOT.aimY[0], SHOT.aimY[1]);
+  // A weaker shooter aims nearer the middle: he just wants it on net.
+  const aimY = aimSide * rng.range(SHOT.aimY[0], SHOT.aimY[1]) * (SHOT.aimReach.base + SHOT.aimReach.perPoint * a.shootingAccuracy);
   const aimZ = rng.range(SHOT.aimZ[0], SHOT.aimZ[1]);
   const y = aimY + rng.gauss() * sigma;
   const z = Math.max(0.02, aimZ + rng.gauss() * sigma * 0.7);
@@ -140,19 +141,20 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
 
 /**
  * Chip the puck deep into the attacked end, toward one corner (picked at random), with a passing-based direction error.
- * Emits a `pass` event with detail `dump` and no receiver.
+ * Emits a `pass` event with detail `dump` and no receiver. With `onNet` he throws it at the net instead (a shoot-in:
+ * detail `shootIn`); if it gets there the goalie has to play it like any puck on net.
  */
-export function executeDump(state: GameState, fromId: string, defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
+export function executeDump(state: GameState, fromId: string, defs: Map<string, PlayerDef>, rng: Rng, onNet = false): GameEvent {
   const s = skaterById(state, fromId);
   const passing = defs.get(fromId)!.attrs.passing;
   const dir = state.attackDir[s.side];
   const p = state.puck.pos;
-  const tx = dir * DUMP.spot.x, ty = (rng.chance(0.5) ? 1 : -1) * DUMP.spot.y;
+  const tx = dir * (onNet ? RINK.goalLineX : DUMP.spot.x), ty = onNet ? 0 : (rng.chance(0.5) ? 1 : -1) * DUMP.spot.y;
   const speed = DUMP.speed.base + passing * DUMP.speed.perPoint;
   const sigma = DUMP.errorFactor * (PASS.error.base + (100 - passing) * PASS.error.perPoint);
   const angle = Math.atan2(ty - p.y, tx - p.x) + rng.gauss() * sigma;
   release(state, s, Math.cos(angle) * speed, Math.sin(angle) * speed, DUMP.vz);
-  return event(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, assistIds: [], detail: 'dump' });
+  return event(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, assistIds: [], detail: onNet ? 'shootIn' : 'dump' });
 }
 
 /**

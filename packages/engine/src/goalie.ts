@@ -66,6 +66,8 @@ export type SaveInput = {
   goalieMovingSpeed: number;
   /** Height (m) at which the puck reaches the goal line. */
   height: number;
+  /** His night (GameState.goalieNight): added to the log-odds. Default 0. */
+  night?: number;
 };
 
 /** Chance that the goalie stops a shot on net. Parity: clamped to [0.03, 0.97]. */
@@ -76,7 +78,10 @@ export function saveChance(input: SaveInput): number {
   skill /= w;
   const reaction = Math.min(1, input.distance / Math.max(1, input.shotSpeed));
   const lm = input.lateralMiss;
-  const logit = G.save.base + G.save.perReactionSecond * reaction + G.save.perPoint * (skill - 70)
+  // Skill counts nearly linearly around 70 (less above it than below) and flattens out toward the extremes.
+  const per = skill >= 70 ? G.save.perPointAbove : G.save.perPoint;
+  const skillTerm = per * G.save.skillSpan * Math.tanh((skill - 70) / G.save.skillSpan);
+  const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0)
     - (input.screened ? G.save.screened : 0)
     - G.save.perMovingSpeed * input.goalieMovingSpeed
     - G.save.perBodyMetre * Math.max(0, lm - G.save.body)
@@ -305,6 +310,7 @@ export function resolveOnNet(
   const p = saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance,
     screened: state.screenedUntilTick[defSide] > state.tick, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
+    night: state.goalieNight[defSide],
   });
   const detail = `${distance.toFixed(1)}m`;
   out.push(event(state, { type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, assistIds: [], detail }));

@@ -1,6 +1,6 @@
 import { executeDump, executePass, executeShot, goalieShade, pressureOn } from './actions';
 import { composite } from './attributes';
-import { BRAIN_INTERVAL_TICKS } from './constants';
+import { BRAIN_INTERVAL_TICKS, DT, PERIOD_SECONDS, PERIODS } from './constants';
 import { RINK, zoneOf } from './rink';
 import { TUNING } from './tuning';
 import { isTiedUp, steeredByContest } from './team-play';
@@ -13,16 +13,17 @@ export type Decision =
   | { kind: 'carry'; to: Vec2 }
   | { kind: 'pass'; toId: string }
   | { kind: 'shoot' }
-  | { kind: 'dump' }
+  | { kind: 'dump'; onNet?: boolean }
   | { kind: 'protect' };
 
 const GOAL = RINK.goalLineX;
 const T = TUNING.brain;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
+const PROTECTING = { puckHandling: 0.5, strength: 0.5 };
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
-/** 0.6 at 0, 1.4 at 100: how much a skill rating scales an option. */
-const skill = (rating: number): number => 0.6 + rating * 0.008;
+/** How much a skill rating scales an option: T.skill.base + T.skill.perPoint * rating (0.81 at 0, 1.31 at 100). */
+const skill = (rating: number): number => T.skill.base + rating * T.skill.perPoint;
 
 /** 0..1 chance-to-score proxy from attack-relative position (inside the offensive zone): distance and angle to the net centre. */
 function shotQuality(rx: number, ly: number): number {
@@ -67,7 +68,20 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   const p = state.puck.pos;
   const rx = p.x * dir, ly = p.y * dir;
   const pressure = pressureOn(state, s);
-  const calm = 1 - pressure * (0.8 - a.poise * 0.005);
+  const calm = 1 - pressure * (T.calm.base - a.poise * T.calm.perPoise);
+  // Score effects: a team well ahead sits on its lead and shoots less; a team behind presses and shoots more.
+  const lead = state.score[s.side] - state.score[s.side === 'home' ? 'away' : 'home'];
+  const se = T.scoreEffects;
+  // A close game is played straight; from se.trailFrom goals behind he presses more with each goal, up to trailMaxGoals.
+  const behind = -lead >= se.trailFrom ? (Math.min(-lead, se.trailMaxGoals) - se.trailFrom + 1) / (se.trailMaxGoals - se.trailFrom + 1) : 0;
+  // Late in the third period a one- or two-goal game changes too: the team behind pushes, the team ahead holds on.
+  const late = state.period >= PERIODS && Math.abs(lead) >= 1 && Math.abs(lead) <= 2 ? 1 - state.clock / PERIOD_SECONDS : 0;
+  const lateShoot = lead < 0 ? 1 + se.latePush * late : 1 - se.lateSit * late;
+  const scoreShoot = (lead >= se.leadFrom ? Math.max(se.leadMin, 1 - se.leadPerGoal * (lead - se.leadFrom + 1))
+    : 1 + se.trailPerGoal * behind * (se.trailMaxGoals - se.trailFrom + 1)) * lateShoot;
+  // Behind, he shoots through traffic: pressure counts for less.
+  const pushing = Math.max(behind, lead < 0 ? late : 0);
+  const shootPressure = T.shootPressure - (T.shootPressure - se.trailPressure) * pushing;
 
   // Space ahead, and which way to swerve from the nearest opponent in front.
   let aheadD = Infinity, aheadLat = 0;
@@ -83,7 +97,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
 
   // Passing lanes: openness of the lane and around the receiver, ground gained, and his chance to score from there.
   const seen = 1 + Math.floor(a.vision / 25);
-  const noise = (100 - a.iq) * 0.004;
+  const noise = T.laneNoise.base + (100 - a.iq) * T.laneNoise.perPoint;
   laneIds.length = 0;
   laneValues.length = 0;
   const outside = rx <= RINK.blueLineX;
@@ -124,15 +138,20 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
 
   // An open side of the net (the goalie shaded off the line to it) makes a better shot.
   const open = clamp(Math.abs(goalieShade(state, s.side)) / T.openNetShade, 0, 1);
-  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * skill(composite(a, SHOOTING)) * tend.shoot * calm ** T.shootPressure;
-  const passSkill = T.weight.pass * skill(a.passing) * tend.pass * calm;
-  const carryW = T.weight.carry * (T.carrySpace[0] + T.carrySpace[1] * spaceAhead) * skill(a.puckHandling) * tend.carry * calm;
+  // The longer he has had it, the more he wants to move it on (nobody holds the puck for long).
+  const t = state.touches;
+  const since = t.side === s.side && t.ids[t.ids.length - 1] === s.id ? t.ticks[t.ticks.length - 1]! : state.tick;
+  const keep = Math.max(T.holdMin, Math.exp(-((state.tick - since) * DT) / T.holdSeconds));
+  const shootOn = 1 + T.holdBoost.shoot * (1 - keep), passOn = 1 + T.holdBoost.pass * (1 - keep);
+  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * (T.shootSkill.base + composite(a, SHOOTING) * T.shootSkill.perPoint) * tend.shoot * calm ** shootPressure * scoreShoot * shootOn;
+  const passSkill = T.weight.pass * skill(a.passing) * tend.pass * calm * passOn;
+  const carryW = T.weight.carry * (T.carrySpace[0] + T.carrySpace[1] * spaceAhead) * skill(a.puckHandling) * tend.carry * calm * keep;
   const zone = zoneOf(p.x, dir);
   // Dump in when the way ahead is closed; clear the own zone only under pressure. From his own half a dump would be
   // icing, so there he would much rather pass or carry.
   const dumpW = T.weight.dump * tend.dump * (rx < 0 ? T.icingDump : 1)
     * (zone === 'N' ? 1 - spaceAhead : zone === 'D' ? 0.5 * pressure : 0);
-  const protectW = T.weight.protect * (T.protectBase + pressure) * skill(composite(a, { puckHandling: 0.5, strength: 0.5 }));
+  const protectW = T.weight.protect * (T.protectBase + pressure) * skill(composite(a, PROTECTING)) * keep;
 
   // Passing as a kind is worth his best lane: seeing more lanes changes which one he picks, not how often he passes.
   let laneTotal = 0;
@@ -153,7 +172,11 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
     for (let i = 0; i < laneValues.length; i++) if ((u -= laneValues[i]!) < 0 || i === laneValues.length - 1) return { kind: 'pass', toId: laneIds[i]! };
   }
   r -= pw;
-  if ((r -= w(dumpW)) < 0) return { kind: 'dump' };
+  if ((r -= w(dumpW)) < 0) {
+    // Well behind, from the neutral zone he may throw it at the net rather than into a corner.
+    const shootIn = zone === 'N' && behind > 0 && rng.chance(se.shootIn * behind);
+    return shootIn ? { kind: 'dump', onNet: true } : { kind: 'dump' };
+  }
   if ((r -= w(protectW)) < 0) return { kind: 'protect' };
   const to = carryTarget(rx, ly, zone, aheadLat, aheadD, dir);
   if (mateOffside && to.x * dir > RINK.blueLineX - T.holdUpGap) to.x = (RINK.blueLineX - T.holdUpGap) * dir;
@@ -189,13 +212,13 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   switch (d.kind) {
     case 'shoot': executeShot(state, s.id, defs, rng); return null;
     case 'pass': return executePass(state, s.id, d.toId, defs, rng);
-    case 'dump': return executeDump(state, s.id, defs, rng);
+    case 'dump': return executeDump(state, s.id, defs, rng, d.onNet === true);
     case 'carry':
       if (busy) return null;
       s.target.x = d.to.x;
       s.target.y = d.to.y;
       s.faceTarget = null;
-      s.speedCap = clamp(0.75 + me.attrs.puckHandling * 0.0025, 0, 1);
+      s.speedCap = clamp(T.carrySpeed.base + me.attrs.puckHandling * T.carrySpeed.perPoint, 0, 1);
       return null;
     case 'protect': {
       if (busy) return null;

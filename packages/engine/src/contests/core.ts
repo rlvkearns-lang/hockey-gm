@@ -97,9 +97,10 @@ export function contestChemistry(ctx: ContestCtx, c: ContestState, id: string): 
   return chemistryWith(ctx.chemistry, id, mates);
 }
 
-/** `effective` for participant `id` of `c`, with his chemistry with the teammates in it. */
+/** `effective` for participant `id` of `c`, with his chemistry with the teammates in it, plus his team's jump on the night. */
 export function contestRating(ctx: ContestCtx, c: ContestState, id: string, weights: Weights): number {
-  return effective(ctx.defs.get(id)!, skaterById(ctx.state, id), weights, contestChemistry(ctx, c, id));
+  const s = skaterById(ctx.state, id);
+  return effective(ctx.defs.get(id)!, s, weights, contestChemistry(ctx, c, id)) + ctx.state.teamJump[s.side];
 }
 
 export function skaterById(state: GameState, id: string): SkaterState {

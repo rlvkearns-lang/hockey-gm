@@ -10,6 +10,7 @@ import { stepPuck, type PuckEvent } from './puck';
 import { refereeTick } from './referee';
 import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './rink';
 import { createRng } from './rng';
+import { TUNING } from './tuning';
 import { movementOf, stepSkater, type Movement } from './skating';
 import { buildResult } from './stats';
 import { assignJobs, isTiedUp, steeredByContest } from './team-play';
@@ -81,7 +82,7 @@ function initialState(setup: GameSetup): GameState {
     carrierId: null, lastTouch: null, possession: null, skaters,
     goalies: { home: goalieAt(setup.home.lines.goalie, dir), away: goalieAt(setup.away.lines.goalie, dir === 1 ? -1 : 1) },
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
-    shotInFlight: null, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
+    shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
     lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null,
     bench: initialBench(setup),
@@ -113,6 +114,9 @@ export function createGame(setup: GameSetup): Game {
   const events: GameEvent[] = [];
   let drained = 0;
   const state = initialState(setup);
+  // How each side comes out on the night: a team's jump and its goalie's form (no game is decided by ratings alone).
+  state.teamJump = { home: rng.gauss() * TUNING.night.teamJumpSd, away: rng.gauss() * TUNING.night.teamJumpSd };
+  state.goalieNight = { home: rng.gauss() * TUNING.night.goalieSd, away: rng.gauss() * TUNING.night.goalieSd };
   startPeriod(state, 1);
   snapToLineup(state); // the opening line-up; later draws wait for players to skate there
 

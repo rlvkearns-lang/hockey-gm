@@ -121,12 +121,14 @@ export function snapToLineup(state: GameState): void {
 const onIceIn = (state: GameState, side: Side, slots: Position[]): SkaterState[] =>
   state.skaters.filter((s) => s.onIce && s.side === side && s.slot !== null && slots.includes(s.slot));
 
-/** Chance that home wins the draw: winProb of the difference between the centres' effective faceoffs ratings. */
+const FACEOFFS = { faceoffs: 1 };
+
+/** Chance that home wins the draw: winProb of the difference between the centres' effective faceoffs ratings (each plus his team's jump). */
 export function drawChance(state: GameState, defs: Map<string, PlayerDef>): number {
   const rating = (side: Side): number => {
     const c = onIceIn(state, side, ['C'])[0];
     const d = c ? defs.get(c.id) : undefined;
-    return c && d ? effective(d, c, { faceoffs: 1 }) : NO_CENTRE_RATING;
+    return (c && d ? effective(d, c, FACEOFFS) : NO_CENTRE_RATING) + state.teamJump[side];
   };
   return winProb(rating('home') - rating('away'));
 }

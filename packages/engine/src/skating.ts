@@ -1,4 +1,5 @@
 import { resolveBoards } from './rink';
+import { TUNING } from './tuning';
 import { hypot2 } from './vec';
 import type { PlayerDef, SkaterState } from './types';
 
@@ -11,6 +12,7 @@ export type Movement = {
   radius: number;
 };
 
+const S = TUNING.skating;
 /** Distance from the target (m) inside which a skater eases off. */
 const ARRIVE_RADIUS = 2;
 /** Sideways velocity shed per second (skate edges). */
@@ -27,8 +29,8 @@ export function movementOf(def: PlayerDef, energy: number): Movement {
   const a = def.attrs;
   const tired = energy >= 0.5 ? 1 : 0.85 + 0.15 * (Math.max(0, energy) / 0.5);
   return {
-    topSpeed: (7.2 + a.speed * 0.022) * tired,
-    accel: (5 + a.acceleration * 0.06) * tired,
+    topSpeed: (S.topSpeed.base + a.speed * S.topSpeed.perPoint) * tired,
+    accel: (S.accel.base + a.acceleration * S.accel.perPoint) * tired,
     turnRate: 2.2 + a.agility * 0.03,
     backwardFactor: 0.72 + a.agility * 0.0012,
     mass: def.weightKg + 9,

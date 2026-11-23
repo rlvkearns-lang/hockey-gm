@@ -161,6 +161,10 @@ export type GameState = {
   /** Skater `id` may not start a contest of `kind` before tick `untilTick` (expired entries are dropped). */
   contestCooldowns: { id: string; kind: string; untilTick: number }[];
   shotInFlight: ShotInFlight | null;
+  /** Each team's jump on the night: rating points added to all its players' contest ratings and faceoffs (drawn at the start). */
+  teamJump: Record<Side, number>;
+  /** Each goalie's night: added to his save chance's log-odds for the whole game (drawn at the start; a hot or cold night). */
+  goalieNight: Record<Side, number>;
   /** The goalie of each side is screened while tick < this value (set by net-front battles). */
   screenedUntilTick: Record<Side, number>;
   /** Skater `id` has his stick tied up (no pass reception, no loose-puck pickup or race) while tick < `tick` (net-front). */

@@ -14,13 +14,33 @@ export const TUNING = {
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
     shotDistanceScale: 9,
     maxShotDistance: 25,
+    /** An option's skill factor: base + perPoint * the rating that drives it. */
+    skill: { base: 0.81, perPoint: 0.005 },
+    /** The shoot option's own skill factor (shooting accuracy .6, power .4): base + perPoint * rating. */
+    shootSkill: { base: 0.6, perPoint: 0.008 },
+    /** Calm (scales shoot, pass and carry): 1 - pressure * (base - perPoise * poise). */
+    calm: { base: 0.66, perPoise: 0.003 },
+    /** Error (relative, one sd) in how he judges a passing lane: base + perPoint * (100 - iq). */
+    laneNoise: { base: 0.06, perPoint: 0.002 },
+    /** Speed cap while carrying: base + perPoint * puckHandling. */
+    carrySpeed: { base: 0.86, perPoint: 0.001 },
     /** Base weight of each kind of option, before situation, skill and tendency. */
     weight: { shoot: 0.45, pass: 1, carry: 3, dump: 0.15, protect: 0.25 },
     /** Shoot weight is scaled by openNetWeight[0] with the goalie square, up to the sum of both with him shaded openNetShade m off. */
     openNetWeight: [0.85, 0.5] as [number, number],
     openNetShade: 0.6,
     /** Shoot weight is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
-    shootPressure: 3,
+    shootPressure: 3.6,
+    /**
+     * Score effects on the shoot weight in a game that is no longer close: leading by L >= leadFrom scales it by
+     * max(leadMin, 1 - leadPerGoal * (L - leadFrom + 1)); trailing by D >= trailFrom by 1 + trailPerGoal * k, where
+     * k = min(D, trailMaxGoals) - trailFrom + 1, and the pressure power moves from shootPressure toward trailPressure
+     * by k / (trailMaxGoals - trailFrom + 1). By that same share times shootIn, a dump from the neutral zone goes at
+     * the net instead of a corner. In the third period a one- or two-goal margin scales it as the period runs out
+     * (progress 0..1): behind by 1 + latePush * progress (and the pressure power toward trailPressure by progress),
+     * ahead by 1 - lateSit * progress.
+     */
+    scoreEffects: { leadFrom: 3, leadPerGoal: 0.3, leadMin: 0.12, trailFrom: 4, trailPerGoal: 0.75, trailMaxGoals: 6, trailPressure: 1, shootIn: 0.6, latePush: 1, lateSit: 0.5 },
     /** Largest share any one kind of option (all passing lanes together count as one kind) may have of the draw. */
     maxShare: 0.97,
     /** Passes shorter or longer than this (m) are not considered. */
@@ -38,9 +58,38 @@ export const TUNING = {
     holdUpGap: 1,
     /** A teammate counts as in the zone if he will be wholly in it this many seconds from now at his speed. */
     offsideLookahead: 0.5,
+    /**
+     * The longer he has had the puck the more he wants to move it on: carry and protect weights are scaled by
+     * keep = max(holdMin, exp(-seconds he has had it / holdSeconds)), shoot and pass weights by 1 + holdBoost * (1 - keep).
+     */
+    holdSeconds: 5,
+    holdMin: 0.1,
+    holdBoost: { shoot: 0.3, pass: 2 },
     /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
     protectStep: 2,
     protectSpeedCap: 0.4,
+  },
+
+  /** The night (game.ts): drawn once per game. */
+  night: {
+    /** Each team's jump: a normal shift of its contest and faceoff ratings with this standard deviation (rating points). */
+    teamJumpSd: 12,
+    /** Each goalie's night (a hot or cold game): a normal shift of his save log-odds with this standard deviation. */
+    goalieSd: 0.75,
+  },
+
+  /** Skating (skating.ts): top speed (m/s) and acceleration (m/s^2), base plus per point of speed / acceleration. */
+  skating: {
+    topSpeed: { base: 7.62, perPoint: 0.016 },
+    accel: { base: 7.1, perPoint: 0.03 },
+  },
+
+  /** Team play (team-play.ts). */
+  teamPlay: {
+    /** A team leading by sitBackLead goals or more sits back: passive forecheck, its presser at 1 - sitBackPerGoal per goal of lead beyond one (at least sitBackMin) of his speed. */
+    sitBackLead: 3,
+    sitBackPerGoal: 0.15,
+    sitBackMin: 0.4,
   },
 
   /** Passes and interceptions (actions.ts). */
@@ -48,13 +97,13 @@ export const TUNING = {
     /** Speed (m/s): base plus per point of passing. */
     speed: { base: 13, perPoint: 0.09 },
     /** Direction error (rad, one standard deviation): a floor, per point of passing below 100, and at full pressure. */
-    error: { base: 0.008, perPoint: 0.0011, pressure: 0.03 },
+    error: { base: 0.023, perPoint: 0.0006, pressure: 0.03 },
     /** A pass stays "pending" (its receiver chases it) for its travel time plus this long (s). */
     graceSeconds: 1,
     /** An opponent this close (m) to a pass's path gets his one chance to intercept it. */
     interceptRange: 0.9,
     /** Interception chance: base + perStick * stickChecking + perPositioning * defensivePositioning, clamped to [0.03, 0.97]... */
-    intercept: { base: 0.08, perStick: 0.003, perPositioning: 0.002 },
+    intercept: { base: 0.206, perStick: 0.002, perPositioning: 0.0012 },
     /** ...falling linearly from full at interceptSpeed[0] m/s to half at interceptSpeed[1] and above. */
     interceptSpeed: [12, 22] as [number, number],
     /** Share of interceptions that are clean takes; the rest are deflections that leave the puck loose. */
@@ -67,12 +116,14 @@ export const TUNING = {
   /** Shots (actions.ts). */
   shot: {
     /** Speed (m/s): base plus per point of shootingPower. */
-    speed: { base: 22, perPoint: 0.2 },
+    speed: { base: 29, perPoint: 0.1 },
     /** Spread at the net (m, one standard deviation): a floor, per point of accuracy below 100, per metre out, at full pressure. */
-    spread: { base: 0.1, perPoint: 0.006, perMetre: 0.008, pressure: 0.25 },
+    spread: { base: 0.19, perPoint: 0.003, perMetre: 0.008, pressure: 0.25 },
     /** Shooters aim this far (m) from the centre of the net, either side, and this high. */
     aimY: [0.35, 0.75] as [number, number],
     aimZ: [0.1, 0.8] as [number, number],
+    /** The aim's distance from the middle is scaled by base + perPoint * shootingAccuracy. */
+    aimReach: { base: 0.4, perPoint: 0.006 },
     /** Chance of aiming at the open side: 0.5, plus this per metre the goalie is shaded off centre, at most openSideMax. */
     openSidePull: 0.6,
     openSideMax: 0.8,
@@ -93,12 +144,18 @@ export const TUNING = {
     cover: { speed: 3, reach: 1.0, threat: 2.5, maxZ: 0.3 },
     /**
      * Save chance, as a logistic: base, plus perReactionSecond per second the puck takes to arrive (at most 1 s
-     * counted), plus perPoint per point of goalie skill over 70, less the penalties. Clamped to [0.03, 0.97].
+     * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 1.7,
-      perReactionSecond: 5,
-      perPoint: 0.05,
+      base: 2.2,
+      perReactionSecond: 2.5,
+      /**
+       * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
+       * per * skillSpan * tanh((skill - 70) / skillSpan): a weak goalie leaks more than a strong one gains.
+       */
+      perPoint: 0.03,
+      perPointAbove: 0.02,
+      skillSpan: 25,
       screened: 0.6,
       /** Per m/s he is still moving when the puck arrives. */
       perMovingSpeed: 0.25,
@@ -190,7 +247,7 @@ export const TUNING = {
     triggerSpeed: 6,
     triggerRange: 2,
     /** With nobody pinned, this many dig rounds without a side winning two in a row traps the puck. */
-    digMaxRounds: 4,
+    digMaxRounds: 2,
     /** Rating points: first man in, a pinned man digging (against him), a supporting teammate; mass difference (kg) per point. */
     firstEdge: 6,
     pinnedEdge: 10,

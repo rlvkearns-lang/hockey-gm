@@ -1,6 +1,7 @@
 import { composite } from './attributes';
 import { DT } from './constants';
 import { boardsNormal, clipToNets, RINK, resolveBoards, resolveNets, zoneOf } from './rink';
+import { TUNING } from './tuning';
 import type { ContestState, GameState, PlayerDef, Position, Side, SkaterState, Tactics } from './types';
 import { dist, hypot2, type Vec2 } from './vec';
 
@@ -223,6 +224,16 @@ function shape(state: GameState, s: SkaterState, d: PlayerDef, phase: ShapePhase
   }
 }
 
+/**
+ * How hard `side` still pushes given the score: 1 unless it leads by TUNING.teamPlay.sitBackLead goals or more, then
+ * 1 - sitBackPerGoal per goal of lead beyond one, at least sitBackMin.
+ */
+export function sitBack(state: GameState, side: Side): number {
+  const lead = state.score[side] - state.score[side === 'home' ? 'away' : 'home'];
+  const t = TUNING.teamPlay;
+  return lead >= t.sitBackLead ? Math.max(t.sitBackMin, 1 - t.sitBackPerGoal * (lead - 1)) : 1;
+}
+
 /** Goal-side pressure on the carrier by the nearest defender. */
 function press(state: GameState, s: SkaterState, d: PlayerDef, carrier: SkaterState, phase: TeamPhase, tactic: Tactics): void {
   const dir = state.attackDir[s.side];
@@ -324,6 +335,8 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   const battle = carrier ? null : boardBattle(state);
   const homeSupport = battle ? supportTarget(state, 'home') : null;
   const awaySupport = battle ? supportTarget(state, 'away') : null;
+  // Score effects: a team well ahead sits back (a passive forecheck, a slower presser).
+  const tactic = (side: Side): Tactics => (sitBack(state, side) < 1 ? { ...tactics[side], forecheck: 'passive' } : tactics[side]);
   const homePhase = phaseOf(shapeSide, puck.x, 'home', state.attackDir.home);
   const awayPhase = phaseOf(shapeSide, puck.x, 'away', state.attackDir.away);
 
@@ -335,14 +348,17 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
     const phase = s.side === 'home' ? homePhase : awayPhase;
     const chasing = s === homeChaser || s === awayChaser;
     const support = chasing && battle ? (s.side === 'home' ? homeSupport : awaySupport) : null;
-    if (s === presser) press(state, s, d, carrier!, phase, tactics[s.side]);
+    if (s === presser) {
+      press(state, s, d, carrier!, phase, tactic(s.side));
+      s.speedCap *= sitBack(state, s.side);
+    }
     else if (support) {
       s.target.x = support.x;
       s.target.y = support.y;
       facePuck(s, puck);
       s.speedCap = 1;
     } else if (chasing && !battle) chase(state, s);
-    else shape(state, s, d, phase, tactics[s.side], dir);
+    else shape(state, s, d, phase, tactic(s.side), dir);
     keepLegal(state, s, dir, chasing, s.side === tagUp);
   }
 }

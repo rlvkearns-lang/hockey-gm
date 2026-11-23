@@ -6,7 +6,7 @@ import { TUNING } from '../tuning';
 import type { ContestState, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
-  carrierNow, carrierOf, contestRating, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS, winProb,
+  carrierNow, carrierOf, contestEvent, contestRating, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx,
 } from './core';
 
@@ -39,7 +39,8 @@ const netOf = (state: GameState, s: SkaterState): Vec2 => ({ x: state.attackDir[
  * and tied up his stick: no pass to him or rebound for him for 1.2 s, `tiedUpUntil`). `leader`: the last round's winner.
  * A round: winProb of strength .4, balance .3, compete .3 against the same, plus mass difference / 4. It ends with
  * no puck change when the attacking side loses the puck, the puck is loose or leaves the zone, the attacker gets the
- * puck, or he skates away from the net front.
+ * puck, or he skates away from the net front; after at least one round, a `battle` event (detail `netFront`) credits
+ * the last round's winner.
  */
 export const netFrontContest: Contest = {
   kind: KIND,
@@ -81,6 +82,11 @@ export const netFrontContest: Contest = {
     if (over) {
       setCooldown(state, att.id, KIND, T.cooldownSeconds);
       setCooldown(state, def.id, KIND, T.cooldownSeconds);
+      if (c.leader !== null) {
+        // Whoever won the last round won the battle for the net front.
+        const w = c.leader === att.id ? att : def, l = w === att ? def : att;
+        ctx.emit(contestEvent(state, { type: 'battle', side: w.side, playerId: w.id, otherId: l.id, assistIds: [], detail: 'netFront' }));
+      }
       return { winnerId: c.leader, puck: 'unchanged' };
     }
     if (c.stageT >= ROUND_SECONDS - STAGE_EPS) round(c, ctx, att, def);

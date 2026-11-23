@@ -1,4 +1,5 @@
 import { recordTouch } from '../actions';
+import { sitBack } from '../team-play';
 import { TUNING } from '../tuning';
 import type { ContestState, PlayerDef, SkaterState } from '../types';
 import { dist, hypot2 } from '../vec';
@@ -55,7 +56,8 @@ export const pokeCheckContest: Contest = {
     if (onCooldown(state, s.id, KIND)) return null;
     // He makes up his mind once per cooldown: poke now, or keep his position.
     setCooldown(state, s.id, KIND, T.cooldownSeconds);
-    return ctx.rng.next() < pokeAttemptChance(ctx.defs.get(s.id)!) ? [s.id, carrier.id] : null;
+    // A team sitting on a big lead (sitBack) gambles for the puck less.
+    return ctx.rng.next() < pokeAttemptChance(ctx.defs.get(s.id)!) * sitBack(state, s.side) ? [s.id, carrier.id] : null;
   },
 
   start(ctx, participants) {

@@ -50,12 +50,13 @@ function closingSpeed(h: SkaterState, t: SkaterState): number {
 /**
  * Chance that `hitter` (state `h`) lands a hit on `target` (state `t`) at contact, closing at `closing` m/s:
  * winProb of hitter (bodyChecking .5, strength .3, balance .2) minus target (balance .45, strength .35, poise .2) plus
- * (hitterMass * closing - targetMass * 2) / 12, masses from Movement. Chemistry is each one's mean with teammates in it.
+ * (hitterMass * closing - targetMass * T.braceSpeed) / T.momentumScale, masses from Movement. Chemistry is each one's
+ * mean with teammates in it; `jumpEdge` is the hitter's team's jump less the target's (GameState.teamJump).
  */
 export function hitChance(
-  hitter: PlayerDef, h: SkaterState, target: PlayerDef, t: SkaterState, closing: number, hitterChem = 0, targetChem = 0,
+  hitter: PlayerDef, h: SkaterState, target: PlayerDef, t: SkaterState, closing: number, hitterChem = 0, targetChem = 0, jumpEdge = 0,
 ): number {
-  const edge = effective(hitter, h, T.hitter, hitterChem) - effective(target, t, T.brace, targetChem)
+  const edge = effective(hitter, h, T.hitter, hitterChem) - effective(target, t, T.brace, targetChem) + jumpEdge
     + (movementOf(hitter, 1).mass * closing - movementOf(target, 1).mass * T.braceSpeed) / T.momentumScale;
   return winProb(edge);
 }
@@ -151,7 +152,8 @@ export const hitContest: Contest = {
       c.spot.y = t.pos.y;
       const dh = ctx.defs.get(h.id)!, tDef = ctx.defs.get(t.id)!;
       if (hypot2(t.pos.x - h.pos.x, t.pos.y - h.pos.y) > bodyRadius(dh.weightKg) + bodyRadius(tDef.weightKg) + CONTACT_MARGIN) return null;
-      c.data.p = hitChance(dh, h, tDef, t, Math.max(0, closingSpeed(h, t)), contestChemistry(ctx, c, h.id), contestChemistry(ctx, c, t.id));
+      c.data.p = hitChance(dh, h, tDef, t, Math.max(0, closingSpeed(h, t)), contestChemistry(ctx, c, h.id), contestChemistry(ctx, c, t.id),
+        state.teamJump[h.side] - state.teamJump[t.side]);
       c.leader = c.data.p >= 0.5 ? h.id : t.id;
       c.spot.x = (h.pos.x + t.pos.x) / 2;
       c.spot.y = (h.pos.y + t.pos.y) / 2;
