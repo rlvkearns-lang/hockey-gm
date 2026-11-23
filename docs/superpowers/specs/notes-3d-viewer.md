@@ -39,3 +39,9 @@ Mockup of the watch screen layout: https://claude.ai/artifact/8zAg7iarbD54vTWYPK
 - First version: a simple arena. Stands with a still crowd shown as coloured blocks, a scoreboard, team colours on the boards, the home team's generated crest at centre ice.
 - Later upgrade, on higher graphics settings: a living arena. The crowd reacts to goals and to how the game is going; attendance reflects how the team is doing (ties into fan reaction and relocation).
 - Reason: early animation effort goes to the players.
+
+## Sound (owner, 2026-11-23)
+
+- Wanted eventually, not soon. The first 3D version is silent.
+- When added: rink sounds (skates, stick on puck, boards, posts, hits, whistle, goal horn) plus crowd (murmur that swells on chances and roars on goals).
+- No commentary: the owner thinks AI voice generation would be a hassle.
