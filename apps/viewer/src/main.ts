@@ -1,3 +1,10 @@
+/**
+ * FROZEN (2026-11-23, viewer final review I6): the skating test page (this file, skating.html, moments.ts,
+ * scripts/shots.mjs, and the rig code only they use). The owner approved it and the approved copy is published
+ * separately. It is kept compiling but no longer kept in step with the watch page: it has its own colours, motion
+ * blending and crouch, and later gait changes are made for the watch page only. Do not extend it; retire it when the
+ * owner no longer needs it.
+ */
 import * as THREE from 'three';
 import { bodyRadius, DT, RINK, generateTeam, type GameSetup, type GameState, type PlayerDef, type Side, type SkaterState } from '@hockey/engine';
 import { bodyDims, type BodyDims } from './body';
