@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createGame, DT, generateTeam, type GameState } from '@hockey/engine';
-import { emptyProbe, goalieJumped, isCut, jumped, lastCutAtOrBefore, probeOf, puckJumped, skaterJumped } from './cuts';
+import { cutKind, emptyProbe, goalieJumped, isCut, jumped, lastCutAtOrBefore, probeOf, puckJumped, skaterJumped } from './cuts';
 
 const state = (): GameState => {
   const g = createGame({ home: generateTeam(11, 'Harbour City', 'HBR'), away: generateTeam(12, 'Northern Peaks', 'NPK'), seed: 5, chemistry: [] });
@@ -33,6 +33,12 @@ describe('engine cuts', () => {
     const sk = structuredClone(a); sk.tick++; sk.skaters[i]!.pos.y += 4;
     expect(isCut(probeOf(a), sk)).toBe(true);
     expect(skaterJumped(probeOf(a), sk, i)).toBe(true);
+    // Which kind of cut each is: a camera cuts with a restart or a change of ends, and may ease across a jump.
+    expect(cutKind(probeOf(a), restart)).toBe('restart');
+    expect(cutKind(probeOf(a), ends)).toBe('ends');
+    expect(cutKind(probeOf(a), tp)).toBe('jump');
+    expect(cutKind(probeOf(a), sk)).toBe('jump');
+    expect(cutKind(probeOf(a), a)).toBe(null);
   });
 
   it('a skater stepping on at the door is not a cut; the same tick or an earlier one never is', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bodyDims } from './body';
-import { carryPoint, stepCarry, stickhandle, type CarryBlend } from './carry';
+import { carryPoint, initialPuckDraw, stepCarry, stepPuckDraw, stickhandle, type CarryBlend, type IcePoint, type PuckDraw, type PuckDrawInput } from './carry';
 import { initialGait, poseOf, type Motion, type Style } from './gait';
 
 const m = (p: Partial<Motion>): Motion => ({ speed: 0, forward: 0, lateral: 0, accelAlong: 0, turnRate: 0, facing: 0, down: false, ...p });
@@ -109,3 +109,60 @@ describe('carry', () => {
     expect(c.z - a.z).toBeGreaterThan(0.06);
   });
 });
+
+/** The puck machine on its own: a made-up carrier skating along +x at 6 m/s with his blade 0.9 m ahead and 0.4 m left. */
+describe('the drawn puck (puck machine)', () => {
+  const DTICK = 1 / 30;
+  type World = { t: number; carrier: (tick: number) => string | null; enginePuck: (t: number) => IcePoint; height?: number };
+  const bodyAt = (t: number): IcePoint => ({ x: 6 * t, z: 0 });
+  const bladeAt = (t: number): IcePoint => ({ x: 6 * t + 0.9, z: -0.4 });
+  /** Step the machine through `w` at `hz` from t0 to t1 (game seconds), returning every drawn puck. */
+  function run(w: World, t0: number, t1: number, hz: number, start: PuckDraw = initialPuckDraw()): { s: PuckDraw; drawn: { t: number; x: number; y: number; z: number }[] } {
+    let s = start;
+    const out: { t: number; x: number; y: number; z: number }[] = [];
+    for (let t = t0; t < t1 - 1e-9; t += 1 / hz) {
+      const pos = t / DTICK, tick = Math.floor(pos), a = pos - tick, now = t;
+      const input: PuckDrawInput = {
+        tick, alpha: a, prevCarrier: w.carrier(tick), nextCarrier: w.carrier(tick + 1),
+        engine: w.enginePuck(now), height: w.height ?? 0, nextPuck: w.enginePuck((tick + 1) * DTICK),
+        holder: (id) => (id === 'c' ? { blade: bladeAt(now), position: bodyAt(now) } : null),
+      };
+      s = stepPuckDraw(s, input, t === t0 ? 0 : 1 / hz);
+      out.push({ t, ...s.drawn });
+    }
+    return { s, drawn: out };
+  }
+
+  it('a loose puck is drawn exactly at the engine puck, at its height', () => {
+    const r = run({ t: 0, carrier: () => null, enginePuck: (t) => ({ x: 3 + 20 * t, z: 1 }), height: 0.4 }, 0, 1, 60);
+    for (const p of r.drawn) { expect(p.x).toBeCloseTo(3 + 20 * p.t, 9); expect(p.z).toBe(1); expect(p.y).toBe(0.4); }
+  });
+  it('carried from the start (a seek into a rush) it is on the blade at once and follows it', () => {
+    const r = run({ t: 0, carrier: () => 'c', enginePuck: (t) => ({ x: 6 * t + 0.6, z: 0 }) }, 0, 1, 60);
+    for (const p of r.drawn) { expect(p.x).toBeCloseTo(bladeAt(p.t).x, 9); expect(p.z).toBeCloseTo(-0.4, 9); expect(p.y).toBe(0); }
+  });
+  it('a pick-up eases onto the blade within 0.15 s from where the puck was, and a release reaches the engine puck by the end of its tick', () => {
+    for (const hz of [30, 60, 144]) {
+      // Loose until tick 15, carried from 15 to 45, released at tick 45 into a 25 m/s pass.
+      const carrier = (tick: number): string | null => (tick >= 15 && tick < 45 ? 'c' : null);
+      const enginePuck = (t: number): IcePoint => (t < 0.5 ? { x: 2.7, z: -0.4 } : t < 1.5 ? { x: 6 * t + 0.6, z: 0 } : { x: 9.6 + 25 * (t - 1.5), z: 0 });
+      const r = run({ t: 0, carrier, enginePuck }, 0, 2, hz);
+      let worst = 0;
+      for (let i = 1; i < r.drawn.length; i++) {
+        const p = r.drawn[i]!, q = r.drawn[i - 1]!;
+        worst = Math.max(worst, Math.hypot(p.x - q.x, p.z - q.z) - 25 / hz);
+        if (p.t >= 14 * DTICK + 0.15 + 1e-6 && p.t < 44 * DTICK) { expect(p.x, `${hz} Hz on the blade at ${p.t}`).toBeCloseTo(bladeAt(p.t).x, 9); }
+        if (p.t >= 45 * DTICK + 1e-6) { expect(p.x, `${hz} Hz loose at ${p.t}`).toBeCloseTo(enginePuck(p.t).x, 9); expect(p.z).toBe(0); }
+      }
+      expect(worst, `${hz} Hz`).toBeLessThan(0.6);
+    }
+  });
+  it('after a cut (a fresh machine) a stale release or pick-up is not carried on', () => {
+    const carrier = (tick: number): string | null => (tick < 20 ? 'c' : null);
+    const first = run({ t: 0, carrier, enginePuck: (t) => ({ x: 6 * t + 0.6, z: 0 }) }, 0, 0.66, 60);
+    const fresh = { ...first.s, fresh: true };
+    const r = run({ t: 0, carrier: () => null, enginePuck: () => ({ x: -10, z: 5 }) }, 1, 1.2, 60, fresh);
+    for (const p of r.drawn) { expect(p.x).toBe(-10); expect(p.z).toBe(5); }
+  });
+});
+

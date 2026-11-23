@@ -1,268 +1,137 @@
 import * as THREE from 'three';
-import { DT, generateTeam, type GameEvent, type GameSetup, type GameState, type PlayerDef, type Side } from '@hockey/engine';
-import { ARENA_BACKGROUND, type ArenaQuality } from './arena';
-import { CAMERA_NAMES, cameraTarget, easeCamera, easePoint, type CameraInput, type CameraName, type CameraPose } from './cameras';
-import type { Vec3 } from './gait';
-import { createCursor, type Playback } from './playback';
-import { recordGame, type WorkerLike } from './record-game';
+import { DT, type GameState } from '@hockey/engine';
+import type { ArenaQuality } from './arena';
+import type { CameraName } from './cameras';
+import { forgetTarget, initialOperator, stepOperator, withCamera, type OperatorInput } from './operator';
+import { createControls } from './page/controls';
+import { $, createHud } from './page/hud';
+import { createLifecycle, type Game } from './page/lifecycle';
+import { canShow3d, createRenderer } from './page/renderer';
+import { createTimebar } from './page/timebar';
+import type { Vec3 } from './pose-mix';
+import type { WorkerLike } from './record-game';
 import RecordWorker from './record.worker?worker&inline';
-import { createGameScene, seekScene, type GameScene } from './scene';
+import { seekScene } from './scene';
 
 /**
  * The watch page: a whole game in 3D with a score bug, a time line, camera angles and playback controls. The game is
- * played once up front, in a background thread when the browser allows one (recordGame); the page only shows it. The
- * real-time loop draws only while something moves (playing, a seek, a new camera); `window.__watch` drives it frame by
- * frame for the screenshot script. Without WebGL the page says so in plain words and starts nothing.
+ * played once up front, in a background thread when the browser allows one (page/lifecycle.ts); the page only shows
+ * it. This entry wires the page modules (renderer, lifecycle, HUD, time bar, controls) to the camera operator
+ * (operator.ts) and runs the real-time loop, which draws only while something moves (playing, a seek, a new camera);
+ * `window.__watch` drives it frame by frame for the screenshot script. Without WebGL the page says so in plain words
+ * and starts nothing.
  */
 
 /** Set by the Vite configs: the link to the skating test works on the dev server, not inside a single-file build. */
 declare const __SKATING_LINK__: boolean;
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
-const stage = $('stage');
-const loading = $('loading');
-const playBtn = $<HTMLButtonElement>('play');
-const scrub = $<HTMLInputElement>('scrub');
-const followSel = $<HTMLSelectElement>('follow');
-const seedInput = $<HTMLInputElement>('seed');
-const fpsEl = $('fps');
-const slowEl = $('slow');
-const summaryEl = $('summary');
-const benchNote = $('benchNote');
-const problemEl = $('problem');
-const preparingEl = $('preparing');
-const newGameBtn = $<HTMLButtonElement>('newGame');
-
 if (__SKATING_LINK__) { const a = $<HTMLAnchorElement>('skatingLink'); a.href = 'skating.html'; a.hidden = false; }
 
-const ORDINAL = ['', '1st', '2nd', '3rd'];
-const periodName = (p: number): string => ORDINAL[p] ?? (p === 4 ? 'OT' : `P${p}`);
-const clockText = (s: number): string => { const t = Math.max(0, Math.floor(s)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
-/** Seconds before a goal that its mark on the time line jumps to. */
-const GOAL_LEAD = 6;
-/** Time constant (s) of the point the cameras watch, chasing the drawn puck: smooths passes and rebounds. */
-const FOCUS_TAU = 0.22;
 /** Below this many frames a second for SLOW_SECONDS in a row on High, suggest Low. */
 const SLOW_FPS = 20, SLOW_SECONDS = 3;
-/** While the time bar is dragged, seeks are plain; this long (ms) after it stops moving, the moment is played in. */
-const SCRUB_SETTLE_MS = 150;
-/** A camera target that moves this far (m) in one frame is cut to, not eased to. */
-const CUT_JUMP = 6;
-/** Goal marks closer than this (px) on the time line are stacked. */
-const MARK_PX = 15;
-let lastTarget: CameraPose | null = null, lastTargetName: CameraName | null = null;
 /** Below this picture width (CSS px) the broadcast camera frames the play tighter: 29 degrees / 1.7, about 17. */
 const NARROW_PX = 700, NARROW_ZOOM = 1.7;
-/**
- * The puck is drawn at least PUCK_MIN_PX across on screen (CSS px), from true size (1x) up close to at most
- * PUCK_MAX_SCALE times a real puck from the far cameras; 7.62 cm is a real puck's width.
- */
-const PUCK_MIN_PX = 9, PUCK_MAX_SCALE = 4, PUCK_WIDTH = 0.0762;
+
+const stage = $('stage');
 
 // ---------------------------------------------------------------------------------------------------------------
-// Renderer, scene and camera. Quality: Low (no antialiasing, the light scene, pixel ratio up to 1.5) or High
-// (antialiasing, real shadows, full figures, pixel ratio up to 2). Antialiasing is fixed when a WebGL context is made,
-// so changing quality replaces the canvas and the renderer, and rebuilds the game scene.
+// What the page is doing
 
-let quality: ArenaQuality = 'low';
-let canvas: HTMLCanvasElement | null = null;
-let renderer: THREE.WebGLRenderer | null = null;
-/** Canvases being replaced: their context loss is ours, not the browser's. */
-const retired = new WeakSet<HTMLCanvasElement>();
-let contextLost = false;
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(ARENA_BACKGROUND);
-const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.1, 400);
-
-function makeRenderer(): void {
-  const c = document.createElement('canvas');
-  c.setAttribute('aria-label', '3D picture of the game');
-  if (canvas) {
-    retired.add(canvas);
-    renderer?.dispose();
-    renderer?.forceContextLoss();
-    canvas.replaceWith(c);
-  } else stage.prepend(c);
-  canvas = c;
-  renderer = null;
-  // If the graphics are reset under the page (a driver update, too many pages using the GPU), say so and wait for
-  // the browser to give them back; three.js rebuilds what it needs when they return.
-  c.addEventListener('webglcontextlost', (e) => {
-    if (retired.has(c)) return;
-    e.preventDefault();
-    contextLost = true;
-    setPlaying(false);
-    showProblem('The picture was interrupted by the computer\'s graphics. Waiting for it to come back…');
-  });
-  c.addEventListener('webglcontextrestored', () => {
-    if (retired.has(c)) return;
-    contextLost = false;
-    problemEl.hidden = true;
-    dirty = true;
-  });
-  const r = new THREE.WebGLRenderer({ canvas: c, antialias: quality === 'high', powerPreference: 'high-performance' });
-  r.shadowMap.enabled = quality === 'high';
-  r.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer = r;
-  fit();
-}
-
-/** Whether this browser can make a WebGL 2 context (three.js needs one). The test context is let go at once. */
-function canShow3d(): boolean {
-  try {
-    const gl = document.createElement('canvas').getContext('webgl2');
-    if (!gl) return false;
-    gl.getExtension('WEBGL_lose_context')?.loseContext();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const NO_3D = 'This computer\'s browser cannot show 3D graphics, so the game cannot be shown here. Try another browser, or turn on "hardware acceleration" in this browser\'s settings.';
-
-/** No picture can be made: say so where the picture would be, and switch every control off. */
-function noGraphics(): void {
-  loading.textContent = NO_3D;
-  loading.hidden = false;
-  document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('main button, main input, main select').forEach((b) => { b.disabled = true; });
-}
-
-function fit(): void {
-  if (!renderer) return;
-  const w = Math.max(1, Math.round(stage.clientWidth)), h = Math.max(1, Math.round((w * 9) / 16));
-  renderer.setPixelRatio(Math.min(quality === 'high' ? 2 : 1.5, window.devicePixelRatio || 1));
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-  dirty = true;
-}
-new ResizeObserver(() => { fit(); if (game) drawTimeline(); }).observe(stage);
-
-// ---------------------------------------------------------------------------------------------------------------
-// The game
-
-type Mark = { tick: number; side: Side; text: string };
-type Game = {
-  setup: GameSetup; playback: Playback; gs: GameScene; defs: Map<string, PlayerDef>;
-  /** Ticks of the shots on goal of each side, in order (a goal is a shot too). */
-  shots: Record<Side, number[]>;
-  goals: Mark[];
-  /** The last tick of each period (from the event log). */
-  periodEnds: number[];
-  scoreboard: THREE.Object3D | undefined;
-};
-let game: Game | null = null;
 let playing = false;
 let speed = 1;
-let cameraName: CameraName = 'broadcast';
 let followId = '';
-let cam: CameraPose = { pos: { x: 0, y: 15, z: 29 }, look: { x: 0, y: 0, z: 0 }, fov: 30 };
-let focus: Vec3 = { x: 0, y: 0, z: 0 };
-let snap = true;
+let operator = initialOperator('broadcast');
 /** Something changed that the picture must show (a seek, a resize, a camera): draw on the next frame even if paused. */
 let dirty = true;
-let lastFollowOn = false;
+/** The cost (ms) of the latest seek that played its moment in, for the screenshot script. */
+let lastSeekMs = 0;
+let slowSeconds = 0;
 
-const puckV = new THREE.Vector3();
+const hud = createHud();
+const renderer = createRenderer(stage, {
+  lost: () => { setPlaying(false); hud.showProblem('The picture was interrupted by the computer\'s graphics. Waiting for it to come back…', game() !== null); },
+  restored: () => { hud.hideProblem(); dirty = true; },
+  resized: () => { dirty = true; },
+});
+const makeWorker = (): WorkerLike => new RecordWorker() as unknown as WorkerLike;
+const life = createLifecycle(renderer, hud, {
+  readSeed: () => controls.readSeed(),
+  showSeed: (seed) => controls.showSeed(seed),
+  setControls: (on) => controls.setControls(on),
+  isPlaying: () => playing,
+  setPlaying: (on) => setPlaying(on),
+  position: () => posNow(),
+  seek: (tick) => seekTo(tick),
+  showQuality: (q) => controls.showQuality(q),
+  resetSlow: () => { slowSeconds = 0; },
+  started: (g) => {
+    operator = forgetTarget(operator);
+    hud.teams(g.setup);
+    controls.fillFollow(g.setup);
+    followId = g.setup.home.lines.forwards[0]?.[1] ?? '';
+    drawTimebar(g);
+    setCamera(operator.camera);
+    seekTo(0);
+  },
+}, makeWorker);
+const game = (): Game | null => life.game();
+const timebar = createTimebar({
+  seek: (tick, settle) => seekTo(tick, settle),
+  playGoal: (tick) => { seekTo(tick); setPlaying(true); },
+});
+const controls = createControls({
+  togglePlay: () => setPlaying(!playing),
+  setSpeed: (v) => setSpeed(v),
+  setCamera: (name) => setCamera(name),
+  setQuality: (q) => { void life.setQuality(q); },
+  toEnd: () => { const g = game(); if (g) { setPlaying(false); seekTo(g.playback.totalTicks); } },
+  newGame: () => { void life.newGame(); },
+  follow: (id) => setFollow(id),
+  seekBy: (seconds) => seekTo(posNow() + seconds / DT),
+}, { hasGame: () => game() !== null, busy: () => life.busy(), preparing: () => life.preparing() });
 
-function buildScene(setup: GameSetup, events: Playback['events']): GameScene {
-  const gs = createGameScene(setup, { quality, events });
-  scene.add(gs.root);
-  return gs;
-}
-function dropScene(gs: GameScene): void {
-  scene.remove(gs.root);
-  gs.dispose();
-}
+new ResizeObserver(() => { renderer.fit(); const g = game(); if (g) drawTimebar(g); }).observe(stage);
 
-/** Count of sorted `ticks` at or before `t`. */
-function countUpTo(ticks: readonly number[], t: number): number {
-  let lo = 0, hi = ticks.length;
-  while (lo < hi) { const m = (lo + hi) >> 1; if (ticks[m]! <= t) lo = m + 1; else hi = m; }
-  return lo;
-}
-
-function indexEvents(events: readonly GameEvent[], defs: Map<string, PlayerDef>, setup: GameSetup): Pick<Game, 'shots' | 'goals' | 'periodEnds'> {
-  const shots: Record<Side, number[]> = { home: [], away: [] };
-  const goals: Mark[] = [];
-  const periodEnds: number[] = [];
-  for (const e of events) {
-    if (e.type === 'shot' && e.side) shots[e.side].push(e.tick);
-    else if (e.type === 'goal' && e.side) {
-      const who = e.playerId ? defs.get(e.playerId)?.name ?? '' : '';
-      const assists = e.assistIds.length === 0 ? 'unassisted' : `assisted by ${e.assistIds.map((id) => defs.get(id)?.name ?? id).join(' and ')}`;
-      goals.push({ tick: e.tick, side: e.side, text: `Goal, ${setup[e.side].abbr}: ${who}, ${assists}. ${clockText(e.clock)} ${periodName(e.period)}` });
-    } else if (e.type === 'periodEnd') periodEnds.push(e.tick);
-  }
-  return { shots, goals, periodEnds };
-}
+const drawTimebar = (g: Game): void => timebar.draw(g.playback.totalTicks, g.timeline.periodEnds, g.goals);
 
 // ---------------------------------------------------------------------------------------------------------------
 // Each frame: the camera, the score bug, the time line
 
 function posNow(): number {
-  if (!game) return 0;
-  const f = game.playback.frame();
+  const g = game();
+  if (!g) return 0;
+  const f = g.playback.frame();
   return f.tick + f.alpha;
 }
 
-/** Point the camera for the current frame; `dt` is the game time just played (0 when paused). */
-function aimCamera(dt: number): void {
-  if (!game) return;
-  const { gs, playback } = game;
+const puckV = new THREE.Vector3();
+
+/** Point the camera for the current frame; `dt` is the game time just played (0 when paused); `snap` cuts to it. */
+function aimCamera(dt: number, snap = false): void {
+  const g = game();
+  if (!g) return;
+  const { gs, playback } = g;
   const f = playback.frame();
   gs.puckWorld(puckV);
-  const puck = { x: puckV.x, y: puckV.y, z: puckV.z };
-  // Cut (do not pan) on the frame the picture cuts (play restarting at a faceoff with the puck on the dot, the teams
-  // changing ends), or when the followed player steps on or off.
-  const attack = f.prev.attackDir.home;
-  if (gs.cutNow()) snap = true;
-  focus = snap ? puck : easePoint(focus, puck, dt, FOCUS_TAU);
   const a = f.alpha, pp = f.prev.puck.vel, pn = f.next.puck.vel;
-  const input: CameraInput = {
-    puck: focus, puckVel: { x: pp.x + (pn.x - pp.x) * a, y: 0, z: pp.y + (pn.y - pp.y) * a }, attackingRight: attack === 1,
-    zoom: stage.clientWidth < NARROW_PX ? NARROW_ZOOM : 1,
-    current: lastTargetName === cameraName && lastTarget ? lastTarget : undefined,
-  };
   const fv = followId ? gs.figure(followId) : undefined;
   const followOn = !!fv && fv.onIce;
-  if (followOn && fv) {
-    const vel = velocityOf(f.prev, f.next, a, followId);
-    input.followed = { pos: { x: fv.position.x, y: 0, z: fv.position.z }, facing: fv.facing, vel };
-  }
-  if (cameraName === 'follow' && followOn !== lastFollowOn) snap = true;
-  lastFollowOn = followOn;
-  const target = cameraTarget(cameraName, input);
-  // An angle that jumps to the other side of the play (ice level as the puck crosses centre along its boards) cuts
-  // there, as a director would, rather than swinging the camera through the players.
-  if (lastTarget && Math.hypot(target.pos.x - lastTarget.pos.x, target.pos.z - lastTarget.pos.z) > CUT_JUMP) snap = true;
-  lastTarget = target; lastTargetName = cameraName;
-  const anchor = cameraName === 'follow' ? input.followed?.pos : undefined;
-  if (anchor && !snap) {
-    // Behind a skater at full speed: ease the camera's place relative to him, so it keeps up instead of trailing.
-    const rel = (p: CameraPose, s: number): CameraPose => ({
-      pos: { x: p.pos.x + s * anchor.x, y: p.pos.y, z: p.pos.z + s * anchor.z },
-      look: { x: p.look.x + s * anchor.x, y: p.look.y, z: p.look.z + s * anchor.z }, fov: p.fov,
-    });
-    cam = rel(easeCamera(rel(cam, -1), rel(target, -1), dt, false), 1);
-  } else cam = easeCamera(cam, target, dt, snap);
-  snap = false;
-  camera.position.set(cam.pos.x, cam.pos.y, cam.pos.z);
-  camera.lookAt(cam.look.x, cam.look.y, cam.look.z);
-  if (camera.fov !== cam.fov) { camera.fov = cam.fov; camera.updateProjectionMatrix(); }
+  const input: OperatorInput = {
+    puck: { x: puckV.x, y: puckV.y, z: puckV.z }, puckVel: { x: pp.x + (pn.x - pp.x) * a, y: 0, z: pp.y + (pn.y - pp.y) * a },
+    attackingRight: f.prev.attackDir.home === 1, zoom: stage.clientWidth < NARROW_PX ? NARROW_ZOOM : 1,
+    // The scene's cut on this frame: the camera cuts with a restart or a change of ends, and eases across a jump.
+    cut: gs.cutKind(), snap,
+  };
+  if (followOn && fv) input.followed = { pos: { x: fv.position.x, y: 0, z: fv.position.z }, facing: fv.facing, vel: velocityOf(f.prev, f.next, a, followId) };
+  const r = stepOperator(operator, input, dt);
+  operator = r.state;
+  renderer.aim(r.pose);
   // Draw the puck large enough to find from far away, and true to size up close.
-  const d = camera.position.distanceTo(puckV);
-  const pxPerM = Math.max(1, stage.clientHeight || 1) / (2 * Math.max(d, 0.5) * Math.tan((cam.fov * Math.PI) / 360));
-  gs.setPuckScale(Math.min(PUCK_MAX_SCALE, Math.max(1, PUCK_MIN_PX / (pxPerM * PUCK_WIDTH))));
+  gs.setPuckScale(renderer.puckScaleAt(puckV));
   // The overhead camera hangs above the scoreboard; it would hide centre ice.
-  if (game.scoreboard) game.scoreboard.visible = cameraName !== 'overhead';
-  const off = cameraName === 'follow' && !followOn;
-  benchNote.hidden = !off;
-  if (off) {
-    const d = game.defs.get(followId);
-    benchNote.textContent = d ? `#${d.number} ${d.name} is on the bench` : 'No player chosen';
-  }
+  if (g.scoreboard) g.scoreboard.visible = operator.camera !== 'overhead';
+  const off = operator.camera === 'follow' && !followOn;
+  hud.benchNote(off ? { def: g.defs.get(followId) } : null);
 }
 
 /** A skater's or goalie's velocity (world) blended between the frame's ticks. */
@@ -273,334 +142,80 @@ function velocityOf(prev: GameState, next: GameState, a: number, id: string): Ve
   return { x: p.vel.x + (n.vel.x - p.vel.x) * a, y: 0, z: p.vel.y + (n.vel.y - p.vel.y) * a };
 }
 
-const text = (el: HTMLElement, s: string): void => { if (el.textContent !== s) el.textContent = s; };
-
-function phaseLabel(st: GameState): { period: string; clock: string } {
-  if (st.phase === 'final') return { period: 'Final', clock: '' };
-  if (st.phase === 'intermission') return { period: `End of ${periodName(st.period)}`, clock: '' };
-  return { period: periodName(st.period), clock: clockText(st.clock) };
-}
-
 function updateHud(): void {
-  if (!game) return;
-  const { playback, setup, shots } = game;
+  const g = game();
+  if (!g) return;
+  const { playback } = g;
   const f = playback.frame();
-  const st = f.prev;
   const atEnd = f.tick >= playback.totalTicks;
-  const ph = phaseLabel(atEnd ? f.next : st);
-  text($('bugHomeScore'), String(st.score.home));
-  text($('bugAwayScore'), String(st.score.away));
-  text($('bugPeriod'), ph.period);
-  text($('bugClock'), ph.clock);
-  $('bugClock').hidden = ph.clock === '';
-  const sh = countUpTo(shots.home, st.tick), sa = countUpTo(shots.away, st.tick);
-  text($('bugShots'), `Shots ${sh} – ${sa}`);
-  text($('when'), ph.clock ? `${ph.period} · ${ph.clock}` : ph.period);
-  if (!scrubbing) {
-    const v = String(Math.round(posNow()));
-    if (scrub.value !== v) scrub.value = v;
-  }
-  scrub.style.setProperty('--pct', `${(100 * posNow()) / Math.max(1, playback.totalTicks)}%`);
-  scrub.setAttribute('aria-valuetext', ph.clock ? `${ph.period} period, ${ph.clock} left` : ph.period);
-  summaryEl.hidden = !atEnd;
-  if (atEnd) {
-    const r = playback.result, ts = { home: shots.home.length, away: shots.away.length };
-    text(summaryEl, `Final: ${setup.home.name} ${r.score.home}, ${setup.away.name} ${r.score.away}${r.tied ? ' (a tie)' : ''} · Shots ${ts.home} – ${ts.away}`);
-  }
+  const ph = hud.update({ setup: g.setup, timeline: g.timeline, result: playback.result, prev: f.prev, next: f.next, atEnd });
+  timebar.show(posNow(), playback.totalTicks, ph);
   if (atEnd && playing) setPlaying(false);
-}
-
-function drawTimeline(): void {
-  if (!game) return;
-  const { playback, goals, periodEnds } = game;
-  const total = Math.max(1, playback.totalTicks);
-  scrub.max = String(playback.totalTicks);
-  const pct = (t: number): string => `${(100 * t) / total}%`;
-  const periods = $('periods');
-  const parts: HTMLElement[] = [];
-  let start = 0;
-  const ends = periodEnds.length > 0 ? periodEnds : [total];
-  ends.forEach((end, i) => {
-    const label = document.createElement('span');
-    label.className = 'label';
-    label.textContent = periodName(i + 1);
-    label.style.left = pct((start + Math.min(end, total)) / 2);
-    parts.push(label);
-    if (end < total - 1) {
-      const split = document.createElement('span');
-      split.className = 'split';
-      split.style.left = pct(end);
-      parts.push(split);
-    }
-    start = end;
-  });
-  periods.replaceChildren(...parts);
-  // Goals close together stack upward, so each mark can be seen and clicked.
-  const width = Math.max(1, $('goals').clientWidth);
-  let lastX = -Infinity, level = 0, maxLevel = 0;
-  $('goals').replaceChildren(...goals.map((g) => {
-    const x = (g.tick / total) * width;
-    level = x - lastX < MARK_PX ? level + 1 : 0;
-    if (level === 0) lastX = x;
-    maxLevel = Math.max(maxLevel, level);
-    const b = document.createElement('button');
-    b.className = g.side;
-    b.style.left = pct(g.tick);
-    b.style.top = `${-1 - level * MARK_PX}px`;
-    b.title = g.text;
-    b.setAttribute('aria-label', `${g.text}. Watch it from just before.`);
-    b.addEventListener('click', () => { seekTo(g.tick - GOAL_LEAD / DT); setPlaying(true); });
-    return b;
-  }));
-  $('timeline').style.marginTop = `${14 + maxLevel * MARK_PX}px`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Actions
-
-/** The cost (ms) of the latest seek that played its moment in, for the screenshot script. */
-let lastSeekMs = 0;
 
 /**
  * Show `tick` at once. With `settle` (the default) the moments before it are played through first (seekScene), so
  * every figure is in the pose play would have shown; without, it is a plain seek (used while the time bar is dragged).
  */
 function seekTo(tick: number, settle = true): void {
-  if (!game) return;
+  const g = game();
+  if (!g) return;
   const t0 = performance.now();
-  seekScene(game.playback, game.gs, tick, settle ? undefined : 0);
+  seekScene(g.playback, g.gs, tick, settle ? undefined : 0);
   if (settle) lastSeekMs = performance.now() - t0;
-  snap = true;
-  aimCamera(0);
+  aimCamera(0, true);
   updateHud();
   dirty = true;
 }
 
 function setPlaying(on: boolean): void {
-  if (on && game && game.playback.frame().tick >= game.playback.totalTicks) seekTo(0); // Play at the end starts again
-  playing = on && game !== null;
-  text(playBtn, playing ? 'Pause' : 'Play');
+  const g = game();
+  if (on && g && g.playback.frame().tick >= g.playback.totalTicks) seekTo(0); // Play at the end starts again
+  playing = on && game() !== null;
+  controls.showPlaying(playing);
   slowSeconds = 0;
   dirty = true;
 }
 
 function setSpeed(v: number): void {
   speed = v;
-  document.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === v)));
+  controls.showSpeed(v);
 }
 
 function setCamera(name: CameraName): void {
-  cameraName = name;
+  operator = withCamera(operator, name);
   // The picker shows the followed player only while following him, so picking him again is a change that follows him.
-  followSel.value = name === 'follow' ? followId : '';
-  document.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.camera === name)));
-  snap = true;
+  controls.showCamera(name, followId);
   aimCamera(0);
   dirty = true;
 }
 
 function setFollow(id: string): void {
-  if (!game || !game.defs.has(id)) return;
+  const g = game();
+  if (!g || !g.defs.has(id)) return;
   followId = id;
-  followSel.value = id;
+  controls.showFollow(id);
   setCamera('follow');
 }
-
-const nextPaint = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
-
-let busy = false;
-/** A new game is being played in the background; the current one stays on screen and usable until it is ready. */
-let preparing = false;
-/** For the screenshot script: make the next New game or quality change fail, to check the page survives it. */
-let failNext: 'game' | 'quality' | null = null;
-const maybeFail = (what: 'game' | 'quality'): void => { if (failNext === what) { failNext = null; throw new Error(`test failure: ${what}`); } };
-/** Turn the controls on or off. Without a game only Seed and New game work (the rest need one). */
-const setControls = (on: boolean): void => {
-  document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('main button, main input, main select').forEach((b) => {
-    b.disabled = !on || (game === null && b !== seedInput && b.id !== 'newGame') || (preparing && (b === seedInput || b === newGameBtn));
-  });
-};
-/** A plain message under the picture (the current game stays as it was), or the picture's own message without one. */
-function showProblem(message: string): void {
-  if (game) {
-    loading.hidden = true;
-    problemEl.textContent = message;
-    problemEl.hidden = false;
-  } else {
-    loading.textContent = message;
-    loading.hidden = false;
-    problemEl.hidden = true;
-  }
-}
-
-const showQuality = (q: ArenaQuality): void =>
-  document.querySelectorAll<HTMLButtonElement>('[data-quality]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.quality === q)));
-
-/** Replace the renderer and the game scene for quality `q`, staying at the same moment of the game. */
-function rebuild(q: ArenaQuality, at: number): void {
-  quality = q;
-  showQuality(q);
-  if (game && game.gs.root.parent) dropScene(game.gs);
-  makeRenderer();
-  if (game) {
-    game.gs = buildScene(game.setup, game.playback.events);
-    game.scoreboard = game.gs.root.getObjectByName('scoreboard');
-    seekTo(at);
-  }
-}
-
-async function setQuality(q: ArenaQuality): Promise<void> {
-  if (busy || preparing || q === quality) return;
-  busy = true;
-  const before = quality, at = posNow();
-  slowEl.hidden = true;
-  problemEl.hidden = true;
-  slowSeconds = 0;
-  const wasPlaying = playing;
-  setPlaying(false);
-  setControls(false);
-  try {
-    await nextPaint();
-    rebuild(q, at);
-    maybeFail('quality');
-  } catch (e) {
-    console.error(e);
-    // Go back to the quality that worked; if even that fails, there is no picture to show.
-    try {
-      rebuild(before, at);
-      showProblem(`Sorry, quality ${q === 'high' ? 'High' : 'Low'} could not be set up on this computer. Staying on ${before === 'high' ? 'High' : 'Low'}.`);
-    } catch (e2) {
-      console.error(e2);
-      game = null;
-      showProblem('Sorry, the picture could not be set up on this computer. Try reloading the page.');
-    }
-  } finally {
-    busy = false;
-    setControls(true);
-    setPlaying(wasPlaying);
-  }
-}
-
-function fillFollow(setup: GameSetup): void {
-  const order = { G: 0, C: 1, LW: 2, RW: 3, LD: 4, RD: 5 } as const;
-  const posName = { G: 'Goalie', C: 'Centre', LW: 'Left wing', RW: 'Right wing', LD: 'Defence', RD: 'Defence' } as const;
-  const none = document.createElement('option');
-  none.value = '';
-  none.textContent = 'Choose a player…';
-  none.disabled = true;
-  followSel.replaceChildren(none);
-  for (const side of ['home', 'away'] as const) {
-    const team = setup[side];
-    const group = document.createElement('optgroup');
-    group.label = team.name;
-    // Skaters and the starting goalie (the only goalie on the ice).
-    const players = team.players.filter((p) => p.position !== 'G' || p.id === team.lines.goalie);
-    for (const p of players.sort((a, b) => order[a.position] - order[b.position] || a.number - b.number)) {
-      const o = document.createElement('option');
-      o.value = p.id;
-      o.textContent = `#${p.number} ${p.name} · ${posName[p.position]}`;
-      group.appendChild(o);
-    }
-    followSel.appendChild(group);
-  }
-}
-
-/** The seed typed in the field: a whole number, or null (with nothing silently put in its place). */
-function readSeed(): number | null {
-  const raw = seedInput.value.trim();
-  if (!/^-?\d+$/.test(raw)) return null;
-  const n = Number(raw);
-  return Number.isSafeInteger(n) ? n : null;
-}
-
-const makeWorker = (): WorkerLike => new RecordWorker() as unknown as WorkerLike;
-
-/**
- * Play a new game up front, in the background when the browser allows it. One at a time. The game on screen keeps
- * playing (and stays usable) until the new one is ready; everything for the new game is made before the old one is
- * let go, so if anything fails the game on screen stays as it was, with a plain message under it.
- */
-async function newGame(): Promise<void> {
-  if (busy || preparing) return;
-  const seed = readSeed();
-  if (seed === null) {
-    showProblem('The seed must be a whole number, like 42. Type one and press New game.');
-    return;
-  }
-  seedInput.value = String(seed); // the seed actually played, as the engine reads it
-  preparing = true;
-  setControls(true);
-  problemEl.hidden = true;
-  if (game) {
-    preparingEl.textContent = `Preparing a new game (seed ${seed})… This one keeps going until it is ready.`;
-    preparingEl.hidden = false;
-  } else {
-    loading.textContent = 'Simulating…';
-    loading.hidden = false;
-  }
-  try {
-    await nextPaint();
-    const setup: GameSetup = { home: generateTeam(seed * 2 + 1, 'Harbour City', 'HBR'), away: generateTeam(seed * 2 + 2, 'Northern Peaks', 'NPK'), seed, chemistry: [] };
-    const made = await recordGame(setup, { makeWorker });
-    // A quality change may have started while the game was being played; wait for it to finish.
-    while (busy) await nextPaint();
-    busy = true;
-    const playback = createCursor(setup, made.recording);
-    const defs = new Map<string, PlayerDef>();
-    for (const t of [setup.home, setup.away]) for (const p of t.players) defs.set(p.id, p);
-    const index = indexEvents(playback.events, defs, setup);
-    maybeFail('game');
-    const gs = buildScene(setup, playback.events);
-    // Made: let the old game go.
-    setPlaying(false);
-    const old = game;
-    game = { setup, playback, gs, defs, ...index, scoreboard: gs.root.getObjectByName('scoreboard') };
-    if (old) dropScene(old.gs);
-    simulateMs = made.ms;
-    simulatedIn = made.where;
-    workerProblem = made.workerProblem ?? null;
-    lastTarget = null; lastTargetName = null;
-    text($('bugHome'), setup.home.abbr);
-    text($('bugAway'), setup.away.abbr);
-    const title = $('title');
-    const h = document.createElement('span'); h.className = 'home'; h.textContent = setup.home.name;
-    const v = document.createElement('span'); v.className = 'vs'; v.textContent = ' vs ';
-    const a = document.createElement('span'); a.className = 'away'; a.textContent = setup.away.name;
-    title.replaceChildren(h, v, a);
-    fillFollow(setup);
-    followId = setup.home.lines.forwards[0]?.[1] ?? '';
-    drawTimeline();
-    setCamera(cameraName);
-    seekTo(0);
-    loading.hidden = true;
-  } catch (e) {
-    console.error(e);
-    showProblem(`Sorry, this game could not be set up (seed ${seed}). Try another seed and press New game.`);
-  } finally {
-    busy = false;
-    preparing = false;
-    preparingEl.hidden = true;
-    setControls(true);
-  }
-}
-let simulateMs = 0;
-let simulatedIn: 'worker' | 'main' | '' = '';
-let workerProblem: string | null = null;
 
 // ---------------------------------------------------------------------------------------------------------------
 // The real-time loop
 
 let lastT = 0;
 let manual = false;
-let frames = 0, fpsSince = 0, fps = 0, slowSeconds = 0;
+let frames = 0, fpsSince = 0, fps = 0;
 
 /** Play `displayDt` seconds of wall time: advance the game (if playing), move the figures and the camera. */
 function advance(displayDt: number): void {
-  if (!game) return;
+  const g = game();
+  if (!g) return;
   const gameDt = playing ? displayDt * speed : 0;
-  if (gameDt > 0) game.playback.advance(gameDt);
+  if (gameDt > 0) g.playback.advance(gameDt);
   if (gameDt > 0 || dirty) {
-    game.gs.update(game.playback.frame(), gameDt);
+    g.gs.update(g.playback.frame(), gameDt);
     aimCamera(gameDt);
     updateHud();
   }
@@ -611,128 +226,93 @@ function loop(t: number): void {
   if (manual) return;
   const dt = lastT === 0 ? 0 : Math.min(0.1, (t - lastT) / 1000); // a background tab must not make the game jump
   lastT = t;
-  if (!game || !renderer || contextLost || (!playing && !dirty)) { frames = 0; fpsSince = t; return; }
+  if (!game() || !renderer.canDraw() || (!playing && !dirty)) { frames = 0; fpsSince = t; return; }
   advance(dt);
-  renderer.render(scene, camera);
+  renderer.render();
   dirty = false;
   frames++;
   if (t - fpsSince >= 1000) {
     fps = playing ? (frames * 1000) / (t - fpsSince) : 0;
     frames = 0; fpsSince = t;
-    text(fpsEl, fps > 0 ? `${Math.round(fps)} fps` : '– fps');
-    slowSeconds = quality === 'high' && playing && fps > 0 && fps < SLOW_FPS ? slowSeconds + 1 : 0;
-    if (slowSeconds >= SLOW_SECONDS) slowEl.hidden = false;
+    hud.fps(fps);
+    slowSeconds = renderer.quality() === 'high' && playing && fps > 0 && fps < SLOW_FPS ? slowSeconds + 1 : 0;
+    if (slowSeconds >= SLOW_SECONDS) hud.slow(true);
   }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Controls and keys
-
-let scrubbing = false;
-playBtn.addEventListener('click', () => setPlaying(!playing));
-document.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => b.addEventListener('click', () => setSpeed(Number(b.dataset.speed))));
-document.querySelectorAll<HTMLButtonElement>('[data-camera]').forEach((b) => b.addEventListener('click', () => setCamera(b.dataset.camera as CameraName)));
-document.querySelectorAll<HTMLButtonElement>('[data-quality]').forEach((b) => b.addEventListener('click', () => { void setQuality(b.dataset.quality as ArenaQuality); }));
-$('toEnd').addEventListener('click', () => { if (game) { setPlaying(false); seekTo(game.playback.totalTicks); } });
-$('toLow').addEventListener('click', () => { void setQuality('low'); });
-$('newGame').addEventListener('click', () => { void newGame(); });
-seedInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') void newGame(); });
-followSel.addEventListener('change', () => setFollow(followSel.value));
-$<HTMLInputElement>('showFps').addEventListener('change', (e) => { fpsEl.hidden = !(e.target as HTMLInputElement).checked; });
-let settleTimer = 0;
-/** The drag ended (or was cancelled by the browser): play the moment in, now. */
-const endScrub = (): void => {
-  if (!scrubbing) return;
-  scrubbing = false;
-  clearTimeout(settleTimer);
-  seekTo(Number(scrub.value));
-};
-scrub.addEventListener('pointerdown', () => { scrubbing = true; });
-window.addEventListener('pointerup', endScrub);
-window.addEventListener('pointercancel', endScrub);
-scrub.addEventListener('pointercancel', endScrub);
-scrub.addEventListener('input', () => {
-  if (!scrubbing) { seekTo(Number(scrub.value)); return; } // keys on the time bar: one step, played in
-  // Dragging: a plain seek per step keeps up with the pointer; once it rests, the moment is played in.
-  seekTo(Number(scrub.value), false);
-  clearTimeout(settleTimer);
-  settleTimer = window.setTimeout(() => { if (scrubbing) seekTo(Number(scrub.value)); }, SCRUB_SETTLE_MS);
-});
-
-/** Space presses a focused button or ticks a focused checkbox, as everywhere else; elsewhere it plays or pauses. */
-const pressable = (t: EventTarget | null): boolean => t instanceof HTMLButtonElement || (t instanceof HTMLInputElement && t.type === 'checkbox');
-const typing = (t: EventTarget | null): boolean => t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && t.type !== 'range' && t.type !== 'checkbox');
-document.addEventListener('keydown', (e) => {
-  if (!game || busy || e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
-  if (e.key === ' ') { if (pressable(e.target)) return; e.preventDefault(); if (!e.repeat) setPlaying(!playing); return; }
-  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); seekTo(posNow() + ((e.key === 'ArrowRight' ? 1 : -1) * 5) / DT); return; }
-  const n = Number(e.key);
-  if (Number.isInteger(n) && n >= 1 && n <= CAMERA_NAMES.length) { e.preventDefault(); setCamera(CAMERA_NAMES[n - 1]!); }
-});
-// Space on the time bar must not scroll the page or reach anything else when the key comes up.
-document.addEventListener('keyup', (e) => { if (e.key === ' ' && !typing(e.target) && !pressable(e.target)) e.preventDefault(); });
-
-// ---------------------------------------------------------------------------------------------------------------
 // The hook for the screenshot script: everything frame by frame, with the real-time loop switched off.
 
-const project = (x: number, y: number, z: number): { x: number; y: number; inFrame: boolean } => {
-  const v = new THREE.Vector3(x, y, z).project(camera);
-  return { x: (v.x + 1) / 2, y: (1 - v.y) / 2, inFrame: Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1 && v.z < 1 };
-};
 const hook = {
-  ready: (): boolean => game !== null && loading.hidden && !busy && !preparing,
+  ready: (): boolean => game() !== null && !hud.loadingShown() && !life.busy() && !life.preparing(),
   seek: (tick: number): void => seekTo(tick),
   /** A plain seek, as while the time bar is dragged (no play-in). */
   seekPlain: (tick: number): void => seekTo(tick, false),
-  newGame: (): Promise<void> => newGame(),
-  preparing: (): boolean => preparing,
+  newGame: (): Promise<void> => life.newGame(),
+  preparing: (): boolean => life.preparing(),
   setCamera: (name: CameraName): void => setCamera(name),
   setFollow: (id: string): void => setFollow(id),
   setSpeed: (v: number): void => setSpeed(v),
-  setQuality: (q: ArenaQuality): Promise<void> => setQuality(q),
+  setQuality: (q: ArenaQuality): Promise<void> => life.setQuality(q),
   setManual: (on: boolean): void => { manual = on; lastT = 0; if (on) setPlaying(false); },
   setPlaying: (on: boolean): void => setPlaying(on),
   /** Play `seconds` of display time at the current speed in steps of 1/60 s (as if playing), without drawing. */
   step: (seconds: number): void => {
-    if (!game) return;
+    if (!game()) return;
     const was = playing;
     playing = true;
     for (let left = seconds; left > 1e-9; left -= 1 / 60) advance(Math.min(1 / 60, left));
     playing = was;
   },
-  renderOnce: (): void => { renderer?.render(scene, camera); },
-  grab: (): string => { renderer?.render(scene, camera); return canvas?.toDataURL('image/png') ?? ''; },
+  renderOnce: (): void => { renderer.render(); },
+  grab: (): string => renderer.grab(),
   fps: (): number => fps,
-  info: () => ({ tick: game?.playback.frame().tick ?? 0, totalTicks: game?.playback.totalTicks ?? 0, camera: cameraName, follow: followId, quality, simulateMs, simulatedIn, workerProblem, lastSeekMs, cam }),
+  info: () => {
+    const g = game(), m = life.made();
+    return { tick: g?.playback.frame().tick ?? 0, totalTicks: g?.playback.totalTicks ?? 0, camera: operator.camera, follow: followId, quality: renderer.quality(), simulateMs: m.simulateMs, simulatedIn: m.simulatedIn, workerProblem: m.workerProblem, lastSeekMs, cam: operator.cam };
+  },
   /** The ticks the engine cuts at (see cuts.ts). */
-  cuts: (): number[] => [...(game?.playback.cuts ?? [])],
-  /** Whether the latest update drew an engine cut (the camera cuts with it). */
-  cutNow: (): boolean => game?.gs.cutNow() ?? false,
+  cuts: (): number[] => [...(game()?.playback.cuts ?? [])],
+  /** Whether the latest update drew an engine cut (the camera cuts with it unless it was a jump in mid-play). */
+  cutNow: (): boolean => game()?.gs.cutNow() ?? false,
   /** A figure's drawn hip height (m). */
-  hipY: (id: string): number | null => game?.gs.figure(id)?.hipY ?? null,
+  hipY: (id: string): number | null => game()?.gs.figure(id)?.hipY ?? null,
   /** The event log, light: what the script needs to find moments. */
-  events: () => (game?.playback.events ?? []).map((e) => ({ type: e.type, tick: e.tick, period: e.period, clock: e.clock, side: e.side, playerId: e.playerId, otherId: e.otherId, pos: e.pos, detail: e.detail })),
-  state: (): GameState | null => (game ? structuredClone(game.playback.frame().next) : null),
-  result: () => (game ? { score: game.playback.result.score, team: game.playback.result.team, shots: { home: game.shots.home.length, away: game.shots.away.length } } : null),
+  events: () => (game()?.playback.events ?? []).map((e) => ({ type: e.type, tick: e.tick, period: e.period, clock: e.clock, side: e.side, playerId: e.playerId, otherId: e.otherId, pos: e.pos, detail: e.detail })),
+  state: (): GameState | null => { const g = game(); return g ? structuredClone(g.playback.frame().next) : null; },
+  result: () => {
+    const g = game();
+    if (!g) return null;
+    const shots = g.timeline.shotsAt(Infinity);
+    return { score: g.playback.result.score, team: g.playback.result.team, shots: { home: shots.home, away: shots.away } };
+  },
   /** Where the drawn puck is in the picture (fractions, 0,0 top left). */
-  puckOnScreen: () => { if (!game) return null; game.gs.puckWorld(puckV); return project(puckV.x, puckV.y, puckV.z); },
+  puckOnScreen: () => { const g = game(); if (!g) return null; g.gs.puckWorld(puckV); return renderer.project(puckV.x, puckV.y, puckV.z); },
   /** Where a figure is in the picture, and how tall he is drawn in pixels (feet to about head height). */
   figureOnScreen: (id: string) => {
-    const f = game?.gs.figure(id);
+    const f = game()?.gs.figure(id);
     if (!f || !f.onIce) return null;
-    const a = project(f.position.x, 0, f.position.z), b = project(f.position.x, 1.8, f.position.z);
-    return { ...a, px: Math.abs(a.y - b.y) * (canvas?.height ?? 0) };
+    const a = renderer.project(f.position.x, 0, f.position.z), b = renderer.project(f.position.x, 1.8, f.position.z);
+    return { ...a, px: Math.abs(a.y - b.y) * renderer.canvasHeight() };
   },
-  failNext: (what: 'game' | 'quality'): void => { failNext = what; },
-  hud: () => ({ bug: $('bug').innerText, when: $('when').textContent, summary: summaryEl.hidden ? null : summaryEl.textContent }),
+  failNext: (what: 'game' | 'quality'): void => life.failNext(what),
+  hud: () => hud.read(),
 };
 (window as unknown as { __watch: typeof hook }).__watch = hook;
+
+const NO_3D = 'This computer\'s browser cannot show 3D graphics, so the game cannot be shown here. Try another browser, or turn on "hardware acceleration" in this browser\'s settings.';
+
+/** No picture can be made: say so where the picture would be, and switch every control off. */
+function noGraphics(): void {
+  hud.loading(NO_3D);
+  controls.disableAll();
+}
 
 function start(): void {
   setSpeed(1);
   if (!canShow3d()) { noGraphics(); return; }
   try {
-    makeRenderer();
+    renderer.make('low');
   } catch (e) {
     // Reported plainly on the page; the error itself is for a developer's console only.
     console.warn(e);
@@ -740,6 +320,6 @@ function start(): void {
     return;
   }
   requestAnimationFrame(loop);
-  void newGame();
+  void life.newGame();
 }
 start();

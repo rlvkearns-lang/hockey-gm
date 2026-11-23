@@ -174,17 +174,17 @@ describe('engine cuts are drawn as cuts', () => {
    * drawn place of the goalies and the puck is at (or within a tick's normal motion of) its old or its new place,
    * and the frame the picture cuts on is the first of tick c.
    */
-  function across(c: number): { worstGoalie: number; worstPuck: number; cutFrames: number[] } {
+  function across(c: number): { worstGoalie: number; worstPuck: number; cutFrames: number[]; kinds: (string | null)[] } {
     const sc = createGameScene(game);
     pb.seek(c - 1);
     const before = structuredClone(pb.frame().prev), after = structuredClone(pb.frame().next);
     seekScene(pb, sc, c - 3);
     let worstGoalie = 0, worstPuck = 0;
-    const cutFrames: number[] = [];
+    const cutFrames: number[] = [], kinds: (string | null)[] = [];
     for (let i = 0; i < 6 * 8; i++) {
       pb.advance(1 / 240); sc.update(pb.frame(), 1 / 240);
       const f = pb.frame();
-      if (sc.cutNow()) cutFrames.push(f.tick);
+      if (sc.cutNow()) { cutFrames.push(f.tick); kinds.push(sc.cutKind()); }
       if (f.tick !== c - 1 && f.tick !== c) continue; // the two ticks either side of the cut
       for (const side of ['home', 'away'] as const) {
         const g = sc.figure(before.goalies[side].id)!.position;
@@ -195,7 +195,7 @@ describe('engine cuts are drawn as cuts', () => {
       worstPuck = Math.max(worstPuck, Math.min(Math.hypot(p.x - o.x, p.z - o.y), Math.hypot(p.x - n.x, p.z - n.y)));
     }
     sc.dispose();
-    return { worstGoalie, worstPuck, cutFrames };
+    return { worstGoalie, worstPuck, cutFrames, kinds };
   }
 
   it('at a period break the goalies change ends in one frame, not across centre ice', () => {
@@ -209,6 +209,7 @@ describe('engine cuts are drawn as cuts', () => {
     expect(r.worstGoalie).toBeLessThan(0.3);
     expect(r.worstPuck).toBeLessThan(1);
     expect(r.cutFrames).toEqual([c]);
+    expect(r.kinds).toEqual(['ends']);
   });
 
   it('at a whistle the puck goes to the dot in one frame, never drawn half way', () => {
@@ -224,6 +225,7 @@ describe('engine cuts are drawn as cuts', () => {
     expect(r.worstPuck).toBeLessThan(0.3);
     expect(r.worstGoalie).toBeLessThan(0.3);
     expect(r.cutFrames).toEqual([c]);
+    expect(r.kinds).toEqual(['restart']);
   });
 });
 

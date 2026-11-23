@@ -69,6 +69,20 @@ export function isCut(a: CutProbe, b: Readonly<GameState>): boolean {
   return false;
 }
 
+/**
+ * What kind of cut going from probe `a` to state `b` is, or null for none: `restart` (play restarts at a faceoff with
+ * the puck on the dot), `ends` (the teams change ends at a period start) or `jump` (something moved further than it
+ * can in the middle of play: the engine handing a loose puck to a race winner, say). A camera cuts with the first two;
+ * across a jump it may ease.
+ */
+export type CutKind = 'restart' | 'ends' | 'jump';
+export function cutKind(a: CutProbe, b: Readonly<GameState>): CutKind | null {
+  if (!isCut(a, b)) return null;
+  if (b.attackDir.home !== a.attack) return 'ends'; // a period start restarts play too: the change of ends says more
+  if (b.phase === 'faceoffSetup' && a.phase !== 'faceoffSetup') return 'restart';
+  return 'jump';
+}
+
 /** Whether the puck jumped between probe `a` and state `b` (or play restarted at a faceoff, which re-spots it). */
 export function puckJumped(a: CutProbe, b: Readonly<GameState>): boolean {
   if (a.tick < 0 || b.tick <= a.tick) return false;

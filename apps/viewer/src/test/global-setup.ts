@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GlobalSetupContext } from 'vitest/node';
@@ -12,7 +12,8 @@ import { OTHER_SEEDS, SHARED_SEED, testSetup } from './setup-of';
  *
  * The file is kept between runs under node_modules/.cache, named by a hash of every source the recording depends on
  * (the engine's sources and the viewer's playback, cut and setup code), so a run after any change to them records
- * afresh and an unchanged run skips three seconds of simulation.
+ * afresh and an unchanged run skips three seconds of simulation. Files are written under a temporary name and renamed,
+ * and the directory is never deleted, so parallel runs cannot pull a cache out from under each other.
  */
 const here = dirname(fileURLToPath(import.meta.url));
 const viewer = resolve(here, '../..');
@@ -30,6 +31,29 @@ const sources = (): string[] => {
   return out;
 };
 
+/**
+ * Write `text` to `file` through a temporary name of this run's own and a rename, so another run reading the cache at
+ * the same moment (parallel local runs) sees the old file or the whole new one, never half of one.
+ */
+function writeAtomically(file: string, text: string): void {
+  const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, file);
+}
+
+/**
+ * Remove cached recordings of other source versions that nobody has touched for a day (no run lasts that long, so
+ * none is in use); the directory itself and anything newer are left alone.
+ */
+function pruneStale(dir: string, key: string): void {
+  const dayAgo = Date.now() - 24 * 3600 * 1000;
+  for (const f of readdirSync(dir)) {
+    if (f.includes(key)) continue;
+    const p = join(dir, f);
+    try { if (statSync(p).mtimeMs < dayAgo) rmSync(p, { force: true }); } catch { /* another run removed it first */ }
+  }
+}
+
 export default function setup({ provide }: GlobalSetupContext): void {
   const hash = createHash('sha256');
   for (const f of sources()) hash.update(f).update(readFileSync(f));
@@ -39,14 +63,14 @@ export default function setup({ provide }: GlobalSetupContext): void {
   const otherFiles: Record<number, string> = {};
   for (const seed of OTHER_SEEDS) otherFiles[seed] = join(dir, `recording-${key}-seed${seed}.json`);
   if (!existsSync(file) || !existsSync(seenFile) || OTHER_SEEDS.some((s) => !existsSync(otherFiles[s]!))) {
-    rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     // Which ticks onStep saw, for playback.test.ts (this run is the onStep run createPlayback makes).
     let seen = 0, inOrder = true;
     const rec = record(testSetup(SHARED_SEED), { onStep: (st) => { if (st.tick !== seen) inOrder = false; seen++; } });
-    writeFileSync(seenFile, JSON.stringify({ count: seen, inOrder }));
-    writeFileSync(file, JSON.stringify(rec));
-    for (const seed of OTHER_SEEDS) writeFileSync(otherFiles[seed]!, JSON.stringify(record(testSetup(seed))));
+    writeAtomically(seenFile, JSON.stringify({ count: seen, inOrder }));
+    writeAtomically(file, JSON.stringify(rec));
+    for (const seed of OTHER_SEEDS) writeAtomically(otherFiles[seed]!, JSON.stringify(record(testSetup(seed))));
+    pruneStale(dir, key);
   }
   provide('recordingFile', file);
   provide('otherRecordingFiles', otherFiles);

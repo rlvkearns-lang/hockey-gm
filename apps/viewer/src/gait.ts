@@ -1,8 +1,12 @@
 import type { SkaterState } from '@hockey/engine';
 import type { BodyDims } from './body';
+import { armReach, fitBody, LIFT_FADE, lerp3, mixRawParts, type RawLeg, type RawPose, type SkaterPose, type Vec3 } from './pose-mix';
+
+export { hipJoint, shoulderJoint, torsoRotate, type ArmPose, type LegPose, type Pose, type SkaterPose, type Vec3 } from './pose-mix';
 
 /**
- * Skating gait and pose maths (pure: no three.js, no DOM).
+ * Skating gait (pure: no three.js, no DOM): the style machine (stepGait) and the key-pose generators of each style
+ * (rawPose), mixed into the raw skating pose (gaitRaw) that the body fit (pose-mix.ts fitBody) turns into a pose.
  *
  * Body frame: x forward (the way he faces), y up, z to his right; the origin is on the ice directly under his pelvis.
  * Angles in radians. Every yaw (footYaw, Pose.yaw, stickAngle, a travel direction) is measured in the ice plane from
@@ -12,8 +16,6 @@ import type { BodyDims } from './body';
  * Engine to body frame: engine x is world X and engine y is world Z (up is world Y), so with engine facing f his
  * forward is engine (cos f, sin f) and his right (+z) is engine (-sin f, cos f). A rising facing turns him toward +z.
  */
-
-export type Vec3 = { x: number; y: number; z: number };
 
 /**
  * His motion in his own frame. `forward` and `lateral` are the velocity components along his facing and toward +z
@@ -58,41 +60,6 @@ export type GaitState = {
   from?: readonly MixPart[];
   blendT?: number;
   blendDur?: number;
-};
-
-/**
- * `foot` is the point where the blade meets the ice (y = 0 when on the ice); the ankle is `skate` straight above it.
- * `footYaw` is the skate's heading relative to his facing.
- */
-export type LegPose = { foot: Vec3; footYaw: number; lifted: boolean };
-export type ArmPose = { hand: Vec3 };
-/**
- * `hipY` is the pelvis (hip joint line) height. `yaw` turns the pelvis and hip sockets (a hockey stop turns the hips);
- * `pitch` then `roll` tilt the torso above the pelvis (see torsoRotate); the torso does not take the pelvis yaw.
- * The stick is held at its butt by the top hand, arms[1] (a left shot; mirror z for a right shot): from that hand the
- * shaft runs at heading `stickAngle` and descends so its end, `stick` metres away, reaches the ice: direction
- * (cos h cos t, -sin t, sin h cos t) with sin t = min(1, hand.y / stick). arms[0] is on the shaft when both hands hold
- * the stick, or swinging free.
- */
-export type Pose = {
-  hipY: number; pitch: number; roll: number; yaw: number; legs: [LegPose, LegPose]; arms: [ArmPose, ArmPose]; stickAngle: number;
-  /** Shoulders turned about the torso's long axis (heading convention), applied before pitch and roll; 0 if absent. */
-  twist?: number;
-  /** Head turned (heading convention) from the torso toward where he looks; 0 if absent. */
-  look?: number;
-  /** Head pitched down from its usual eyes-up carriage toward the ice ahead (rad, positive down); 0 if absent. */
-  lookDown?: number;
-  /**
-   * The heel of the stick blade (body frame), where the shaft ends: on the ice (y = 0) unless he carries the stick
-   * with the blade up. The shaft runs from the top hand straight to it, so a rig should aim the shaft at this point
-   * rather than assume the heel reaches the ice. poseOf always sets it; mirror its z for a right shot.
-   */
-  blade?: Vec3;
-  /**
-   * How far down the shaft from the butt the top hand holds it (m); 0 if absent. The shaft then runs from the hand
-   * `stick - grip` to the heel, with the butt `grip` back up the shaft behind the hand.
-   */
-  grip?: number;
 };
 
 /**
@@ -184,7 +151,7 @@ export const GAIT = {
    */
   skateFollow: 1.75,
   /** Height (m) over which a lifting skate stops holding the pelvis down. */
-  liftFade: 0.06,
+  liftFade: LIFT_FADE,
 } as const;
 
 const TAU = 2 * Math.PI;
@@ -199,9 +166,6 @@ const sign = (v: number): 1 | -1 => (v < 0 ? -1 : 1);
 const fin = (v: number): number => (Number.isFinite(v) ? v : 0);
 const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
 const add = (a: Vec3, b: Vec3): Vec3 => v3(a.x + b.x, a.y + b.y, a.z + b.z);
-const sub = (a: Vec3, b: Vec3): Vec3 => v3(a.x - b.x, a.y - b.y, a.z - b.z);
-const mul = (a: Vec3, k: number): Vec3 => v3(a.x * k, a.y * k, a.z * k);
-const len = (a: Vec3): number => Math.hypot(a.x, a.y, a.z);
 /** Turn a body-frame point by heading h about the vertical (x toward +z). */
 const turn = (v: Vec3, h: number): Vec3 => { const c = Math.cos(h), s = Math.sin(h); return v3(v.x * c - v.z * s, v.y, v.x * s + v.z * c); };
 
@@ -424,56 +388,7 @@ export function stepGait(g: GaitState, motion: Motion, dt: number, carrying?: bo
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Pose
-
-/**
- * A style's pose before it is fitted to the body. The top (stick) hand is placed from the pelvis centre (it rides at
- * the hip on the side away from the blade); the free hand, when it swings, from its own shoulder. `blade` is where on
- * the ice the stick should point (body frame, from the pelvis): the fit aims the shaft from the top hand toward it.
- */
-type RawLeg = { foot: Vec3; footYaw: number };
-type RawPose = {
-  hipY: number; pitch: number; roll: number; yaw: number; twist: number; look: number;
-  legs: [RawLeg, RawLeg];
-  /** Top (stick) hand, arms[1], from the pelvis centre; free hand, arms[0], from the left shoulder. */
-  top: Vec3; freeRel: Vec3;
-  /** 1: the left hand is on the shaft; 0: it swings free at freeRel. */
-  twoHands: number;
-  /** Where the stick points on the ice (x, z from the pelvis; y unused). */
-  blade: Vec3;
-  /** Head pitched down toward the ice (Pose.lookDown); 0 if absent. */
-  lookDown?: number;
-  /** Height of the blade heel off the ice (m); 0 if absent (the shaft reaches the ice). */
-  bladeUp?: number;
-};
-
-const armReach = (d: BodyDims): number => d.upperArm + d.forearm;
-/** Share of the stick between its butt and the top hand. */
-const STICK_GRIP = 0.14;
-
-/**
- * Rotate a torso-frame vector by the torso's twist (about its own long axis, heading convention), then pitch, then
- * roll: Rx(roll) * Rz(-pitch) * Ry(-twist).
- */
-export function torsoRotate(v: Vec3, pitch: number, roll: number, twist = 0): Vec3 {
-  const ct = Math.cos(twist), st = Math.sin(twist);
-  const tx = v.x * ct - v.z * st, tz = v.x * st + v.z * ct;
-  const cp = Math.cos(pitch), sp = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
-  const x = tx * cp + v.y * sp, y = -tx * sp + v.y * cp, z = tz;
-  return v3(x, y * cr - z * sr, y * sr + z * cr);
-}
-
-/** Hip joint (side 0 left, 1 right) in the body frame: on the pelvis line at hipY, turned by the pelvis yaw. */
-export function hipJoint(p: Pick<Pose, 'hipY' | 'yaw'>, side: 0 | 1, d: BodyDims): Vec3 {
-  const w = ((side === 0 ? -1 : 1) * d.hipWidth) / 2;
-  return v3(-w * Math.sin(p.yaw), p.hipY, w * Math.cos(p.yaw));
-}
-
-/** Shoulder joint (side 0 left, 1 right): torso up from the pelvis centre, twisted, then tilted by pitch then roll. */
-export function shoulderJoint(p: Pick<Pose, 'hipY' | 'pitch' | 'roll'> & { twist?: number }, side: 0 | 1, d: BodyDims): Vec3 {
-  const w = ((side === 0 ? -1 : 1) * d.shoulderWidth) / 2;
-  return add(v3(0, p.hipY, 0), torsoRotate(v3(0, d.torso, w), p.pitch, p.roll, p.twist ?? 0));
-}
+// Key poses (raw: before the body fit, pose-mix.ts)
 
 /** An arm hanging at angle `a` from straight down (forward positive), `k` of full reach, `out` sideways share. */
 const swingArm = (a: number, k: number, out: number, R: number): Vec3 => v3(R * k * Math.sin(a), -R * k * Math.cos(a), R * out);
@@ -725,7 +640,8 @@ export type PoseOptions = {
   handle?: { dx: number; dz: number };
 };
 
-function rawPose(style: Style, g: GaitState, side: 1 | -1, m: Motion, d: BodyDims, o: PoseOptions): RawPose {
+/** The raw key pose of one style (and side) for gait `g` and motion `m`, before the body fit. */
+export function rawPose(style: Style, g: GaitState, side: 1 | -1, m: Motion, d: BodyDims, o: PoseOptions): RawPose {
   const acc = fin(g.acc ?? m.accelAlong);
   const travel = fin(g.travel ?? travelYawOf(m));
   const phase = fin(g.phase), lean = fin(g.lean), roll = fin(g.roll), speed = fin(g.speed ?? m.speed);
@@ -742,97 +658,6 @@ function rawPose(style: Style, g: GaitState, side: 1 | -1, m: Motion, d: BodyDim
 }
 
 /**
- * Weighted mix of raw poses (weights sum to 1). Every style's yaws are continuous and stay inside (-PI, PI), so they
- * mix as plain numbers (a short-way-round blend would be ambiguous between skate headings far apart).
- */
-function mixRaw(parts: { raw: RawPose; w: number }[]): RawPose {
-  const sum = (f: (r: RawPose) => number): number => parts.reduce((t, p) => t + f(p.raw) * p.w, 0);
-  const sum3 = (f: (r: RawPose) => Vec3): Vec3 => v3(sum((r) => f(r).x), sum((r) => f(r).y), sum((r) => f(r).z));
-  const leg = (i: 0 | 1): RawLeg => ({ foot: sum3((r) => r.legs[i].foot), footYaw: sum((r) => r.legs[i].footYaw) });
-  return {
-    hipY: sum((r) => r.hipY), pitch: sum((r) => r.pitch), roll: sum((r) => r.roll), yaw: sum((r) => r.yaw),
-    twist: sum((r) => r.twist), look: sum((r) => r.look), lookDown: sum((r) => r.lookDown ?? 0),
-    legs: [leg(0), leg(1)],
-    top: sum3((r) => r.top), freeRel: sum3((r) => r.freeRel), twoHands: sum((r) => r.twoHands),
-    blade: sum3((r) => r.blade), bladeUp: sum((r) => r.bladeUp ?? 0),
-  };
-}
-
-/** Pull `p` to within `r` of `c`. */
-const within = (p: Vec3, c: Vec3, r: number): Vec3 => { const v = sub(p, c), l = len(v); return l > r ? add(c, mul(v, r / l)) : p; };
-
-/** Fit a raw pose to the body: lowest skate on the ice, hips low enough for the planted legs, hands within reach. */
-function fit(raw: RawPose, d: BodyDims): SkaterPose {
-  const maxLeg = 0.985 * (d.thigh + d.shin);
-  const feet = raw.legs.map((l) => ({ ...l.foot }));
-  const minY = Math.min(feet[0]!.y, feet[1]!.y);
-  for (const f of feet) f.y = Math.max(0, f.y - minY);
-  const yaw = raw.yaw;
-  const want = Math.max(0.1, raw.hipY);
-  // Each skate on the ice holds the pelvis down to where its ankle is in reach (one further out than a leg can reach
-  // is drawn in toward the hip). A lifting skate lets go gradually over its first liftFade of height, so the pelvis
-  // rises smoothly as the weight comes off it.
-  let hipY = want;
-  for (const i of [0, 1] as const) {
-    const f = feet[i]!, hip = hipJoint({ hipY: want, yaw }, i, d);
-    const hx = f.x - hip.x, hz = f.z - hip.z, h = Math.hypot(hx, hz);
-    const ankleY = f.y + d.skate;
-    let limit: number;
-    if (h >= maxLeg * 0.999) {
-      if (f.y === 0) { const k = (maxLeg * 0.999) / h; f.x = hip.x + hx * k; f.z = hip.z + hz * k; }
-      limit = ankleY;
-    } else limit = ankleY + Math.sqrt(maxLeg * maxLeg - h * h);
-    hipY = Math.min(hipY, lerp(limit, want, smooth(f.y / GAIT.liftFade)));
-  }
-  hipY = Math.max(0.1, hipY);
-  // Skates still out of reach (only lifted ones can be) are drawn in toward the hip.
-  for (const i of [0, 1] as const) {
-    const hip = hipJoint({ hipY, yaw }, i, d);
-    const ankle = within(add(feet[i]!, v3(0, d.skate, 0)), hip, maxLeg);
-    feet[i] = v3(ankle.x, Math.max(0, ankle.y - d.skate), ankle.z);
-  }
-  // Hands: the top hand holds the stick butt at the hip; the other is on the shaft or swinging free.
-  const body = { hipY, pitch: raw.pitch, roll: raw.roll, twist: raw.twist };
-  const reach = armReach(d) * 0.98;
-  const lift = (p: Vec3, sh: Vec3): Vec3 => within(p.y < 0.03 ? v3(p.x, 0.03, p.z) : p, sh, reach);
-  const sl = shoulderJoint(body, 0, d), sr = shoulderJoint(body, 1, d);
-  const top = lift(add(v3(0, hipY, 0), raw.top), sr);
-  const stickAngle = Math.atan2(raw.blade.z - top.z, raw.blade.x - top.x);
-  // The top hand chokes up a little, so the blade is carried about a metre in front rather than at full stick length.
-  // The shaft descends from it to the heel, on the ice or raised by bladeUp.
-  const grip = STICK_GRIP * d.stick, below = d.stick - grip;
-  const up = clamp(fin(raw.bladeUp ?? 0), 0, Math.max(0, top.y));
-  const sinT = Math.min(1, (top.y - up) / below), cosT = Math.sqrt(1 - sinT * sinT);
-  const shaft = v3(Math.cos(stickAngle) * cosT, -sinT, Math.sin(stickAngle) * cosT);
-  const heel = add(top, mul(shaft, below));
-  const onShaft = add(top, mul(shaft, shaftGrip(top, shaft, sl, reach, 0.36 * d.stick)));
-  const free = add(sl, raw.freeRel);
-  const bottom = lift(lerp3(free, onShaft, clamp01(raw.twoHands)), sl);
-  const leg = (i: 0 | 1): LegPose => ({ foot: feet[i]!, footYaw: raw.legs[i].footYaw, lifted: feet[i]!.y > 0.01 });
-  return {
-    hipY, pitch: raw.pitch, roll: raw.roll, yaw, twist: raw.twist, look: raw.look, lookDown: fin(raw.lookDown ?? 0),
-    legs: [leg(0), leg(1)], arms: [{ hand: bottom }, { hand: top }], stickAngle, grip,
-    blade: v3(heel.x, Math.max(0, heel.y), heel.z),
-  };
-}
-
-const lerp3 = (a: Vec3, b: Vec3, t: number): Vec3 => v3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
-
-/** Distance down the shaft for the lower hand: as near `want` as the arm (shoulder `sh`, reach `r`) allows. */
-function shaftGrip(top: Vec3, dir: Vec3, sh: Vec3, r: number, want: number): number {
-  const toSh = sub(sh, top);
-  const tc = toSh.x * dir.x + toSh.y * dir.y + toSh.z * dir.z;
-  const d2 = len(toSh) ** 2 - tc * tc;
-  if (d2 >= r * r) return Math.max(0, tc);
-  const half = Math.sqrt(r * r - d2);
-  const lo = Math.max(0, tc - half);
-  return clamp(want, lo, Math.max(lo, tc + half)); // never above the butt: continuous with the branch above
-}
-
-/** A pose from poseOf: always says where the blade is and how far the head is down. */
-export type SkaterPose = Pose & { blade: Vec3; lookDown: number };
-
-/**
  * With the puck (share k, 0..1): both hands on the stick, the blade on the ice, and the stickhandle moving the blade.
  */
 function withPuck(raw: RawPose, k: number, handle: PoseOptions['handle']): RawPose {
@@ -845,11 +670,27 @@ function withPuck(raw: RawPose, k: number, handle: PoseOptions['handle']): RawPo
   };
 }
 
-export function poseOf(g: GaitState, motion: Motion, d: BodyDims, opts: PoseOptions = {}): SkaterPose {
+/**
+ * The raw skating pose (before the body fit): the styles shown, mixed by their shares, with the puck carried. This is
+ * the base layer the animator's overlays modify before fitBody.
+ */
+export function gaitRaw(g: GaitState, motion: Motion, d: BodyDims, opts: PoseOptions = {}): RawPose {
   const m = sane(motion);
   const parts = shownMix(g).map((p) => ({ raw: rawPose(p.style, g, p.side, m, d, opts), w: p.w }));
   const k = smooth(g.puck !== undefined ? fin(g.puck) : opts.hasPuck === true ? 1 : 0);
-  return fit(withPuck(parts.length === 1 ? parts[0]!.raw : mixRaw(parts), k, opts.handle), d);
+  return withPuck(parts.length === 1 ? parts[0]!.raw : mixRawParts(parts), k, opts.handle);
+}
+
+/** The skating pose: the gait's raw pose fitted to the body. */
+export function poseOf(g: GaitState, motion: Motion, d: BodyDims, opts: PoseOptions = {}): SkaterPose {
+  return fitBody(gaitRaw(g, motion, d, opts), d);
+}
+
+/** The share (0..1) of `style` in the pose shown now (both sides counted). */
+export function styleShare(g: GaitState, style: Style): number {
+  let w = 0;
+  for (const p of shownMix(g)) if (p.style === style) w += p.w;
+  return w;
 }
 
 /**

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { GameSetup } from '@hockey/engine';
 import type { Playback } from './playback';
 import { createGameScene } from './scene';
+import { buildTimeline } from './timeline';
 import { sharedPlayback } from './test/game';
 
 describe('game scene', () => {
@@ -96,6 +97,17 @@ describe('game scene', () => {
     for (const l of lights) { const rt = new THREE.WebGLRenderTarget(4, 4); rt.addEventListener('dispose', () => { freed++; }); l.shadow!.map = rt; }
     sc.dispose();
     expect(freed).toBe(lights.length);
+  });
+  it('a scene given the game\'s timeline draws exactly what one given its event log does', () => {
+    const a = createGameScene(game, { events: pb.events }), b = createGameScene(game, { timeline: buildTimeline(pb.events) });
+    pb.seek(30000); a.reset(); b.reset();
+    for (let i = 0; i < 300; i++) {
+      pb.advance(1 / 60); a.update(pb.frame(), 1 / 60); b.update(pb.frame(), 1 / 60);
+      for (const s of pb.frame().prev.skaters) expect(b.figure(s.id)!.hipY).toBe(a.figure(s.id)!.hipY);
+      for (const g of [pb.frame().prev.goalies.home, pb.frame().prev.goalies.away]) expect(b.figure(g.id)!.hipY).toBe(a.figure(g.id)!.hipY);
+      expect(b.puckWorld().equals(a.puckWorld())).toBe(true);
+    }
+    a.dispose(); b.dispose();
   });
   it('the page can set how large the puck is drawn; its shadow scales with it', () => {
     const sc = createGameScene(game);
