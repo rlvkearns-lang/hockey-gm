@@ -2,6 +2,8 @@ import { generateTeam, type GameSetup } from '@hockey/engine';
 
 /** The seed of the game the scene and playback tests share (recorded once per run by global-setup.ts). */
 export const SHARED_SEED = 5;
+/** The other games recorded once per run, for tests that need more than one (e.g. picture.test.ts, timeline.test.ts). */
+export const OTHER_SEEDS = [42] as const;
 
 export const testSetup = (seed: number): GameSetup => {
   const home = generateTeam(seed * 2 + 1, 'Harbour City', 'HBR');

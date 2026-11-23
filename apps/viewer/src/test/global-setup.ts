@@ -4,10 +4,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GlobalSetupContext } from 'vitest/node';
 import { record } from '../playback';
-import { SHARED_SEED, testSetup } from './setup-of';
+import { OTHER_SEEDS, SHARED_SEED, testSetup } from './setup-of';
 
 /**
- * Plays the one game the scene and playback tests share, once per test run, and leaves it in a file for every test
+ * Plays the games the scene and playback tests share (SHARED_SEED, and OTHER_SEEDS for the tests that need a second), once per test run, and leaves it in a file for every test
  * file to read (test files run in separate workers, so a module-level cache would not be shared).
  *
  * The file is kept between runs under node_modules/.cache, named by a hash of every source the recording depends on
@@ -36,7 +36,9 @@ export default function setup({ provide }: GlobalSetupContext): void {
   const dir = resolve(viewer, '../../node_modules/.cache/hockey-viewer-tests');
   const key = hash.digest('hex').slice(0, 16);
   const file = join(dir, `recording-${key}.json`), seenFile = join(dir, `onstep-${key}.json`);
-  if (!existsSync(file) || !existsSync(seenFile)) {
+  const otherFiles: Record<number, string> = {};
+  for (const seed of OTHER_SEEDS) otherFiles[seed] = join(dir, `recording-${key}-seed${seed}.json`);
+  if (!existsSync(file) || !existsSync(seenFile) || OTHER_SEEDS.some((s) => !existsSync(otherFiles[s]!))) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     // Which ticks onStep saw, for playback.test.ts (this run is the onStep run createPlayback makes).
@@ -44,7 +46,9 @@ export default function setup({ provide }: GlobalSetupContext): void {
     const rec = record(testSetup(SHARED_SEED), { onStep: (st) => { if (st.tick !== seen) inOrder = false; seen++; } });
     writeFileSync(seenFile, JSON.stringify({ count: seen, inOrder }));
     writeFileSync(file, JSON.stringify(rec));
+    for (const seed of OTHER_SEEDS) writeFileSync(otherFiles[seed]!, JSON.stringify(record(testSetup(seed))));
   }
   provide('recordingFile', file);
+  provide('otherRecordingFiles', otherFiles);
   provide('onStepSeen', JSON.parse(readFileSync(seenFile, 'utf8')) as { count: number; inOrder: boolean });
 }
