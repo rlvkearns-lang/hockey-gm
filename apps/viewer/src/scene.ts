@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { DT, type GameSetup, type GameState, type PlayerDef, type Side, type SkaterState } from '@hockey/engine';
-import { buildArena, type ArenaQuality } from './arena';
+import { buildArena, TEAM_COLORS as ARENA_TEAM_COLORS, type ArenaQuality } from './arena';
 import { bodyDims, type BodyDims } from './body';
 import { carryPoint, stepCarry, stickhandle, type CarryBlend, type IcePoint } from './carry';
 import { initialGait, poseOf, stepGait, type GaitState, type Motion, type PoseOptions, type Vec3 } from './gait';
@@ -42,10 +42,7 @@ export type GameScene = {
 export type FigureView = { readonly position: THREE.Vector3; readonly facing: number; readonly onIce: boolean };
 
 /** Team colours until the league stage brings real ones: home in a dark red jersey, away in white with blue trim. */
-export const TEAM_COLORS: Record<Side, RigColors> = {
-  home: { jersey: 0x9e1b2a, trim: 0xf2f3f5, pants: 0x17181b },
-  away: { jersey: 0xf2f3f5, trim: 0x1d4fa8, pants: 0x1b2a4a },
-};
+export const TEAM_COLORS: Record<Side, RigColors> = ARENA_TEAM_COLORS;
 
 /** The puck is drawn this much larger than a real one (7.62 cm across, 2.54 cm thick) so it reads from up high. */
 export const PUCK_SCALE = 1.5;
@@ -192,9 +189,11 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
       fig.rig.root.visible = false;
       return;
     }
-    // On the ice at the earlier tick. If the engine takes him off at the later one, hold him where he was.
+    // On the ice at the earlier tick. If the engine takes him off at the later one (it puts him on the bench at the
+    // door), he carries on along his velocity for that last tick, so he is never drawn skating in place.
     const n = nAny && nAny.onIce ? nAny : p;
-    const x = lerp(p.pos.x, n.pos.x, a), z = lerp(p.pos.y, n.pos.y, a);
+    const x = p === n ? p.pos.x + p.vel.x * a * DT : lerp(p.pos.x, n.pos.x, a);
+    const z = p === n ? p.pos.y + p.vel.y * a * DT : lerp(p.pos.y, n.pos.y, a);
     const facing = p === n ? p.facing : lerpAngle(p.facing, n.facing, a);
     if (!view.onIce) fig.fresh = true;
     const m = motionOf(fig, p, n, a, facing);
@@ -285,7 +284,10 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
       // He let it go during this tick: slide from his blade to the engine's puck by the tick's end.
       // Where it was drawn when he let it go is kept relative to his blade, so it leaves from there.
       if (!release.active || release.tick !== frame.tick || release.id !== A) {
-        release.active = true; release.tick = frame.tick; release.id = A!; release.a0 = Math.min(a, 0.999);
+        // The slide starts at the previous frame's moment (`dt` of game time ago, where the puck was last drawn), so
+        // the first frame that sees the release already moves it, at any frame rate. With dt = 0 (paused) it starts
+        // now and moves once play resumes.
+        release.active = true; release.tick = frame.tick; release.id = A!; release.a0 = Math.min(a, 0.999) - dt / DT;
         release.ox = drawn.x - bladeA.x; release.oz = drawn.z - bladeA.z;
       }
       // It heads straight for where the engine's puck is at the tick's end, at an even speed: the shortest slide.

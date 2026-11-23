@@ -20,12 +20,28 @@ import type { RigColors } from './rig';
 export type ArenaQuality = 'low' | 'high';
 export type ArenaTeams = { home: { abbr: string; colors: RigColors }; away: { abbr: string; colors: RigColors } };
 
-const DEFAULT_TEAMS: ArenaTeams = {
-  home: { abbr: 'HOME', colors: { jersey: 0x9e1b2a, trim: 0xf2f3f5, pants: 0x1a1a1a } },
-  away: { abbr: 'AWAY', colors: { jersey: 0xf2f3f5, trim: 0x1b4fa0, pants: 0x1c2438 } },
+/**
+ * The two teams' colours until the league stage brings real ones (scene.ts re-exports them): home in a dark red
+ * jersey with white trim, away in white with blue trim. Kept here, the one place, so the arena's defaults match.
+ */
+export const TEAM_COLORS: Record<'home' | 'away', RigColors> = {
+  home: { jersey: 0x9e1b2a, trim: 0xf2f3f5, pants: 0x17181b },
+  away: { jersey: 0xf2f3f5, trim: 0x1d4fa8, pants: 0x1b2a4a },
 };
+const DEFAULT_TEAMS: ArenaTeams = { home: { abbr: 'HOME', colors: TEAM_COLORS.home }, away: { abbr: 'AWAY', colors: TEAM_COLORS.away } };
+
+/** Relative luminance (0 black .. 1 white) of an sRGB hex colour. */
+function brightness(hex: number): number {
+  const lin = (v: number): number => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  return 0.2126 * lin((hex >> 16) & 255) + 0.7152 * lin((hex >> 8) & 255) + 0.0722 * lin(hex & 255);
+}
+/** A colour scaled toward black by `k` (0..1). */
+const shade = (hex: number, k: number): number =>
+  (Math.round(((hex >> 16) & 255) * k) << 16) | (Math.round(((hex >> 8) & 255) * k) << 8) | Math.round((hex & 255) * k);
 
 const BOARD_H = 1.07;
+/** The rink's centre red line width and centre dot radius (rink.ts), left showing through the crest. */
+const RED_LINE_W = 0.305, CENTRE_DOT_R = 0.15;
 /** From the boards out to where the stands begin (room for the benches), and the height of the first row. */
 const STANDS_FROM = 3.6, FIRST_ROW_Y = 1.4;
 /** Depth and top height of the stands on the far side and the ends, and on the near (broadcast) side. */
@@ -217,6 +233,13 @@ function crest(teams: ArenaTeams): THREE.Object3D {
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillStyle = css(trim);
     g.fillText(text, 256, 266, 360);
+    // Leave the centre red line and the centre dot showing through: cut them out of the crest (canvas x is world x,
+    // so the red line along world z is a vertical stripe through the middle).
+    const px = 512 / size;
+    g.globalCompositeOperation = 'destination-out';
+    g.fillRect(256 - (RED_LINE_W / 2) * px - 1, 0, RED_LINE_W * px + 2, 512);
+    g.beginPath(); g.arc(256, 256, CENTRE_DOT_R * px + 2, 0, Math.PI * 2); g.fill();
+    g.globalCompositeOperation = 'source-over';
   });
   const mat = map
     ? new THREE.MeshLambertMaterial({ map, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
@@ -296,8 +319,11 @@ function benches(teams: ArenaTeams): THREE.Group {
     for (const x of [x0, x1]) g.add(box(x - 0.08, x + 0.08, 0, depth + 0.1, 0, 1.35, 0x30343b));
   };
   for (const side of ['home', 'away'] as const) {
+    // The bench in the team's stronger colour (the darker of jersey and trim: red for a red team with white trim,
+    // blue for a white team with blue trim), its seat a shade darker.
     const door = BENCH_DOORS[side].x, c = teams[side].colors;
-    area(door - 4.6, door + 4.6, c.trim === 0xffffff || c.trim === 0xf2f3f5 ? c.jersey : c.trim, c.jersey === 0xf2f3f5 ? c.trim : c.jersey, `bench-${side}`);
+    const strong = brightness(c.jersey) <= brightness(c.trim) ? c.jersey : c.trim;
+    area(door - 4.6, door + 4.6, shade(strong, 0.7), strong, `bench-${side}`);
   }
   const outer = Math.max(Math.abs(BENCH_DOORS.home.x), Math.abs(BENCH_DOORS.away.x)) + 4.6 + 1.2;
   for (const sx of [-1, 1]) {
