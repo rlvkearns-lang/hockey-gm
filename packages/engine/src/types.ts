@@ -98,6 +98,8 @@ export type SkaterState = {
   contestId: number | null;
   /** Game clock seconds (counted from the opening faceoff) when he last stepped on the ice. */
   shiftStart: number;
+  /** Live ticks he has spent on the ice (time on ice is toiTicks * DT seconds). */
+  toiTicks: number;
 };
 
 export type Phase = 'faceoffSetup' | 'live' | 'stopped' | 'intermission' | 'final';
@@ -138,7 +140,10 @@ export type ContestState = {
   data: Record<string, number>;
 };
 
-/** Plain JSON data only: a viewer reads it between steps. */
+/**
+ * Plain JSON data only: a viewer reads it between steps, and it holds everything that decides the rest of the game, so
+ * a snapshot of it resumes exactly (restoreGame).
+ */
 export type GameState = {
   tick: number;
   period: number;
@@ -206,6 +211,10 @@ export type GameState = {
   icingWatch: { side: Side; fromX: number; fromY: number; tick: number } | null;
   /** Each team's line rotation (see bench.ts). */
   bench: Record<Side, BenchState>;
+  /** The game's seed (GameSetup.seed). */
+  seed: number;
+  /** The random-number generator's state after the last step: with it a snapshot resumes exactly (restoreGame). */
+  rng: [number, number, number, number];
 };
 
 /** One kind of unit of a team: its forward lines or its defence pairs. */

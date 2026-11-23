@@ -90,7 +90,7 @@ export function at(x: number, y: number): SkaterState {
   return {
     id: `s${skaterSeq++}`, side: 'home', slot: null, pos: { x, y }, vel: { x: 0, y: 0 }, facing: 0,
     target: { x, y }, faceTarget: null, mode: 'forward', speedCap: 1, energy: 1, onIce: true, leaving: false,
-    downT: 0, contestId: null, shiftStart: 0,
+    downT: 0, contestId: null, shiftStart: 0, toiTicks: 0,
   };
 }
 
@@ -193,7 +193,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
       skaters.push({
         id: skaterId(side, slot), side, slot, pos, vel: { x: 0, y: 0 }, facing: dir === 1 ? 0 : Math.PI,
         target: { x: pos.x, y: pos.y }, faceTarget: null, mode: 'forward', speedCap: 1, energy: 1, onIce: true, leaving: false,
-        downT: 0, contestId: null, shiftStart: 0,
+        downT: 0, contestId: null, shiftStart: 0, toiTicks: 0,
       });
     }
   }
@@ -216,6 +216,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
     },
+    seed: 1, rng: [1, 2, 3, 4],
   };
 }
 

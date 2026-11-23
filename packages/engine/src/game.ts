@@ -9,7 +9,7 @@ import { goalieTick, resolveOnNet, trackShot, tryBlock } from './goalie';
 import { stepPuck, type PuckEvent } from './puck';
 import { refereeTick } from './referee';
 import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './rink';
-import { createRng } from './rng';
+import { createRng, restoreRng, type Rng } from './rng';
 import { TUNING } from './tuning';
 import { movementOf, stepSkater, type Movement } from './skating';
 import { buildResult } from './stats';
@@ -71,7 +71,7 @@ function initialState(setup: GameSetup): GameState {
       const b = BENCH_DOORS[side];
       skaters.push({
         id: p.id, side, slot, pos: { x: b.x, y: b.y }, vel: { x: 0, y: 0 }, facing: 0, target: { x: b.x, y: b.y },
-        faceTarget: null, mode: 'forward', speedCap: 1, energy: 1, onIce: slot !== null, leaving: false, downT: 0, contestId: null, shiftStart: 0,
+        faceTarget: null, mode: 'forward', speedCap: 1, energy: 1, onIce: slot !== null, leaving: false, downT: 0, contestId: null, shiftStart: 0, toiTicks: 0,
       });
       if (slot !== null) onIce[side].push(p.id);
     }
@@ -88,6 +88,8 @@ function initialState(setup: GameSetup): GameState {
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
     lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null, turnoverWatch: null,
     bench: initialBench(setup),
+    seed: setup.seed,
+    rng: [0, 0, 0, 1],
   };
 }
 
@@ -121,35 +123,64 @@ function noNegativeZero(state: GameState): void {
   for (const g of [state.goalies.home, state.goalies.away]) { z(g.pos); z(g.vel); g.facing += 0; }
 }
 
+/** A new game of `setup` (validated first: a bad setup throws a SetupError naming the problem). */
 export function createGame(setup: GameSetup): Game {
   validateSetup(setup);
   const rng = createRng(setup.seed);
-  const defs = new Map<string, PlayerDef>();
-  for (const side of SIDES) for (const p of setup[side].players) defs.set(p.id, p);
-  const tactics: Record<Side, Tactics> = { home: setup.home.tactics, away: setup.away.tactics };
-  const events: GameEvent[] = [];
-  let drained = 0;
   const state = initialState(setup);
   // How each side comes out on the night: a team's jump and its goalie's form (no game is decided by ratings alone).
   state.teamJump = { home: rng.gauss() * TUNING.night.teamJumpSd, away: rng.gauss() * TUNING.night.teamJumpSd };
   state.goalieNight = { home: rng.gauss() * TUNING.night.goalieSd, away: rng.gauss() * TUNING.night.goalieSd };
   startPeriod(state, 1);
   snapToLineup(state); // the opening line-up; later draws wait for players to skate there
+  state.rng = rng.getState();
+  return run(setup, state, rng, []);
+}
 
-  // Per-skater bookkeeping, parallel to state.skaters (whose order never changes).
+/**
+ * A game of `setup` that carries on from `state`, a snapshot of `game.state` taken between steps (it may have been
+ * through JSON), with `eventsSoFar` the events up to then (`game.result().events`). It plays out exactly as the game
+ * it was taken from. The state and events are copied; drainEvents hands out only events after the snapshot.
+ * Throws if the setup is invalid or the state is not one of its games.
+ */
+export function restoreGame(setup: GameSetup, state: GameState, eventsSoFar: readonly GameEvent[]): Game {
+  validateSetup(setup);
+  const own = JSON.parse(JSON.stringify(state)) as GameState;
+  checkStateFits(setup, own);
+  const events = JSON.parse(JSON.stringify(eventsSoFar)) as GameEvent[];
+  return run(setup, own, restoreRng(own.rng), events);
+}
+
+/** Throws unless `state` is a state of a game of `setup`: its seed, and the same skaters and goalies. */
+function checkStateFits(setup: GameSetup, state: GameState): void {
+  const skaters = [...setup.home.players, ...setup.away.players].filter((p) => p.position !== 'G').map((p) => p.id);
+  const ids = Array.isArray(state.skaters) ? state.skaters.map((s) => s.id) : [];
+  if (state.seed !== setup.seed) throw new Error(`state is from a game with seed ${String(state.seed)}, not ${setup.seed}`);
+  if (ids.length !== skaters.length || ids.some((id, i) => id !== skaters[i])) throw new Error('state does not hold this setup\'s skaters');
+  for (const side of SIDES) {
+    if (!setup[side].players.some((p) => p.id === state.goalies?.[side]?.id && p.position === 'G')) throw new Error(`state's ${side} goalie is not in this setup`);
+  }
+  if (!Array.isArray(state.rng) || state.rng.length !== 4) throw new Error('state has no random-number state');
+}
+
+function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]): Game {
+  const defs = new Map<string, PlayerDef>();
+  for (const side of SIDES) for (const p of setup[side].players) defs.set(p.id, p);
+  const tactics: Record<Side, Tactics> = { home: setup.home.tactics, away: setup.away.tactics };
+  let drained = events.length;
+
+  // Per-skater bookkeeping (derived, rebuilt on restore), parallel to state.skaters (whose order never changes).
   // Movement is rebuilt only when the skater's legs change (see legs()).
-  const bodies = state.skaters.map((sk) => ({ def: defs.get(sk.id)!, legs: legs(sk.energy), move: movementOf(defs.get(sk.id)!, legs(sk.energy)), toi: 0 }));
+  const bodies = state.skaters.map((sk) => ({ def: defs.get(sk.id)!, legs: legs(sk.energy), move: movementOf(defs.get(sk.id)!, legs(sk.energy)) }));
   const bodyById = new Map(state.skaters.map((sk, i) => [sk.id, bodies[i]!]));
   const move = (id: string): Movement => bodyById.get(id)!.move;
-  /** On-ice skaters, refilled in place each tick, and their bookkeeping (same order). */
+  /** On-ice skaters, refilled in place each tick, and their Movements (same order). */
   const onIceList: SkaterState[] = [];
-  const onIceBodies: (typeof bodies)[number][] = [];
   const onIceMoves: Movement[] = [];
   /** Loose puck position before this tick's step (scratch). */
   const prevPuck = { x: 0, y: 0 };
   const onIceSkaters = (): SkaterState[] => {
     onIceList.length = 0;
-    onIceBodies.length = 0;
     onIceMoves.length = 0;
     const all = state.skaters;
     for (let i = 0; i < all.length; i++) {
@@ -159,14 +190,13 @@ export function createGame(setup: GameSetup): Game {
       const l = legs(sk.energy);
       if (b.legs !== l) { b.legs = l; b.move = movementOf(b.def, l); }
       onIceList.push(sk);
-      onIceBodies.push(b);
       onIceMoves.push(b.move);
     }
     return onIceList;
   };
   const toiMap = (): Map<string, number> => {
     const m = new Map<string, number>();
-    state.skaters.forEach((sk, i) => { if (bodies[i]!.toi > 0) m.set(sk.id, bodies[i]!.toi); });
+    for (const sk of state.skaters) if (sk.toiTicks > 0) m.set(sk.id, sk.toiTicks * DT);
     return m;
   };
 
@@ -285,7 +315,7 @@ export function createGame(setup: GameSetup): Game {
     const turnover = confirmTurnover(state);
     if (turnover) events.push(turnover);
 
-    for (const b of onIceBodies) b.toi += DT;
+    for (const s of skaters) s.toiTicks++;
     const liveTicks = Math.round((PERIOD_SECONDS - state.clock) / DT) + 1;
     state.clock = Math.max(0, (PERIOD_TICKS - liveTicks) * DT);
 
@@ -311,6 +341,7 @@ export function createGame(setup: GameSetup): Game {
     if (state.phase === 'final') return;
     stepOnce();
     noNegativeZero(state);
+    state.rng = rng.getState();
   }
 
   function stepOnce(): void {

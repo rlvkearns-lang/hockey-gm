@@ -1,4 +1,7 @@
 import { dcos, dlog } from './dmath';
+/** The generator's four 32-bit state words: with them a stream carries on exactly where it was (see restoreRng). */
+export type RngState = [number, number, number, number];
+
 export type Rng = {
   next(): number;
   range(min: number, max: number): number;
@@ -6,6 +9,8 @@ export type Rng = {
   chance(p: number): boolean;
   gauss(): number;
   pick<T>(items: readonly T[]): T;
+  /** The state words now (a copy). */
+  getState(): RngState;
 };
 
 /** FNV-1a style string hash with a final avalanche, returning a 32-bit state word. */
@@ -25,11 +30,20 @@ function hashString(s: string, salt: number): number {
 
 export function createRng(seed: number): Rng {
   const text = String(seed);
-  let a = hashString(text, 0x9e3779b9);
-  let b = hashString(text, 0x85ebca6b);
-  let c = hashString(text, 0xc2b2ae35);
-  let d = 1;
+  const rng = fromWords(hashString(text, 0x9e3779b9), hashString(text, 0x85ebca6b), hashString(text, 0xc2b2ae35), 1);
+  for (let i = 0; i < 12; i++) rng.next();
+  return rng;
+}
 
+/** A generator that carries on from `state` (as getState returned it). */
+export function restoreRng(state: RngState): Rng {
+  if (state.length !== 4 || !state.every((w) => Number.isInteger(w) && w >= 0 && w <= 0xffffffff)) {
+    throw new Error('rng state must be four 32-bit unsigned integers');
+  }
+  return fromWords(state[0], state[1], state[2], state[3]);
+}
+
+function fromWords(a: number, b: number, c: number, d: number): Rng {
   // sfc32
   const next = (): number => {
     const t = (((a + b) >>> 0) + d) >>> 0;
@@ -40,8 +54,6 @@ export function createRng(seed: number): Rng {
     c = (c + t) >>> 0;
     return t / 4294967296;
   };
-  for (let i = 0; i < 12; i++) next();
-
   const rng: Rng = {
     next,
     range: (min, max) => min + (max - min) * next(),
@@ -56,6 +68,7 @@ export function createRng(seed: number): Rng {
       if (items.length === 0) throw new Error('pick from empty list');
       return items[Math.floor(next() * items.length)] as T;
     },
+    getState: () => [a >>> 0, b >>> 0, c >>> 0, d >>> 0],
   };
   return rng;
 }

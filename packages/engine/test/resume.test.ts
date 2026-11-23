@@ -1,0 +1,63 @@
+import { describe, it, expect } from 'vitest';
+import { createGame, restoreGame, simulateGame, type Game } from '../src/game';
+import type { GameEvent, GameResult, GameState } from '../src/types';
+import { gameSetup } from './helpers';
+
+const GAME_TIMEOUT = 60_000;
+const setup = () => gameSetup(11);
+
+/** Steps `g` until `pred` holds after a step (at or after tick `from`); fails if the game ends first. */
+function stepUntil(g: Game, from: number, pred: (s: GameState) => boolean): number {
+  while (!g.done) {
+    g.step();
+    if (g.state.tick >= from && pred(g.state)) return g.state.tick;
+  }
+  throw new Error('game ended before the condition held');
+}
+
+/** A snapshot as a viewer or server would keep it: plain JSON, nothing shared with the running game. */
+const snapshot = (g: Game): { state: GameState; events: GameEvent[] } =>
+  JSON.parse(JSON.stringify({ state: g.state, events: g.result().events })) as { state: GameState; events: GameEvent[] };
+
+function finish(g: Game): GameResult {
+  while (!g.done) g.step();
+  return g.result();
+}
+
+describe('resuming a game from a snapshot', () => {
+  const straight = simulateGame(setup());
+  const cases: [string, (s: GameState) => boolean, number][] = [
+    ['the first tick', () => true, 0],
+    ['mid-contest (a contest past its first stage)', (s) => s.contests.some((c) => c.stageT > 0.2 && c.stage !== 'close' && c.stage !== 'reach' && c.stage !== 'race'), 9_000],
+    ['mid-board-battle', (s) => s.contests.some((c) => c.kind === 'boardBattle' && c.stage === 'dig'), 30_000],
+    ['mid-line-change', (s) => s.bench.home.forwards.changing || s.bench.away.defence.changing, 40_000],
+    ['with a shot in flight', (s) => s.shotInFlight !== null, 60_000],
+    ['while play is stopped', (s) => s.phase === 'stopped', 70_000],
+    ['in the third period, a turnover being watched', (s) => s.period === 3 && s.turnoverWatch !== null, 80_000],
+  ];
+  for (const [name, when, from] of cases) {
+    it(`restored ${name}, it plays out exactly as the straight run`, () => {
+      const g = createGame(setup());
+      const k = stepUntil(g, from, when);
+      const snap = snapshot(g);
+      const resumed = restoreGame(setup(), snap.state, snap.events);
+      expect(resumed.state.tick).toBe(k);
+      expect(resumed.drainEvents()).toEqual([]); // events before the snapshot are not handed out again
+      expect(finish(resumed)).toEqual(straight);
+      expect(finish(g)).toEqual(straight); // the original, which the snapshot shares nothing with, is unaffected
+    }, GAME_TIMEOUT);
+  }
+  it('the snapshot holds everything: the random stream and time on ice are in the state', () => {
+    const g = createGame(setup());
+    stepUntil(g, 5_000, () => true);
+    expect(g.state.rng).toHaveLength(4);
+    expect(g.state.skaters.every((s) => Number.isInteger(s.toiTicks))).toBe(true);
+    expect(g.state.skaters.some((s) => s.toiTicks > 0)).toBe(true);
+  }, GAME_TIMEOUT);
+  it('a restored game rejects a state that does not belong to its setup', () => {
+    const g = createGame(setup());
+    g.step();
+    const snap = snapshot(g);
+    expect(() => restoreGame(gameSetup(12), snap.state, snap.events)).toThrow(/state/);
+  });
+});

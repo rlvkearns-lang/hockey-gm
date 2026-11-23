@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createRng } from '../src/rng';
+import { createRng, restoreRng, type RngState } from '../src/rng';
 
 describe('rng', () => {
   it('same seed gives the same stream', () => {
@@ -19,6 +19,13 @@ describe('rng', () => {
     const mean = xs.reduce((s, x) => s + x, 0) / xs.length;
     const sd = Math.sqrt(xs.reduce((s, x) => s + (x - mean) ** 2, 0) / xs.length);
     expect(Math.abs(mean)).toBeLessThan(0.03); expect(Math.abs(sd - 1)).toBeLessThan(0.03);
+  });
+  it('a stream restored from its state carries on exactly', () => {
+    const a = createRng(77);
+    for (let i = 0; i < 50; i++) a.next();
+    const b = restoreRng(JSON.parse(JSON.stringify(a.getState())) as RngState);
+    expect(Array.from({ length: 100 }, () => b.next())).toEqual(Array.from({ length: 100 }, () => a.next()));
+    expect(() => restoreRng([1, 2, 3] as unknown as RngState)).toThrow(/rng state/);
   });
   it('int is inclusive', () => {
     const r = createRng(9);
