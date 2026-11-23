@@ -103,3 +103,4 @@ Proposed shape **[my call, not yet agreed]**:
 - The same confidence marks apply per attribute (a potential nobody has watched much is a wide guess).
 - Development then has something to aim at: the coach and development staff can focus a player on an attribute with room to grow; ice time, linemates, league level and personality (work ethic) decide how much of the gap closes; some potential is never reached, and late bloomers exist.
 - The prospect headline ("high ceiling, flashy") is derived from this picture rather than written separately.
+- Development focus (owner, 2026-11-23): either way. The GM can set a focus per player, or leave it to the development staff, who choose by default. Same hand-off rules as everything else.
