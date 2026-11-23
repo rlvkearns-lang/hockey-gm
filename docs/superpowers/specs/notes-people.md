@@ -93,3 +93,23 @@ Proposed shape **[my call, not yet agreed]**:
 - Each row gives a rough reading in words (for example "trusted", "wary", "hostile"), the direction it is moving, and the two or three things that most shaped it lately ("kept his promise to Keane", "traded a fan favourite", "caught planting a story").
 - Rows open to more detail: rival GMs one by one, agents one by one.
 - Readings are impressions gathered the same way as player feelings, not exact numbers, with the same off switch for plain numbers.
+
+## More ideas from the owner (2026-11-23)
+
+The owner has invited Claude to push back on ideas or quietly park them.
+
+- **Pay comparisons.** Teammates see what others sign for and may think they are worth that too.
+- **Leaders and a natural captain.** A way to find out who the leaders in the room are. A captain should emerge naturally: someone who loves his team, teammates and city, or a traded-in veteran who was a leader elsewhere and becomes one at once.
+- **"A Larkin situation", major drama, storylines.** Claude's reading **[my call, to confirm]**: a captain publicly criticising management (for example after a quiet trade deadline). More generally, multi-step stories that build over weeks.
+- **Alerts** when a major trade or signing happens around the league.
+- **No-move clauses.** A player with a full no-move can agree to a list of teams he would go to. When a team wants a player with a no-move, the GM has to sit down with him; by personality some take offence at being asked, some understand but refuse, some understand and waive.
+- **Negative value and cap dumps.** Bad contracts that cost assets to move.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Pay comparisons feed the existing "money" feeling: a player compares himself with teammates and league peers of similar role and production, weighted by ego. A new signing can unsettle the room or reset a pending negotiation. Agents use comparables openly in talks.
+- Leadership is a hidden standing each player has in a room, built from personality (cares about others, vocal or by example), tenure, performance, respect earned elsewhere (carried at reduced strength on a trade), and how he treats teammates. The coach and assistant GM report who the room follows; the "what we know" card shows it. The GM (or coach) names the captain; picking against the room's choice has a cost, picking the natural leader has a benefit. Leaders amplify word getting around, for or against the GM.
+- Storylines are not scripted plots. They are chains the people layer produces by itself (a feeling escalates, leaks, the feed picks it up, the room takes sides), surfaced to the GM as one running story with a headline and a timeline rather than scattered messages. A captain calling out management is the top rung of the existing escalation ladder for a respected leader unhappy about "winning".
+- Alerts use the inbox's three levels; league-wide major moves are "breaking news" on the feed with an optional pop-up.
+- No-move handling: asking is itself an event with a memory. The outcome depends on personality, his five feelings, the destination (contender, hometown, friends there) and how the GM asks (honestly, with a reason, or by pressure). A list of acceptable teams can be negotiated into the contract or offered by the player later. Asking and being refused leaves a mark; asking through the agent first is the softer route.
+- Contracts have a value that can be negative. Rival GMs price cap space; moving a bad deal costs a sweetener (pick, prospect) or retained salary, and teams with space and a patient owner act as takers. Belongs to stage 3 (GM job).
