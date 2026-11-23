@@ -153,3 +153,12 @@ Proposed shape **[my call]**:
 - Lottery: non-playoff teams weighted by finish, shown as an event with the reveal, and the real limits on how far a team can jump. Rules as a setting so they can follow the current NHL format.
 - Rivalry is a number between each pair of teams that rises with playoff series, close and nasty games, big hits and fights, lopsided trades and offer sheets between them, and geography; it fades slowly without fuel. A rivalry game starts hotter (see game temperature in `notes-engine-play.md`), draws more fan and media attention, and matters more to players' and fans' feelings. Rivalries also form between individual players.
 - Owner agreed to the lottery and rivalry shapes above (2026-11-23).
+
+## The farm team (owner agreed, 2026-11-23)
+
+- Call-ups and send-downs between the NHL and AHL, with waivers in (a veteran sent down can be claimed by another team).
+- The AHL coach runs the AHL team; the GM can make requests ("play the kid on the top line"), as with the NHL coach.
+- Development depends on where a player plays: big AHL minutes can beat sitting in the NHL press box; too good for the level and he stalls, over his head and he loses confidence.
+- AHL games can be watched in 3D like any other, or followed through results and staff reports.
+- The assistant GM can manage the farm team entirely, bringing only call-up recommendations and injury replacements; handed off by default **[my call]**.
+- Prospects' feelings apply: stuck in the minors too long he gets frustrated; called up and scratched every night he may ask to go back down.
