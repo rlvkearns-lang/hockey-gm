@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bodyDims } from './body';
-import { carryPoint, initialPuckDraw, stepCarry, stepPuckDraw, stickhandle, type CarryBlend, type IcePoint, type PuckDraw, type PuckDrawInput } from './carry';
+import { BLADE_RAISED, BLADE_RAISE_SPAN, carryPoint, heelForPuck, initialPuckDraw, STRIKE_SPOT, stepCarry, stepPuckDraw, stickhandle, type CarryBlend, type IcePoint, type PuckDraw, type PuckDrawInput } from './carry';
 import { initialGait, poseOf, type Motion, type Style } from './gait';
 
 const m = (p: Partial<Motion>): Motion => ({ speed: 0, forward: 0, lateral: 0, accelAlong: 0, turnRate: 0, facing: 0, down: false, ...p });
@@ -164,5 +164,51 @@ describe('the drawn puck (puck machine)', () => {
     const r = run({ t: 0, carrier: () => null, enginePuck: () => ({ x: -10, z: 5 }) }, 1, 1.2, 60, fresh);
     for (const p of r.drawn) { expect(p.x).toBe(-10); expect(p.z).toBe(5); }
   });
-});
 
+  // Task 2: shots and passes.
+  it('a release leaves from where the puck sat on his blade at the start of its tick, and reaches the engine puck by its end', () => {
+    // Carried until tick 44, released into a 30 m/s shot: the engine's puck at tick 45 is a tick of flight from his reach.
+    const carrier = (tick: number): string | null => (tick >= 15 && tick < 45 ? 'c' : null);
+    const enginePuck = (t: number): IcePoint => (t < 0.5 ? { x: 2.7, z: -0.4 } : t < 1.5 ? { x: 6 * t + 0.6, z: 0 } : { x: 9.6 + 30 * (t - 1.5), z: 0 });
+    for (const hz of [30, 60, 120]) {
+      let s = initialPuckDraw(), seen = 0, left: IcePoint | null = null;
+      for (let i = 0; i <= 2 * hz; i++) {
+        const t = i / hz, pos = Math.round(t / DTICK * 1e9) / 1e9, tick = Math.floor(pos), a = pos - tick;
+        const input: PuckDrawInput = {
+          tick, alpha: a, prevCarrier: carrier(tick), nextCarrier: carrier(tick + 1), engine: enginePuck(t), height: 0,
+          nextPuck: enginePuck((tick + 1) * DTICK), holder: (id) => (id === 'c' ? { blade: bladeAt(t), position: bodyAt(t) } : null),
+        };
+        s = stepPuckDraw(s, input, i === 0 ? 0 : 1 / hz);
+        if (tick !== 44) continue;
+        // On the blade at the moment the engine lets it go, then straight on (no longer carried by the blade) to where
+        // the engine has it at the tick's end.
+        left ??= bladeAt(t);
+        const b = left, n = input.nextPuck;
+        expect(s.drawn.x, `${hz} Hz at alpha ${a}`).toBeCloseTo(n.x + (b.x - n.x) * (1 - a), 9);
+        expect(s.drawn.z, `${hz} Hz at alpha ${a}`).toBeCloseTo(n.z + (b.z - n.z) * (1 - a), 9);
+        seen++;
+      }
+      expect(seen).toBeGreaterThan(0);
+    }
+  });
+  it('a raised blade (a slapshot back-swing) leaves the puck on the ice where the swing comes down; a skating blade carries it as before', () => {
+    const pose = { blade: { x: -0.6, y: 0, z: -0.5 }, stickAngle: -2.4 };
+    const onIce = carryPoint(pose);
+    expect(carryPoint({ ...pose, blade: { ...pose.blade, y: BLADE_RAISED } })).toEqual(onIce);
+    expect(carryPoint({ ...pose, blade: { ...pose.blade, y: 0.22 } })).toEqual(onIce); // the sprint's raised blade
+    const up = carryPoint({ ...pose, blade: { ...pose.blade, y: BLADE_RAISED + BLADE_RAISE_SPAN } });
+    expect(up.x).toBeCloseTo(STRIKE_SPOT.x, 12); expect(up.z).toBeCloseTo(STRIKE_SPOT.z, 12);
+    // A blade raised ahead of him (a follow-through) still carries it.
+    const ahead = { ...pose, blade: { x: 0.9, y: 0.6, z: -0.3 } };
+    expect(carryPoint(ahead)).toEqual(carryPoint({ ...ahead, blade: { ...ahead.blade, y: 0 } }));
+    let last = onIce;
+    for (let y = 0; y <= 1; y += 0.01) { const c = carryPoint({ ...pose, blade: { ...pose.blade, y } }); expect(Math.hypot(c.x - last.x, c.z - last.z)).toBeLessThan(0.15); last = c; }
+  });
+  it('heelForPuck finds the heel that puts the puck at a given spot', () => {
+    for (const spot of [STRIKE_SPOT, { x: 0.9, z: -0.6 }, { x: 0.3, z: 0.4 }]) for (const from of [{ x: 0.25, z: 0.1 }, { x: 0, z: 0.2 }]) {
+      const h = heelForPuck(spot, from);
+      const c = carryPoint({ blade: { x: h.x, y: 0, z: h.z }, stickAngle: Math.atan2(h.z - from.z, h.x - from.x) });
+      expect(Math.hypot(c.x - spot.x, c.z - spot.z)).toBeLessThan(2e-3);
+    }
+  });
+});

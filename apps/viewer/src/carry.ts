@@ -18,13 +18,47 @@ const TOE_OUT = 0.35;
 /**
  * Where the puck sits on the blade, on the ice in the body frame (x forward, z to his right), for a pose from poseOf
  * (a left shot: mirror z for a right shot, as the pose is mirrored). It is along the blade from the heel, just in
- * front of the blade's forehand face.
+ * front of the blade's forehand face. While the blade is raised well off the ice behind him (the back-swing of a
+ * slapshot or a one-timer, above BLADE_RAISED), the puck stays on the ice at STRIKE_SPOT, where that swing comes down,
+ * instead of rising with the blade; a skating pose never raises it that far (gait.ts sprintBladeUp, 0.22 m, and never with the
+ * puck), so the carry is unchanged there.
  */
 export function carryPoint(pose: Pick<SkaterPose, 'blade' | 'stickAngle'>): IcePoint {
   const h = pose.stickAngle - TOE_OUT; // the blade's heading (toe out to his left, -z)
   const c = Math.cos(h), s = Math.sin(h);
   // The forehand face looks a quarter turn round from the blade toward +z (forward and in front of him).
-  return { x: pose.blade.x + BLADE_SPOT * c - PUCK_OFF * s, z: pose.blade.z + BLADE_SPOT * s + PUCK_OFF * c };
+  const x = pose.blade.x + BLADE_SPOT * c - PUCK_OFF * s, z = pose.blade.z + BLADE_SPOT * s + PUCK_OFF * c;
+  const up = smooth((fin(pose.blade.y) - BLADE_RAISED) / BLADE_RAISE_SPAN) * smooth((BLADE_BEHIND - fin(pose.blade.x)) / BLADE_BEHIND_SPAN)
+    * smooth(-fin(pose.blade.z) / BLADE_BEHIND_SPAN);
+  return up <= 0 ? { x, z } : { x: x + (STRIKE_SPOT.x - x) * up, z: z + (STRIKE_SPOT.z - z) * up };
+}
+
+/**
+ * A blade heel higher than BLADE_RAISED (m) starts to leave the puck on the ice, and above BLADE_RAISED +
+ * BLADE_RAISE_SPAN it has; only while the blade is behind his hips on his stick side (a back-swing, not a
+ * follow-through): fully from BLADE_BEHIND - BLADE_BEHIND_SPAN back (x, m) and BLADE_BEHIND_SPAN out to that side (-z),
+ * not at all from BLADE_BEHIND forward or across his middle (z 0).
+ */
+export const BLADE_RAISED = 0.25, BLADE_RAISE_SPAN = 0.2, BLADE_BEHIND = 0.1, BLADE_BEHIND_SPAN = 0.4;
+/**
+ * Where a shot meets the puck (body frame of a left shot, on the ice): a little ahead of and beside his front foot,
+ * near the engine's own carried puck (0.6 m straight ahead), so the puck's flight from the blade starts close to the
+ * engine's. The stick overlays (overlays/stick.ts) bring the blade down here, and a raised blade leaves the puck here.
+ */
+export const STRIKE_SPOT: IcePoint = { x: 0.68, z: -0.2 };
+
+/**
+ * The blade heel (body frame, on the ice) that puts the puck (carryPoint) at `spot` when the shaft comes down from
+ * `from` (the top hand, x and z): the inverse of carryPoint, to the shaft heading through the heel it finds.
+ */
+export function heelForPuck(spot: IcePoint, from: IcePoint): IcePoint {
+  let hx = spot.x, hz = spot.z;
+  for (let i = 0; i < 4; i++) {
+    const h = Math.atan2(hz - from.z, hx - from.x) - TOE_OUT, c = Math.cos(h), s = Math.sin(h);
+    hx = spot.x - (BLADE_SPOT * c - PUCK_OFF * s);
+    hz = spot.z - (BLADE_SPOT * s + PUCK_OFF * c);
+  }
+  return { x: hx, z: hz };
 }
 
 const TAU = 2 * Math.PI;
@@ -56,11 +90,12 @@ export type CarryBlend = { w: number; from: IcePoint };
 /** Seconds to ease onto the blade once he has the puck, and back to the engine's puck once he has not. */
 export const CARRY_ON = 0.15, CARRY_OFF = 0.1;
 /**
- * While carried, the drawn puck and both ends of the blend move with the carrier (well under 12 m/s), so a gap between
- * where it was drawn and where the blend says it was that is wider than CATCH_UP_SLACK plus that much in a step means
- * the blade itself jumped (a new carrier, or a blend not reset after a seek). The gap is then closed at CATCH_UP_SPEED.
+ * While carried, the drawn puck and both ends of the blend move with the blade (the carrier skates well under 12 m/s;
+ * a shot or a pass sweeps the blade faster, up to about 25 m/s with his skating), so a gap between where it was drawn
+ * and where the blend says it was that is wider than CATCH_UP_SLACK plus CARRIER_SPEED in a step means the blade
+ * itself jumped (a new carrier, or a blend not reset after a seek). The gap is then closed at CATCH_UP_SPEED.
  */
-const CATCH_UP_SLACK = 0.05, CARRIER_SPEED = 12, CATCH_UP_SPEED = 24;
+const CATCH_UP_SLACK = 0.05, CARRIER_SPEED = 25, CATCH_UP_SPEED = 24;
 
 const blendAt = (engine: IcePoint, blade: IcePoint, w: number): IcePoint => {
   if (w === 0) return { x: engine.x, z: engine.z };
@@ -101,25 +136,39 @@ export function stepCarry(b: CarryBlend, carried: boolean, enginePuck: IcePoint,
 
 /**
  * The drawn puck's state between frames. `drawn` is where it was last drawn (world: x, z on the ice, y its height).
- * `blend` eases it onto a carrier's blade (stepCarry); `pickup` is a pick-up under way (who, and where the puck was
- * relative to him when he got it); `release` a carry ending during the tick that starts at `tick` (who had it, where
- * it was drawn relative to his blade, and the alpha `a0` the slide starts from). `fresh`: the next step starts afresh
- * (after a seek, a new game, or an engine cut that moved the puck), with nothing eased across.
+ * `blend` eases it onto a carrier's blade (stepCarry); `pickup` is a pick-up under way (who, where the puck was
+ * relative to him when he got it, and `v`, how fast it was drawn moving then); `release` a carry ending during the tick that starts at `tick` (who had it, where
+ * it left his blade (world x, z), and the alpha `a0` the slide starts from). `blade` is where the puck sat on the
+ * blade of the skater who had it at the last step (`id`, '' for nobody), so a release keeps the puck where it was on his
+ * blade. `speed` is how fast the drawn puck moved over the last step (m/s). `fresh`: the next step starts afresh (after a seek, a new game, or an engine cut that moved the puck), with
+ * nothing eased across.
  */
 export type PuckDraw = {
   fresh: boolean;
   blend: CarryBlend;
-  pickup: { id: string; ox: number; oz: number };
+  pickup: { id: string; ox: number; oz: number; v: number };
   release: { active: boolean; tick: number; id: string; ox: number; oz: number; a0: number };
+  blade: { id: string; x: number; z: number };
   drawn: { x: number; y: number; z: number };
+  speed: number;
 };
 
 export function initialPuckDraw(): PuckDraw {
   return {
-    fresh: true, blend: { w: 0, from: { x: 0, z: 0 } }, pickup: { id: '', ox: 0, oz: 0 },
-    release: { active: false, tick: -1, id: '', ox: 0, oz: 0, a0: 0 }, drawn: { x: 0, y: 0, z: 0 },
+    fresh: true, blend: { w: 0, from: { x: 0, z: 0 } }, pickup: { id: '', ox: 0, oz: 0, v: 0 },
+    release: { active: false, tick: -1, id: '', ox: 0, oz: 0, a0: 0 }, blade: { id: '', x: 0, z: 0 }, drawn: { x: 0, y: 0, z: 0 }, speed: 0,
   };
 }
+
+/**
+ * A puck picked up moving at least CHASE_FROM (m/s) goes on into the blade at CHASE_GAIN times its speed (the engine
+ * hands a pass to its receiver up to a couple of metres short of his stick, and a one-touch pass leaves again a tick
+ * or two later), and at least CHASE_SPEED.
+ */
+export const CHASE_FROM = 6, CHASE_GAIN = 1.75, CHASE_SPEED = 12;
+
+/** The most (m) by which a release's slide may outrun the engine's own flight in a tick (see stepPuckDraw). */
+export const RELEASE_GAP = 0.4;
 
 /**
  * One frame for the puck machine: the frame's earlier tick and alpha, who had the puck at the two ticks drawn, the
@@ -138,10 +187,13 @@ export type PuckDrawInput = {
  * Where the puck is drawn this frame. While a skater keeps it, it eases from the engine's puck onto his blade
  * (stepCarry, CARRY_ON) and follows the blade; a puck he picks up (or wins off another skater) eases from where it was
  * last drawn, carried along with him, rather than from the engine's spot at his reach. When he lets it go (a pass, a
- * shot, a check, a poke) it slides from his blade straight to the engine's puck within that same tick, at an even
- * speed starting from the previous frame's moment (`dt` of game time ago), so from the first tick nobody has it, it is
- * exactly the engine's puck; with `dt` 0 (paused) it holds and moves once play resumes. A puck in the air is drawn at
- * the engine's height. Moved here from scene.ts with its behaviour and numbers unchanged.
+ * shot, a check, a poke) it leaves from where it sat on his blade at the start of that tick, the moment the engine
+ * lets it go (the event log stamps the release with the tick it ends, when the engine's puck is already a tick of
+ * flight away), and goes straight to the engine's puck by the tick's end at an even speed, so from the first tick nobody
+ * has it, it is exactly the engine's puck. The stick overlays (overlays/stick.ts) bring the blade through the puck at
+ * that moment. A frame drawn part way into the tick picks the slide up where it is by then (from where the puck was on
+ * his blade); with `dt` 0 (paused) it holds and moves once play resumes. A puck in the air is drawn at the engine's
+ * height.
  */
 export function stepPuckDraw(s: PuckDraw, input: PuckDrawInput, dt: number): PuckDraw {
   const { engine, alpha: a } = input;
@@ -156,34 +208,60 @@ export function stepPuckDraw(s: PuckDraw, input: PuckDrawInput, dt: number): Puc
     drawnX = engine.x; drawnZ = engine.z;
     release.active = false;
     pickup.id = blend.w === 1 ? B! : '';
+    // Carried at once: it was (as far as the catch-up knows) already on his blade.
+    if (blend.w === 1) { blend.from.x = holderB!.blade.x; blend.from.z = holderB!.blade.z; }
   }
   let k = 0; // the blade's share of the drawn puck
+  let caught: IcePoint | null = null; // where stepCarry puts a carried puck (its ease and catch-up), if it does
   let bx = engine.x, bz = engine.z, ex = engine.x, ez = engine.z;
   const holderA = B === null && A !== null ? input.holder(A) : null;
   if (holderB) {
     // He has it (or gets it during this tick, picked up or won off another skater): ease onto his blade and follow
     // it. The engine snaps a puck it hands him to a spot at his reach, so the ease starts from where the puck was
-    // last drawn instead, carried along with him, not from the engine's spot.
+    // last drawn instead, carried along with him, not from the engine's spot. A puck coming in fast (a pass) keeps
+    // its speed on into the blade instead of easing.
     const f = holderB.position, bladeB = holderB.blade;
-    if (pickup.id !== B) { pickup.id = B!; blend.w = 0; pickup.ox = drawnX - f.x; pickup.oz = drawnZ - f.z; }
+    if (pickup.id !== B) { pickup.id = B!; blend.w = 0; pickup.ox = drawnX - f.x; pickup.oz = drawnZ - f.z; pickup.v = s.fresh ? 0 : fin(s.speed); }
     const anchor = { x: f.x + pickup.ox, z: f.z + pickup.oz };
-    const r = stepCarry(blend, true, anchor, bladeB, dt);
-    blend = r.blend;
-    k = smooth(blend.w);
+    const h = Math.max(0, fin(dt));
+    if (blend.w < 1 && pickup.v >= CHASE_FROM) {
+      // Coming in fast: on toward the blade a little faster than it came (CHASE_GAIN), from where it was drawn.
+      const dx = bladeB.x - drawnX, dz = bladeB.z - drawnZ, d = Math.hypot(dx, dz), go = Math.max(pickup.v * CHASE_GAIN, CHASE_SPEED) * h;
+      if (d <= go) { blend.w = 1; k = 1; }
+      else { anchor.x = drawnX + (dx * go) / d; anchor.z = drawnZ + (dz * go) / d; k = 0; }
+      pickup.ox = anchor.x - f.x; pickup.oz = anchor.z - f.z;
+      blend.from.x = k === 1 ? bladeB.x : anchor.x; blend.from.z = k === 1 ? bladeB.z : anchor.z;
+    } else {
+      const r = stepCarry(blend, true, anchor, bladeB, dt);
+      blend = r.blend;
+      k = smooth(blend.w);
+      // stepCarry's own place: the ease, or where a blade that moved faster than a carrier can (a new carrier, or a
+      // stick action swinging it) is caught up with at CATCH_UP_SPEED rather than jumped to.
+      caught = r.drawn;
+    }
     bx = bladeB.x; bz = bladeB.z;
     ex = anchor.x; ez = anchor.z;
     release.active = false;
   } else if (holderA) {
-    // He let it go during this tick: slide from his blade to the engine's puck by the tick's end.
-    // Where it was drawn when he let it go is kept relative to his blade, so it leaves from there.
+    // He let it go during this tick: slide from his blade to the engine's puck by the tick's end, as if it left at the
+    // tick's start (or at the previous frame, if that was already in this tick). It leaves from where it sat on his
+    // blade (where it was drawn at the last step, relative to the blade, put on the blade as it is now), and from then
+    // on it is on its own: the stick's follow-through does not carry it.
     const bladeA = holderA.blade;
     if (!release.active || release.tick !== input.tick || release.id !== A) {
-      release.active = true; release.tick = input.tick; release.id = A!; release.a0 = Math.min(a, 0.999) - dt / DT_TICK;
-      release.ox = drawnX - bladeA.x; release.oz = drawnZ - bladeA.z;
+      const was = !s.fresh && s.blade.id === A ? s.blade : bladeA;
+      release.ox = bladeA.x + drawnX - was.x; release.oz = bladeA.z + drawnZ - was.z;
+      // The slide is the engine's flight over the tick plus the gap from where it sat on the blade to where the engine
+      // let it go. A gap wider than RELEASE_GAP a tick (a blade far from the engine's spot) is spread back over the
+      // previous frame's interval as well, so the puck never darts.
+      const ai = Math.min(a, 0.999), flight = Math.hypot(input.nextPuck.x - engine.x, input.nextPuck.z - engine.z) / (1 - ai);
+      const slide = Math.hypot(input.nextPuck.x - release.ox, input.nextPuck.z - release.oz);
+      const early = Math.min(0, 1 - slide / (flight + RELEASE_GAP));
+      release.active = true; release.tick = input.tick; release.id = A!; release.a0 = Math.max(ai - dt / DT_TICK, early);
     }
     // It heads straight for where the engine's puck is at the tick's end, at an even speed: the shortest slide.
     k = 1 - Math.min(1, Math.max(0, (a - release.a0) / (1 - release.a0)));
-    bx = bladeA.x + release.ox; bz = bladeA.z + release.oz;
+    bx = release.ox; bz = release.oz;
     ex = input.nextPuck.x; ez = input.nextPuck.z;
     blend.w = 0;
     pickup.id = '';
@@ -192,7 +270,10 @@ export function stepPuckDraw(s: PuckDraw, input: PuckDrawInput, dt: number): Puc
     release.active = false;
     pickup.id = '';
   }
-  const px = ex + (bx - ex) * k, pz = ez + (bz - ez) * k;
+  const px = caught ? caught.x : ex + (bx - ex) * k, pz = caught ? caught.z : ez + (bz - ez) * k;
   blend.from.x = px; blend.from.z = pz;
-  return { fresh: false, blend, pickup, release, drawn: { x: px, y: height * (1 - k), z: pz } };
+  const blade = holderB ? { id: B!, x: holderB.blade.x, z: holderB.blade.z } : { id: '', x: 0, z: 0 };
+  const h = Math.max(0, fin(dt));
+  const speed = s.fresh ? 0 : h > 0 ? Math.hypot(px - s.drawn.x, pz - s.drawn.z) / h : s.speed;
+  return { fresh: false, blend, pickup, release, blade, drawn: { x: px, y: height * (1 - k), z: pz }, speed };
 }

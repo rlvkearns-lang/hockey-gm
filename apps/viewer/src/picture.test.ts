@@ -13,9 +13,13 @@ import { sharedPlayback } from './test/game';
  * picture. Find out why rather than updating the constant.
  */
 
+// Re-pinned by Task 2 of milestone 3 (stick actions): the picture changed on purpose (the stick overlays, and the puck
+// machine leaving from the blade at the moment the engine lets it go and chasing a pass onto the blade). Before that,
+// with only the faceoff crouch and the old carry.ts, these were 5: e21e2fd3cf98651d and 42: 7107aa93e57f2c7d, which
+// that code still gives.
 const PICTURE_HASH: Record<number, string> = {
-  5: 'e21e2fd3cf98651d',
-  42: '7107aa93e57f2c7d',
+  5: '12657c9df77f0d51',
+  42: '01b183534ee12000',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */

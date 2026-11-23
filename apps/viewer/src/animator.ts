@@ -5,6 +5,7 @@ import { stickhandle } from './carry';
 import { gaitRaw, initialGait, stepGait, type GaitState, type Motion } from './gait';
 import { fitGoalie, goalieMotion, goalieRaw, initialGoalieGait, mixGoalieRaw, stepGoalie, type GoalieFigurePose, type GoalieGait } from './goalie-pose';
 import { faceoffCrouch } from './overlays/faceoff';
+import { STICK_OVERLAYS } from './overlays/stick';
 import { fitBody, mixRaw, type SkaterPose } from './pose-mix';
 
 export * from './anim-context';
@@ -27,7 +28,7 @@ export * from './anim-context';
  */
 
 /** The registered overlays, in the order they are applied (later ones see the earlier ones' result). */
-export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay];
+export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, ...STICK_OVERLAYS];
 
 export function initialSkaterAnim(): SkaterAnim {
   return { gait: initialGait(), fresh: true, carrying: false, slots: {} };
