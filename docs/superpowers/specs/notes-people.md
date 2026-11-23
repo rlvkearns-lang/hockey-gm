@@ -133,3 +133,6 @@ Proposed shape **[my call, not yet agreed]**, with a caution:
 - Each time there are a few real choices (back the player, stay neutral, criticise, deny, confirm, no comment), and what is said is remembered by the player, the room, fans, the owner and rival GMs. A public promise counts as a promise.
 - The GM can also go to the media unprompted (announce a direction, defend a player), which is the public version of the private leak.
 - Handing it off: "no comment" by default, or the assistant GM / a PR person speaks for him under the delegation rules, with their own skill at it.
+- Owner agreed to the media shape above (2026-11-23), and added: the media should ask tough, specific questions drawn from what is actually happening, for example "why has X had reduced ice time over the past few days?"
+
+Proposed shape **[my call]**: questions are generated from real recent facts the game already tracks (a drop in a player's ice time, a healthy scratch, a slump, a quiet deadline, a rumour, a broken promise, a contract stalemate). Sharper reporters notice more and ask harder. The honest answer, a cover story and "no comment" each have consequences: the player hears what was said about him, and a cover story can be caught out later.
