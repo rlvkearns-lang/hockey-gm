@@ -177,3 +177,16 @@ Proposed shape **[my call]**:
 - Lighter additions afterwards: Olympics and other international play (stars leave, come back tired, hurt or riding high; players care about selection), prospect tournaments and development camp.
 - All-Star weekend: the owner does not care about it. Leave it out, or at most a line in the news **[my call]**.
 - Tournaments are simulated with the generated-player system rather than as full leagues **[my call]**.
+
+## Development and ageing (owner, 2026-11-23)
+
+- Surprises (late-round stars, top-pick busts) at about the real NHL rate.
+- True ability can be known, but it must be earned: nobody is merely "estimating" that an established superstar is a franchise player.
+
+Proposed shape **[my call]**, the first block presented to the owner without objection:
+
+- Every attribute has its own curve: skating and athletic ability peak early and fade first; shot and puck skills peak mid-twenties and hold; hockey sense, positioning, faceoffs and poise grow into the late twenties and decline last.
+- Each player has his own timing (early developer, late bloomer, ages gracefully, falls off a cliff), which scouts can only estimate.
+- Growth toward potential is earned each year from ice time and role at a level that challenges him, staff quality, work ethic, linemates, health and luck. Serious injuries can lower a ceiling; a bad fit can stall a prospect.
+- Ratings move a little through the season rather than in one summer jump; staff report who is progressing and who has stalled.
+- Certainty is earned by evidence. What a player is now becomes certain with NHL games played: after a few full seasons his current ratings are simply known, to every team. What he could still become stays an estimate while he is young and narrows as he ages, reaching "known" once there is nothing left to grow into. A proven star is shown as proven; an 18-year-old never is. Time in the GM's own organisation speeds this up for his own players.
