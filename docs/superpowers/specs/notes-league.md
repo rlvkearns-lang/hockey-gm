@@ -190,3 +190,11 @@ Proposed shape **[my call]**, the first block presented to the owner without obj
 - Growth toward potential is earned each year from ice time and role at a level that challenges him, staff quality, work ethic, linemates, health and luck. Serious injuries can lower a ceiling; a bad fit can stall a prospect.
 - Ratings move a little through the season rather than in one summer jump; staff report who is progressing and who has stalled.
 - Certainty is earned by evidence. What a player is now becomes certain with NHL games played: after a few full seasons his current ratings are simply known, to every team. What he could still become stays an estimate while he is young and narrows as he ages, reaching "known" once there is nothing left to grow into. A proven star is shown as proven; an 18-year-old never is. Time in the GM's own organisation speeds this up for his own players.
+
+## Season calendar (2026-11-23)
+
+Proposed and not objected to **[my call]**: the game moves a day at a time; advance by a day, to the next game, or to a chosen date, stopping for anything on the GM's "must see" list. The year's events: training camp and pre-season, opening night, trade deadline, playoffs, lottery, draft, free agency opening, arbitration hearings, development camp, a quiet late summer. The off-season moves in smaller steps with more stops.
+
+Owner on training camp and pre-season: much of it can be handled by the assistant GM, with a report afterwards. The GM can leave instructions beforehand in plain terms (for example "give this prospect some NHL minutes, and send him down unless he truly surprises"), and the report says what happened and why (who made the team, who was sent to the AHL or back to junior or college, who surprised, who disappointed).
+
+Proposed shape **[my call]**: camp exists as a short phase that can be played in full (watch pre-season games, make the cuts) or handed off. Handed off, the GM sets a few standing instructions per player or leaves it to the assistant GM's judgement, and gets one camp report with decisions he can overrule before opening night.
