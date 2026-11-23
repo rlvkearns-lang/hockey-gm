@@ -1,8 +1,9 @@
 import { DT, RINK, type GameSetup, type GameState, type SkaterState } from '@hockey/engine';
 import {
-  BODY_PASS, initialSkaterAnim, OVERLAYS, poseSkater, refreshSkater, stepSkater, turnRateOf,
-  type AnimContext, type BodyPass, type DrawnBody, type GoalieSample, type Overlay, type SkaterAnim, type SkaterSample,
+  BODY_PASS, GOALIE_OVERLAYS, initialGoalieAnim, initialSkaterAnim, OVERLAYS, poseGoalie, poseSkater, refreshGoalie, refreshSkater, stepGoalieAnim, stepSkater, turnRateOf,
+  type AnimContext, type BodyPass, type DrawnBody, type GoalieAnim, type GoalieSample, type Overlay, type SkaterAnim, type SkaterSample,
 } from '../animator';
+import type { GoalieFigurePose } from '../goalie-pose';
 import { bodyDims } from '../body';
 import { isCut, probeOf } from '../cuts';
 import { createCursor, lerpAngle, type Recording } from '../playback';
@@ -14,8 +15,9 @@ import { recorded, testSetup } from './game';
  * One pass over the first period of a recorded game at 60 Hz through the animator and the body pass, without the
  * scene (no three.js), sampling every figure as the scene does: blended between the frame's two ticks, the earlier
  * tick across an engine cut, everyone afresh after a cut. Each frame, after the body pass, `onFrame` sees every
- * skater's sample, pose and drawn body, and both goalies' drawn bodies. The objects are reused between frames: copy
- * what you keep.
+ * skater's sample, pose and drawn body, and both goalies' drawn bodies. With `goalies: true` the goalies are animated
+ * too (stepped after the skaters and posed after them, before the body pass, as the scene does) and their poses are in
+ * `goaliePoses`. The objects are reused between frames: copy what you keep.
  */
 
 export type PeriodSkater = { id: string; sample: SkaterSample; anim: SkaterAnim; pose: SkaterPose | null; body: DrawnBody };
@@ -24,6 +26,8 @@ export type PeriodFrame = {
   i: number; tick: number; alpha: number; prev: GameState; next: GameState; cut: boolean;
   skaters: readonly PeriodSkater[];
   goalies: readonly DrawnBody[];
+  /** Each goalie's pose this frame (with `goalies: true`; else empty), in the order of `goalies`. */
+  goaliePoses: readonly { id: string; sample: GoalieSample; anim: GoalieAnim; pose: GoalieFigurePose }[];
   /** Every drawn body (skaters, then goalies), as the body pass saw them. */
   bodies: readonly DrawnBody[];
   ctx: AnimContext;
@@ -35,7 +39,7 @@ const newBody = (id: string, kind: 'skater' | 'goalie', side: 'home' | 'away'): 
 
 export function drivePeriod(
   seed: number, onFrame: (f: PeriodFrame) => void,
-  opts: { overlays?: readonly Overlay[]; bodyPass?: BodyPass; hz?: number } = {},
+  opts: { overlays?: readonly Overlay[]; bodyPass?: BodyPass; hz?: number; goalies?: boolean } = {},
 ): { rec: Recording; setup: GameSetup; tl: Timeline; frames: number } {
   const rec = recorded(seed), setup = testSetup(seed), tl = buildTimeline(rec.events), pb = createCursor(setup, rec);
   const overlays = opts.overlays ?? OVERLAYS, pass = opts.bodyPass ?? BODY_PASS, hz = opts.hz ?? 60;
@@ -65,7 +69,10 @@ export function drivePeriod(
     goalies.push(newBody(g.id, 'goalie', side));
   }
   const bodies = [...skaters.map((s) => s.body), ...goalies];
-  const frame: PeriodFrame = { i: 0, tick: 0, alpha: 0, prev: first, next: first, cut: false, skaters, goalies, bodies, ctx };
+  const goaliePoses = opts.goalies
+    ? goalies.map((b) => ({ id: b.id, sample: goalieSamples.get(b.id)!, anim: initialGoalieAnim(), pose: null as unknown as GoalieFigurePose }))
+    : [];
+  const frame: PeriodFrame = { i: 0, tick: 0, alpha: 0, prev: first, next: first, cut: false, skaters, goalies, goaliePoses, bodies, ctx };
   const step = 30 / hz, dt = 1 / hz;
   let frames = 0;
   for (let i = 1; i * step <= end; i++) {
@@ -100,6 +107,10 @@ export function drivePeriod(
       if (cut) sk.anim = refreshSkater(sk.anim);
       sk.anim = stepSkater(sk.anim, sk.sample, ctx, dt, overlays);
     }
+    for (const g of goaliePoses) {
+      if (cut) g.anim = refreshGoalie(g.anim);
+      g.anim = stepGoalieAnim(g.anim, g.sample, ctx, dt, GOALIE_OVERLAYS);
+    }
     for (const sk of skaters) {
       const s = sk.sample, b = sk.body;
       if (!s.onIce) { sk.pose = null; b.onIce = false; b.offset.x = 0; b.offset.z = 0; continue; }
@@ -107,6 +118,7 @@ export function drivePeriod(
       sk.pose = r.pose;
       b.onIce = true; b.pos.x = s.pos.x; b.pos.y = s.pos.y; b.facing = s.facing; b.offset.x = r.offset.x; b.offset.z = r.offset.z;
     }
+    for (const g of goaliePoses) g.pose = poseGoalie(g.anim, g.sample, ctx, g.sample.dims, GOALIE_OVERLAYS);
     for (const b of goalies) {
       const g = goalieSamples.get(b.id)!;
       b.onIce = true; b.pos.x = g.pos.x; b.pos.y = g.pos.y; b.facing = g.facing; b.offset.x = 0; b.offset.z = 0;

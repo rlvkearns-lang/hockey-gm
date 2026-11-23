@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "lib": ["ES2022", "DOM"], "types": [] },
-  "include": ["src", "vite.config.ts", "vite.single.config.ts"]
+  "include": ["src", "vite.config.ts", "vite.single.config.ts", "vitest.picture.config.ts"]
 }

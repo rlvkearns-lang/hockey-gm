@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { DT, type GameEventOf, type GameSetup } from '@hockey/engine';
 import { bodyDims, type BodyDims } from '../body';
@@ -7,14 +7,12 @@ import { createCursor, type Playback, type Recording } from '../playback';
 import { armReach, shoulderJoint, type SkaterPose, type Vec3 } from '../pose-mix';
 import { createGameScene, PUCK_SCALE, seekScene, type GameScene } from '../scene';
 import { recorded, testSetup } from '../test/game';
-import { drivePeriod } from '../test/period';
 import { buildTimeline, type Timeline } from '../timeline';
-import { boardsGap, HIT_EFFECT_TICKS, MAX_OFFSET, pairMin, radiusOfWeight, weightOfDims } from './contact';
-import { CONTACT_FRAME_BODY_BOUND, CONTACT_FRAME_BOUND, contactFrames as contactFramesOf } from '../test/contact-frames';
 
 /**
- * Poke checks, hits, falls and the body pass, through the real scene and recorded games (seeds 5 and 42), and one
- * pass over the first period of seed 5 through the animator and the body pass for the whole-period bounds.
+ * Poke checks, hits, falls and the body pass, through the real scene and recorded games (seeds 5 and 42). The
+ * whole-period bounds are in period.picture.test.ts and the seek into a fall in contact.picture.test.ts (npm run
+ * test:picture).
  */
 
 type Game = { rec: Recording; tl: Timeline; setup: GameSetup; pb: Playback; sc: GameScene; dims: Map<string, BodyDims>; right: Map<string, boolean> };
@@ -185,169 +183,6 @@ describe('hits that show their weight and speed', () => {
     expect(light.length).toBeGreaterThan(5); expect(heavy.length).toBeGreaterThan(5);
     expect(mean(light.map((r) => r.recoil)) - mean(heavy.map((r) => r.recoil))).toBeGreaterThan(0.06);
   });
-});
-
-describe('a fall is the same however you reach it', () => {
-  // The target through his fall and get-up (down, mid-down, getting up, up as downT ends): every joint and where he is
-  // drawn. The hitter while the hit still shows on him (to HIT_EFFECT_TICKS): where he is drawn (the hit's offsets).
-  // His pose is his skating gait with the hit on top, and a seek's pre-roll at 1/30 s can settle a gait in another
-  // style or phase than play at 1/60 s (a glide for a sprint, a stop to the other side), as before this task; the same
-  // holds for the target before T + 8 and after downT ends, while some of his gait still shows.
-  it('seeking into a landed hit\'s fall and get-up shows what play shows (worst joint within 0.1 m)', () => {
-    let checked = 0, worst = 0, worstAt = '';
-    for (const seed of [5, 42]) {
-      const g = game(seed), end1 = g.tl.periodEnds[0]!;
-      for (const e of hitsOf(g, 'landed').filter((h) => h.tick < end1)) {
-        const T = e.tick, ids = [e.otherId!, e.playerId!];
-        const D = engineAt(g, T).skaters.find((k) => k.id === e.otherId)!.downT;
-        if (!(D > 0)) continue;
-        const endT = T + Math.ceil(D / DT - 1e-6);
-        const points = [T + 8, T + Math.round(D / 2 / DT), endT - 4, endT];
-        const played = new Map<number, { pose: SkaterPose; x: number; z: number }[]>();
-        const grab = (id: string): { pose: SkaterPose; x: number; z: number } => { const f = g.sc.figure(id)!; return { pose: copyPose(f.pose!), x: f.position.x, z: f.position.z }; };
-        // Play from 90 ticks before the hit.
-        play(g, T - 45, points[3]!, (tk) => { if (points.includes(tk)) played.set(tk, ids.map(grab)); });
-        for (const pt of points) {
-          seekScene(g.pb, g.sc, pt);
-          ids.forEach((id, k) => {
-            if (k === 1 && pt > T + HIT_EFFECT_TICKS) return;
-            const was = played.get(pt)![k]!, a = was.pose, now = grab(id), b = now.pose;
-            const at = Math.hypot(was.x - now.x, was.z - now.z);
-            // The torso's turns as metres at the shoulders (0.5 m up).
-            const torso = 0.5 * Math.max(Math.abs(a.pitch - b.pitch), Math.abs(a.roll - b.roll), Math.abs((a.twist ?? 0) - (b.twist ?? 0)));
-            const d = k === 1 ? at : Math.max(at, torso, dist(a.arms[0].hand, b.arms[0].hand), dist(a.arms[1].hand, b.arms[1].hand), dist(a.legs[0].foot, b.legs[0].foot),
-              dist(a.legs[1].foot, b.legs[1].foot), dist(a.blade, b.blade), Math.abs(a.hipY - b.hipY));
-            if (d > worst) { worst = d; worstAt = `${seed}@${T} ${id} at ${pt}`; }
-          });
-          checked++;
-        }
-      }
-    }
-    expect(checked).toBeGreaterThan(40);
-    expect(worst, worstAt).toBeLessThan(0.1);
-  });
-});
-
-/** The whole-period run, once for this file: seed 5, first period, 60 Hz. */
-type PeriodStats = {
-  frames: number; worstOverlap: number; worstOverlapAt: string; worstBoards: number; worstOffset: number;
-  lateOffset: number; lateAt: string; worstPlain: number; worstPlainAt: string; worstBodyContact: number; worstBodyContactAt: string; worstBody: number; worstBodyAt: string; worstContact: number; contactFrames: number; plainFrames: number; bad: number;
-  worstStep: number; worstStepAt: string; worstThrough: number;
-};
-let stats: PeriodStats;
-
-describe('the whole period (seed 5, 60 Hz, the animator and the body pass)', () => {
-  beforeAll(() => {
-    const s: PeriodStats = { frames: 0, worstOverlap: 0, worstOverlapAt: '', worstBoards: 0, worstOffset: 0, lateOffset: 0, lateAt: '', worstPlain: 0, worstPlainAt: '', worstBodyContact: 0, worstBodyContactAt: '', worstBody: 0, worstBodyAt: '', worstContact: 0, contactFrames: 0, plainFrames: 0, bad: 0, worstStep: 0, worstStepAt: '', worstThrough: 0 };
-    const radius = new Map<string, number>(), lastContact = new Map<string, number>(), lastOffset = new Map<string, { x: number; z: number }>();
-    const cf = contactFramesOf();
-    const last = new Map<string, { h0: Vec3; h1: Vec3; b: Vec3; f0: Vec3; f1: Vec3; hip: number }>();
-    let r: ReturnType<typeof drivePeriod> | null = null;
-    const res = drivePeriod(5, (f) => {
-      const { bodies, ctx } = f;
-      if (radius.size === 0) {
-        for (const b of bodies) {
-          const dims = b.kind === 'skater' ? ctx.skaters.get(b.id)!.dims : ctx.goalies.get(b.id)!.dims;
-          radius.set(b.id, radiusOfWeight(weightOfDims(dims)));
-        }
-      }
-      // Overlaps of drawn bodies, the boards, and the size of each offset.
-      for (let i = 0; i < bodies.length; i++) {
-        const a = bodies[i]!;
-        if (!a.onIce) continue;
-        const ax = a.pos.x + a.offset.x, az = a.pos.y + a.offset.z, ra = radius.get(a.id)!;
-        s.worstBoards = Math.max(s.worstBoards, ra - boardsGap(ax, az, { x: 0, z: 0 }));
-        s.worstOffset = Math.max(s.worstOffset, Math.hypot(a.offset.x, a.offset.z));
-        for (let j = i + 1; j < bodies.length; j++) {
-          const b = bodies[j]!;
-          if (!b.onIce) continue;
-          const rb = radius.get(b.id)!;
-          // (The two men of a hit may be drawn meeting through its impact: pairMin.)
-          const o = pairMin(ctx, a.id, b.id, ra, rb) - Math.hypot(b.pos.x + b.offset.x - ax, b.pos.y + b.offset.z - az);
-          // A skater whose engine place comes within 0.6 m of a goalie's is running right through him (the engine does not
-          // keep skaters off goalies): the side the pass holds him to must flip as he goes by, and at OFFSET_SPEED
-          // with 0.35 m each that leaves a larger overlap for a few frames (in dead play the goalie is not moved at all,
-          // so the skater alone moves). Measured apart.
-          const through = (a.kind === 'goalie') !== (b.kind === 'goalie') && Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y) < 0.6;
-          if (through) s.worstThrough = Math.max(s.worstThrough, o);
-          else if (o > s.worstOverlap) { s.worstOverlap = o; s.worstOverlapAt = `${f.tick} ${a.id} ${b.id}`; }
-          // In contact: their engine places within the two radii, or (the body pass holding them apart, or about to: it
-          // looks 0.12 s ahead) their drawn places within the radii and a margin.
-          const drawn = Math.hypot(b.pos.x + b.offset.x - ax, b.pos.y + b.offset.z - az);
-          if (ra + rb - Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y) > 0 || drawn < ra + rb + 0.05) { lastContact.set(a.id, f.i); lastContact.set(b.id, f.i); }
-        }
-      }
-      // Contact from the engine: in a contest, or down.
-      for (const sk of f.skaters) {
-        const st = sk.sample.state;
-        if (st.contestId !== null || st.downT > 0) lastContact.set(sk.id, f.i);
-      }
-      for (const b of bodies) {
-        const was = lastOffset.get(b.id);
-        if (!b.onIce) { lastOffset.delete(b.id); continue; }
-        if (was && !f.cut) {
-          const step = Math.hypot(b.offset.x - was.x, b.offset.z - was.z);
-          if (step > s.worstStep) { s.worstStep = step; s.worstStepAt = `${f.tick}+${f.alpha} ${b.id}`; }
-        }
-        lastOffset.set(b.id, { x: b.offset.x, z: b.offset.z });
-        const since = f.i - (lastContact.get(b.id) ?? -1e9);
-        const off = Math.hypot(b.offset.x, b.offset.z);
-        if (since >= 60 && off > s.lateOffset) { s.lateOffset = off; s.lateAt = `${f.tick} ${b.id}`; }
-      }
-      // Continuity: hands and blade per frame; impact and fall frames apart (from engine facts).
-      for (const sk of f.skaters) {
-        const p = sk.pose;
-        if (!p) { last.delete(sk.id); continue; }
-        const contact = cf.at((f.tick + f.alpha) * DT, f.prev, f.next, sk.id);
-        const now = { h0: { ...p.arms[0].hand }, h1: { ...p.arms[1].hand }, b: { ...p.blade }, f0: { ...p.legs[0].foot }, f1: { ...p.legs[1].foot }, hip: p.hipY };
-        const nums = [p.hipY, p.pitch, p.roll, now.h0.x, now.h0.y, now.h0.z, now.h1.x, now.h1.y, now.h1.z, now.b.x, now.b.y, now.b.z, p.legs[0].foot.x, p.legs[1].foot.z];
-        if (nums.some((v) => !Number.isFinite(v))) s.bad++;
-        const was = last.get(sk.id);
-        if (was && !f.cut) {
-          const mv = Math.max(dist(was.h0, now.h0), dist(was.h1, now.h1), dist(was.b, now.b));
-          const body = Math.max(Math.abs(was.hip - now.hip), dist(was.f0, now.f0), dist(was.f1, now.f1));
-          if (contact && body > s.worstBodyContact) { s.worstBodyContact = body; s.worstBodyContactAt = `${f.tick}+${f.alpha} ${sk.id}`; }
-          if (!contact && body > s.worstBody) { s.worstBody = body; s.worstBodyAt = `${f.tick}+${f.alpha} ${sk.id}`; }
-          if (contact) { s.worstContact = Math.max(s.worstContact, mv); s.contactFrames++; } else { if (mv > s.worstPlain) { s.worstPlain = mv; s.worstPlainAt = `${f.tick}+${f.alpha.toFixed(2)} ${sk.id}`; } s.plainFrames++; }
-        }
-        last.set(sk.id, now);
-      }
-    });
-    r = res;
-    s.frames = r.frames;
-    stats = s;
-  }, 120_000);
-
-  it('no two drawn figures overlap by more than 0.15 m at any frame of a period, and none is drawn outside the boards', () => {
-    expect(stats.frames).toBeGreaterThan(80000);
-    expect(stats.worstOverlap, stats.worstOverlapAt).toBeLessThan(0.15);
-    expect(stats.worstThrough).toBeLessThan(0.45);
-    expect(stats.worstBoards).toBeLessThan(1e-6);
-  });
-  it('the drawn offset never exceeds 0.35 m and returns to under 0.02 m within a second of contact ending', () => {
-    expect(stats.worstOffset).toBeLessThan(MAX_OFFSET + 1e-9);
-    expect(stats.lateOffset, stats.lateAt).toBeLessThan(0.02);
-  });
-  it('no figure\'s drawn offset changes by more than 0.08 m in one 60 Hz frame', () => {
-    expect(stats.worstStep, stats.worstStepAt).toBeLessThan(0.08);
-  });
-  it('outside the impact and fall frames the real-game continuity bound still holds; within them no part moves more than 0.6 m in one 60 Hz frame', () => {
-    console.log(JSON.stringify(stats));
-    expect(stats.bad).toBe(0);
-    expect(stats.contactFrames).toBeGreaterThan(1000);
-    expect(stats.worstPlain, stats.worstPlainAt).toBeLessThan(0.35);
-    expect(stats.worstContact).toBeLessThan(0.6);
-    expect(stats.worstContact).toBeLessThan(CONTACT_FRAME_BOUND);
-    expect(stats.worstBodyContact, stats.worstBodyContactAt).toBeLessThan(CONTACT_FRAME_BODY_BOUND);
-    // Beyond the brief: outside them, hips and skates stay under 0.1 m a frame (overlays/stick.test.ts's bound).
-    expect(stats.worstBody, stats.worstBodyAt).toBeLessThan(0.1);
-  });
-});
-
-const dist = (a: Vec3, b: Vec3): number => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-const copyPose = (p: SkaterPose): SkaterPose => ({
-  ...p, legs: [{ ...p.legs[0], foot: { ...p.legs[0].foot } }, { ...p.legs[1], foot: { ...p.legs[1].foot } }],
-  arms: [{ hand: { ...p.arms[0].hand } }, { hand: { ...p.arms[1].hand } }], blade: { ...p.blade },
 });
 
 describe('the body pass and a held puck', () => {

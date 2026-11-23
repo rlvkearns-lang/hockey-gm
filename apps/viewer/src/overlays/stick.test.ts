@@ -1,17 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { GameEventOf, GameSetup } from '@hockey/engine';
-import { DT, RINK } from '@hockey/engine';
-import { initialSkaterAnim, OVERLAYS, poseSkater, refreshSkater, stepSkater, turnRateOf, type AnimContext, type Overlay, type SkaterAnim, type SkaterSample } from '../animator';
-import { bodyDims } from '../body';
-import { isCut, probeOf } from '../cuts';
-import { createCursor, lerpAngle, type Playback, type Recording } from '../playback';
+import { RINK } from '@hockey/engine';
+import { OVERLAYS, type Overlay } from '../animator';
+import { createCursor, type Playback, type Recording } from '../playback';
 import type { SkaterPose, Vec3 } from '../pose-mix';
 import { createGameScene, seekScene, type GameScene } from '../scene';
-import { CONTACT_FRAME_BODY_BOUND, CONTACT_FRAME_BOUND, contactFrames as contactFramesOf } from '../test/contact-frames';
 import { recorded, testSetup } from '../test/game';
 import { buildTimeline, type Timeline } from '../timeline';
 import { faceoffCrouch } from './faceoff';
-import { SLAP_DISTANCE, STICK_OVERLAYS, stickSlotOf, stickWeight, type StickStyle } from './stick';
+import { SLAP_DISTANCE, STICK_OVERLAYS, stickSlotOf, type StickStyle } from './stick';
 
 /**
  * The stick actions through the real scene and a recorded game: each helper plays the scene (with the game's event
@@ -99,12 +96,6 @@ function directionTo(rec: Recording, fromId: string, toId: string, tick: number)
   const dx = b.pos.x - a.pos.x, dz = b.pos.y - a.pos.y, l = Math.hypot(dx, dz);
   return { x: dx / l, z: dz / l };
 }
-/** Every number of a pose is finite. */
-function finitePose(p: SkaterPose): boolean {
-  const v = [p.blade, p.arms[0].hand, p.arms[1].hand, p.legs[0].foot, p.legs[1].foot];
-  for (const q of v) if (!Number.isFinite(q.x) || !Number.isFinite(q.y) || !Number.isFinite(q.z)) return false;
-  return Number.isFinite(p.hipY) && Number.isFinite(p.pitch) && Number.isFinite(p.roll) && Number.isFinite(p.yaw) && Number.isFinite(p.stickAngle) && Number.isFinite(p.twist ?? 0);
-}
 const releases = (rec: Recording): GameEventOf<'release'>[] => rec.events.filter((e): e is GameEventOf<'release'> => e.type === 'release');
 
 describe('stick actions', () => {
@@ -129,77 +120,12 @@ describe('stick actions', () => {
     }
     expect(checked).toBeGreaterThan(25);
   });
-  it('through a whole period the per-frame move of hands and blade stays under 0.35 m at 60 Hz and nothing is NaN', () => {
-    const r = drivePeriod(5);
-    expect(r.posed).toBeGreaterThan(300000);
-    expect(r.active).toBeGreaterThan(20000); // frames of a skater with a stick action showing
-    expect(r.bad).toBe(0);
-    expect(r.worst).toBeLessThan(0.35);
-    // Beyond the brief: the actions leave the hips and the skates to the gait (the scene's real-game bound is 10 cm).
-    expect(r.worstBody).toBeLessThan(0.1);
-    // Milestone 3 Task 4: the frames of a hit's impact and of a fall and getting up (test/contact-frames.ts, from engine
-    // facts) are measured apart, against the larger bound stated for them.
-    expect(r.contactFrames).toBeGreaterThan(500);
-    expect(r.worstContact).toBeLessThan(CONTACT_FRAME_BOUND);
-    expect(r.worstContactBody).toBeLessThan(CONTACT_FRAME_BODY_BOUND);
-  });
   it('seeking into the middle of a wind-up shows the wind-up', () => {
     const { rec, tl } = game(42); const rel = rec.events.find(e => e.type === 'release' && e.detail.kind === 'shot')!;
     expect(poseDistance(poseBySeek(rec, tl, rel.playerId!, rel.tick - 4), poseAtTick(rec, tl, rel.playerId!, rel.tick - 4))).toBeLessThan(0.15);
   });
 
-  // Beyond the brief's list.
-  it('a seek shows the stick actions play shows: their state and weights around shots, passes and dumps', () => {
-    for (const seed of [5, 42]) {
-      const g = game(seed);
-      const watch = { id: '', tick: 0 };
-      type Got = { w: Record<string, number>; style: string; pending: boolean; aim: number };
-      const box: { v: Got | null } = { v: null };
-      const skaters = OVERLAYS.map((ov): Overlay => ({
-        ...ov,
-        weight: (a, s, c) => {
-          const w = ov.weight(a, s, c);
-          if (s.id === watch.id) {
-            const got = (box.v ??= { w: {}, style: '', pending: false, aim: 0 });
-            got.w[ov.id] = w;
-            const act = stickSlotOf(a)?.acts.find((x) => x.tick === watch.tick);
-            if (act) { got.style = act.style; got.pending = act.pending; got.aim = act.aim; }
-          }
-          return w;
-        },
-      }));
-      const sc = createGameScene(g.setup, { timeline: g.tl, animation: { skaters } });
-      const rels = releases(g.rec);
-      const pick = (kind: string): GameEventOf<'release'>[] => rels.filter((e) => e.detail.kind === kind && e.tick > 400).slice(0, 12);
-      const offsets = [-12, -4, 0, 6];
-      let compared = 0;
-      for (const rel of [...pick('shot'), ...pick('pass'), ...pick('dump')]) {
-        watch.id = rel.playerId!; watch.tick = rel.tick;
-        // Play: from 1.5 s before the first offset, at 60 Hz.
-        const start = rel.tick + offsets[0]! - 45, played = new Map<number, Got | null>();
-        seekScene(g.pb, sc, start);
-        for (let i = 1; start + i * 0.5 <= rel.tick + offsets[offsets.length - 1]!; i++) {
-          box.v = null; g.pb.seek(start + i * 0.5); sc.update(g.pb.frame(), 1 / 60);
-          const at = start + i * 0.5;
-          if (offsets.includes(at - rel.tick)) played.set(at - rel.tick, box.v);
-        }
-        for (const off of offsets) {
-          box.v = null; seekScene(g.pb, sc, rel.tick + off);
-          const p = played.get(off), q = box.v as Got | null;
-          if (!p || !q) continue; // off the ice at that moment
-          expect(q.style, `${seed} ${rel.tick} ${off}`).toBe(p.style);
-          expect(q.pending).toBe(p.pending);
-          // The aim is followed step by step until the contact and kept from there: a 30 Hz pre-roll may keep it a
-          // fraction of a tick earlier than a 60 Hz play.
-          expect(Math.abs(q.aim - p.aim)).toBeLessThan(0.1);
-          for (const ov of STICK_OVERLAYS) expect(Math.abs((q.w[ov.id] ?? 0) - (p.w[ov.id] ?? 0)), `${seed} ${rel.tick} ${off} ${ov.id}`).toBeLessThan(0.05);
-          compared++;
-        }
-      }
-      sc.dispose();
-      expect(compared).toBeGreaterThan(120);
-    }
-  });
+  // Beyond the brief's list. (The seek sweep over shots, passes and dumps is in stick.picture.test.ts.)
   it('both hands: the wind-up goes back on his stick side and the follow-through goes where the puck went, for left and right shots', () => {
     const g = game(42);
     const shoots = new Map([...g.setup.home.players, ...g.setup.away.players].map((d) => [d.id, d.shoots]));
@@ -251,75 +177,6 @@ describe('stick actions', () => {
     }
   });
 });
-
-/**
- * Drive the animator (no scene) through the first period of a recorded game at 60 Hz, sampling every skater on the
- * ice as the scene does (blended between the frame's ticks, the earlier tick across an engine cut, everyone afresh
- * after a cut), and measure the largest move in a frame of a hand or the blade heel, and of the hips or a skate, for
- * every skater on the ice in every frame but his first on the ice and those across an engine cut; count the frames in
- * which a stick action shows on him, and the poses with a number that is not finite. Frames of a hit's impact or of a
- * fall and getting up (test/contact-frames.ts) are measured apart (worstContact, worstContactBody).
- */
-function drivePeriod(seed: number): { worst: number; worstBody: number; posed: number; active: number; bad: number; worstContact: number; worstContactBody: number; contactFrames: number } {
-  const g = game(seed), pb = g.pb;
-  const end = g.rec.events.find((e) => e.type === 'periodEnd')!.tick;
-  const defs = new Map([...g.setup.home.players, ...g.setup.away.players].map((d) => [d.id, d]));
-  const samples = new Map<string, SkaterSample>(), anims = new Map<string, SkaterAnim>(), last = new Map<string, { pose: SkaterPose; on: boolean }>();
-  const cuts = new Set(pb.cuts);
-  pb.seek(0);
-  const ctx: AnimContext = {
-    tick: 0, alpha: 0, time: 0, state: pb.frame().next, skaters: samples, goalies: new Map(),
-    puck: { engine: { x: 0, y: 0, z: 0 }, drawn: { x: 0, y: 0, z: 0 }, carrierId: null }, contests: [], timeline: g.tl, rink: RINK, defends: { home: -1, away: 1 },
-  };
-  let worst = 0, worstBody = 0, posed = 0, active = 0, bad = 0, worstContact = 0, worstContactBody = 0, contactFrames = 0;
-  const cf = contactFramesOf();
-  for (let i = 1; i <= end * 2; i++) {
-    pb.seek(i * 0.5);
-    const f = pb.frame(), prev = f.prev, a = f.alpha;
-    const next = isCut(probeOf(prev), f.next) ? prev : f.next;
-    const cut = cuts.has(prev.tick) && a === 0;
-    ctx.tick = f.tick; ctx.alpha = a; ctx.time = (f.tick + a) * DT; ctx.state = next; ctx.contests = next.contests;
-    ctx.defends.home = next.attackDir.home === 1 ? -1 : 1; ctx.defends.away = next.attackDir.away === 1 ? -1 : 1;
-    ctx.puck.engine.x = lerp(prev.puck.pos.x, next.puck.pos.x, a); ctx.puck.engine.z = lerp(prev.puck.pos.y, next.puck.pos.y, a);
-    ctx.puck.engine.y = Math.max(0, lerp(prev.puck.z, next.puck.z, a));
-    ctx.puck.drawn.x = ctx.puck.engine.x; ctx.puck.drawn.y = ctx.puck.engine.y; ctx.puck.drawn.z = ctx.puck.engine.z;
-    ctx.puck.carrierId = next.carrierId;
-    for (const p of prev.skaters) {
-      const n0 = next.skaters.find((x) => x.id === p.id), n = n0 && n0.onIce ? n0 : p, d = defs.get(p.id)!;
-      samples.set(p.id, {
-        id: p.id, side: p.side, right: d.shoots === 'R', dims: bodyDims(d.heightCm, d.weightKg), onIce: p.onIce,
-        pos: { x: lerp(p.pos.x, n.pos.x, a), y: lerp(p.pos.y, n.pos.y, a) }, vel: { x: lerp(p.vel.x, n.vel.x, a), y: lerp(p.vel.y, n.vel.y, a) },
-        facing: lerpAngle(p.facing, n.facing, a), accelAlong: p === n ? 0 : (Math.hypot(n.vel.x, n.vel.y) - Math.hypot(p.vel.x, p.vel.y)) / DT,
-        turnRate: p === n ? 0 : turnRateOf(p.facing, n.facing), down: n.downT > 0, carrying: (n === p ? prev.carrierId : next.carrierId) === p.id, state: n,
-      });
-    }
-    for (const p of prev.skaters) {
-      const s = samples.get(p.id)!;
-      let anim = anims.get(p.id) ?? initialSkaterAnim();
-      if (cut) anim = refreshSkater(anim);
-      anim = stepSkater(anim, s, ctx, 1 / 60);
-      anims.set(p.id, anim);
-      if (!s.onIce) { last.delete(p.id); continue; }
-      const pose = poseSkater(anim, s, ctx, s.dims).pose, on = stickWeight(anim, s, ctx) > 0;
-      posed++;
-      if (!finitePose(pose)) bad++;
-      const was = last.get(p.id);
-      const contact = cf.at((f.tick + a) * DT, prev, next, p.id);
-      if (was && !cut && contact) {
-        worstContact = Math.max(worstContact, poseDistance(was.pose, pose));
-        worstContactBody = Math.max(worstContactBody, Math.abs(was.pose.hipY - pose.hipY), dist3(was.pose.legs[0].foot, pose.legs[0].foot), dist3(was.pose.legs[1].foot, pose.legs[1].foot));
-        contactFrames++;
-      } else if (was && !cut) {
-        worst = Math.max(worst, poseDistance(was.pose, pose));
-        if (on || was.on) active++;
-        worstBody = Math.max(worstBody, Math.abs(was.pose.hipY - pose.hipY), dist3(was.pose.legs[0].foot, pose.legs[0].foot), dist3(was.pose.legs[1].foot, pose.legs[1].foot));
-      }
-      last.set(p.id, { pose, on });
-    }
-  }
-  return { worst, worstBody, posed, active, bad, worstContact, worstContactBody, contactFrames };
-}
-const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 /** The type each shooter's slot gave his release, as play reaches its contact (read through a tracker that keeps it). */
 function stylesOf(g: Game, rels: GameEventOf<'release'>[]): Map<GameEventOf<'release'>, StickStyle> {
