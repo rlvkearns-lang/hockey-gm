@@ -1,0 +1,50 @@
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { GlobalSetupContext } from 'vitest/node';
+import { record } from '../playback';
+import { SHARED_SEED, testSetup } from './setup-of';
+
+/**
+ * Plays the one game the scene and playback tests share, once per test run, and leaves it in a file for every test
+ * file to read (test files run in separate workers, so a module-level cache would not be shared).
+ *
+ * The file is kept between runs under node_modules/.cache, named by a hash of every source the recording depends on
+ * (the engine's sources and the viewer's playback, cut and setup code), so a run after any change to them records
+ * afresh and an unchanged run skips three seconds of simulation.
+ */
+const here = dirname(fileURLToPath(import.meta.url));
+const viewer = resolve(here, '../..');
+const sources = (): string[] => {
+  const out: string[] = [];
+  const walk = (d: string): void => {
+    for (const f of readdirSync(d).sort()) {
+      const p = join(d, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (p.endsWith('.ts') && !p.endsWith('.test.ts')) out.push(p);
+    }
+  };
+  walk(resolve(viewer, '../../packages/engine/src'));
+  out.push(resolve(viewer, 'src/playback.ts'), resolve(viewer, 'src/cuts.ts'), resolve(here, 'setup-of.ts'), fileURLToPath(import.meta.url));
+  return out;
+};
+
+export default function setup({ provide }: GlobalSetupContext): void {
+  const hash = createHash('sha256');
+  for (const f of sources()) hash.update(f).update(readFileSync(f));
+  const dir = resolve(viewer, '../../node_modules/.cache/hockey-viewer-tests');
+  const key = hash.digest('hex').slice(0, 16);
+  const file = join(dir, `recording-${key}.json`), seenFile = join(dir, `onstep-${key}.json`);
+  if (!existsSync(file) || !existsSync(seenFile)) {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    // Which ticks onStep saw, for playback.test.ts (this run is the onStep run createPlayback makes).
+    let seen = 0, inOrder = true;
+    const rec = record(testSetup(SHARED_SEED), { onStep: (st) => { if (st.tick !== seen) inOrder = false; seen++; } });
+    writeFileSync(seenFile, JSON.stringify({ count: seen, inOrder }));
+    writeFileSync(file, JSON.stringify(rec));
+  }
+  provide('recordingFile', file);
+  provide('onStepSeen', JSON.parse(readFileSync(seenFile, 'utf8')) as { count: number; inOrder: boolean });
+}

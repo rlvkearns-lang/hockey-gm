@@ -4,5 +4,5 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   define: { __SKATING_LINK__: 'true' },
   build: { rollupOptions: { input: { index: 'index.html', skating: 'skating.html' } } },
-  test: { include: ['src/**/*.test.ts'] },
+  test: { include: ['src/**/*.test.ts'], globalSetup: ['src/test/global-setup.ts'] },
 } as Parameters<typeof defineConfig>[0]);
