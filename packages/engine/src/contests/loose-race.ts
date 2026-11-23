@@ -60,6 +60,17 @@ function raceable(state: GameState): boolean {
     && hypot2(p.vel.x, p.vel.y) < T.maxPuckSpeed && distToBoards(p.pos) > T.boardsClear && !puckHeldByContest(state);
 }
 
+const RACEABLE = 'looseRace.raceable';
+
+/** raceable, worked out once per round of triggers (`ctx.memo`). */
+function raceableNow(ctx: ContestCtx): boolean {
+  const m = ctx.memo.get(RACEABLE) as boolean | undefined;
+  if (m !== undefined) return m;
+  const ok = raceable(ctx.state);
+  ctx.memo.set(RACEABLE, ok);
+  return ok;
+}
+
 /** A skater busy in a contest that steers him is counted this much (s) later to the puck. */
 const BUSY_SECONDS = 0.3;
 
@@ -116,7 +127,7 @@ export const looseRaceContest: Contest = {
 
   trigger(ctx, s) {
     const state = ctx.state;
-    if (!raceable(state) || !eligible(state, s)) return null;
+    if (!raceableNow(ctx) || !eligible(state, s)) return null;
     const first = firstMen(ctx);
     const mine = first[s.side === 'home' ? 0 : 1], theirs = first[s.side === 'home' ? 1 : 0];
     if (mine.id !== s.id || theirs.id === null) return null;

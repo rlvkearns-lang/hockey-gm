@@ -7,7 +7,7 @@ import { TUNING } from '../tuning';
 import type { ContestState, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
-  carrierOf, contestEvent, contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
+  carrierNow, carrierOf, contestEvent, contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx, type ContestResult, type Weights,
 } from './core';
 
@@ -103,11 +103,8 @@ export const boardBattleContest: Contest = {
 
   trigger(ctx, s) {
     const state = ctx.state;
-    const p = state.puck;
-    if (state.shotInFlight !== null || p.z > 0.1) return null;
-    if (hypot2(p.vel.x, p.vel.y) >= T.triggerSpeed || distToBoards(p.pos) > T.triggerBoards) return null;
-    if (dist(s.pos, p.pos) > T.triggerRange || onCooldown(state, s.id, KIND) || puckHeldByContest(state)) return null;
-    const carrier = carrierOf(state);
+    if (!puckBattleable(ctx) || dist(s.pos, state.puck.pos) > T.triggerRange || onCooldown(state, s.id, KIND)) return null;
+    const carrier = carrierNow(ctx);
     if (carrier !== null) {
       // A carrier along the boards: the battle is between him and the opponent on him.
       if (!isFree(carrier) || onCooldown(state, carrier.id, KIND)) return null;
@@ -155,6 +152,23 @@ export const boardBattleContest: Contest = {
     return r;
   },
 };
+
+const BATTLEABLE = 'boardBattle.puck';
+
+/**
+ * The puck could start a board battle: on the ice and not a shot, slower than T.triggerSpeed, within T.triggerBoards of
+ * the boards, and no battle holds it already. Worked out once per round of triggers (`ctx.memo`).
+ */
+function puckBattleable(ctx: ContestCtx): boolean {
+  const m = ctx.memo.get(BATTLEABLE) as boolean | undefined;
+  if (m !== undefined) return m;
+  const state = ctx.state;
+  const p = state.puck;
+  const ok = state.shotInFlight === null && p.z <= 0.1 && hypot2(p.vel.x, p.vel.y) < T.triggerSpeed
+    && distToBoards(p.pos) <= T.triggerBoards && !puckHeldByContest(state);
+  ctx.memo.set(BATTLEABLE, ok);
+  return ok;
+}
 
 /** `s` and the nearest free opponent within T.triggerRange of the puck, or null. */
 function nearestOpponent(state: GameState, s: SkaterState): string[] | null {

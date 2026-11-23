@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DT } from '../../src/constants';
-import { beatenChance } from '../../src/contests/poke-check';
+import { beatenChance, pokeAttemptChance } from '../../src/contests/poke-check';
 import { def, pokeOutcomes, pokeOutOfReach, pokeReleased, runPoke, share, startPoke, stepsUntilDone } from '../helpers';
 
 describe('poke checks', () => {
@@ -14,6 +14,10 @@ describe('poke checks', () => {
     expect(o.kept + o.beaten).toBeGreaterThan(50);
     expect(o.beaten / (o.kept + o.beaten)).toBeLessThan(0.3);
     expect(beatenChance(0.95)).toBeGreaterThanOrEqual(0.03); expect(beatenChance(0.05)).toBeLessThanOrEqual(0.97);
+  });
+  it('a defender in range does not always poke: better stick checkers go for it more, never always or never', () => {
+    expect(pokeAttemptChance(def({ stickChecking: 90 }))).toBeGreaterThan(pokeAttemptChance(def({ stickChecking: 50 })));
+    expect(pokeAttemptChance(def({ stickChecking: 100 }))).toBeLessThan(0.97); expect(pokeAttemptChance(def({ stickChecking: 1 }))).toBeGreaterThanOrEqual(0.03);
   });
   it('a poke check takes time and is visible in state', () => { const c = startPoke(); expect(c.stage).toBe('reach'); expect(stepsUntilDone(c)).toBeGreaterThanOrEqual(Math.floor(0.25 / DT)); });
   it('releasing the puck before the stick gets there ends it with no result', () => {

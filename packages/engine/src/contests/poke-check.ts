@@ -1,9 +1,9 @@
 import { recordTouch } from '../actions';
 import { TUNING } from '../tuning';
-import type { ContestState, SkaterState } from '../types';
+import type { ContestState, PlayerDef, SkaterState } from '../types';
 import { dist, hypot2 } from '../vec';
 import {
-  carrierOf, contestEvent, contestRating, dropParticipant, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS,
+  carrierNow, carrierOf, contestEvent, contestRating, dropParticipant, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS,
   winProb, type Contest, type ContestCtx, type ContestResult,
 } from './core';
 
@@ -46,14 +46,16 @@ export const pokeCheckContest: Contest = {
 
   trigger(ctx, s) {
     const state = ctx.state;
-    const carrier = carrierOf(state);
+    const carrier = carrierNow(ctx);
     if (!carrier || carrier.side === s.side || !isFree(carrier) || state.puck.z > 0) return null;
     const dx = s.pos.x - carrier.pos.x, dy = s.pos.y - carrier.pos.y;
     const d = hypot2(dx, dy);
     if (d > T.triggerRange) return null;
     if (d > 0 && (Math.cos(carrier.facing) * dx + Math.sin(carrier.facing) * dy) / d < T.frontCos) return null;
     if (onCooldown(state, s.id, KIND)) return null;
-    return [s.id, carrier.id];
+    // He makes up his mind once per cooldown: poke now, or keep his position.
+    setCooldown(state, s.id, KIND, T.cooldownSeconds);
+    return ctx.rng.next() < pokeAttemptChance(ctx.defs.get(s.id)!) ? [s.id, carrier.id] : null;
   },
 
   start(ctx, participants) {
@@ -96,6 +98,11 @@ export const pokeCheckContest: Contest = {
     return finish(c, ctx, checker, carrier);
   },
 };
+
+/** Chance a defender in range goes for the puck when he makes up his mind: attemptBase + attemptPerPoint * (stickChecking - 50), within [0.03, 0.97]. */
+export function pokeAttemptChance(d: PlayerDef): number {
+  return Math.max(0.03, Math.min(0.97, T.attemptBase + T.attemptPerPoint * (d.attrs.stickChecking - 50)));
+}
 
 /**
  * The poke itself: one roll against winProb of the checker's edge. A failed poke then leaves him beaten with its own

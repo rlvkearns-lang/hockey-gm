@@ -4,7 +4,7 @@ import { TUNING } from '../tuning';
 import type { ContestState, GameState, PlayerDef, SkaterState } from '../types';
 import { hypot2 } from '../vec';
 import {
-  applyResult, carrierOf, contestChemistry, contestEvent, dropParticipant, effective, enterStage, isFree, onCooldown, setCooldown, skaterById,
+  applyResult, carrierNow, carrierOf, contestChemistry, contestEvent, dropParticipant, effective, enterStage, isFree, onCooldown, setCooldown, skaterById,
   STAGE_EPS, winProb, type Contest, type ContestCtx,
 } from './core';
 
@@ -82,7 +82,7 @@ function hittable(ctx: ContestCtx): Hittable {
   const memo = ctx.memo.get(HITTABLE) as Hittable | undefined;
   if (memo !== undefined) return memo;
   const state = ctx.state;
-  const carrier = carrierOf(state);
+  const carrier = carrierNow(ctx);
   const r = state.lastRelease;
   const released = r !== null && r.id !== state.carrierId && state.tick - r.tick <= Math.round(T.releaseWindowSeconds / DT) ? skaterById(state, r.id) : null;
   const out: Hittable = { carrier, released };

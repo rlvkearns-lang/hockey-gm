@@ -3,7 +3,7 @@ import { assignJobs, phaseFor } from '../src/team-play';
 import { DT } from '../src/constants';
 import { resolveNets } from '../src/rink';
 import { movementOf, stepSkater } from '../src/skating';
-import { defs, onIce, skater, spotName, stateWith, tactics } from './helpers';
+import { defs, onIce, skater, spotName, stateWith, tactics, wingerAheadOnRush } from './helpers';
 
 describe('team play', () => {
   it('phases track the puck', () => {
@@ -29,6 +29,9 @@ describe('team play', () => {
       reached = Math.hypot(d.pos.x - st.puck.pos.x, d.pos.y - st.puck.pos.y) < 0.9;
     }
     expect(reached).toBe(true);
+  });
+  it('a winger flying up ice with the carrier eases up in time to stay onside', () => {
+    expect(wingerAheadOnRush()).toBeLessThan(0);
   });
   it('forwards rotate in the offensive zone', () => {
     const spots = new Set<string>(); const st = stateWith({ carrier: 'home', puckX: 22 });

@@ -36,8 +36,13 @@ export function movementOf(def: PlayerDef, energy: number): Movement {
   };
 }
 
-const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 const TWO_PI = 2 * Math.PI;
+/** Wrap an angle to (-PI, PI] by whole turns (no trigonometry: this runs for every skater every tick). */
+export function wrapAngle(a: number): number {
+  if (a > -Math.PI && a <= Math.PI) return a;
+  const w = a - TWO_PI * Math.round(a / TWO_PI);
+  return w <= -Math.PI ? w + TWO_PI : w > Math.PI ? w - TWO_PI : w;
+}
 /** Cheap wrap to about [-PI, PI]; within ~1e-15 of wrapAngle, so only used where that cannot change an outcome. */
 const roughWrap = (a: number): number => a - TWO_PI * Math.round(a / TWO_PI);
 /** Margin far above roughWrap's error, so a comparison outside it decides the same way as with wrapAngle. */

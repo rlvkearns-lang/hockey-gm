@@ -14,6 +14,7 @@ import { executeDump, executePass, recordTouch, releasePuck, tryIntercept } from
 import { resolveBodies } from '../src/bodies';
 import { contestTick, startContest } from '../src/contests/core';
 import { hitContest } from '../src/contests/hit';
+import { pokeCheckContest } from '../src/contests/poke-check';
 import { boardBattleContest } from '../src/contests/board-battle';
 import { netFrontContest } from '../src/contests/net-front';
 import { looseRaceContest, timeToReach } from '../src/contests/loose-race';
@@ -610,16 +611,23 @@ function duelToEnd(h: Duel): void {
   throw new Error('no contest started and finished within 6 s');
 }
 
+/** `defender` (away C) standing 1.2 m in front of the still carrier `carrier` (home C), with a poke check started on him (startContest, not the trigger's draw). */
+function pokeDuel(defender: PlayerDef, carrier: PlayerDef): Duel {
+  const h = duel(defender, carrier, 0.6, 0);
+  startContest(h.st, h.ds, h.rng, pokeCheckContest, ['away-C', 'home-C'], h.events);
+  return h;
+}
+
 /** A poke check by `defender` (standing 1.2 m in front of him) on the still carrier `carrier`: true when the defender wins it. */
 export function runPoke(defender: PlayerDef, carrier: PlayerDef): boolean {
-  const h = duel(defender, carrier, 0.6, 0);
+  const h = pokeDuel(defender, carrier);
   duelToEnd(h);
   return h.events.some((e) => e.type === 'takeaway' && e.playerId === 'away-C');
 }
 
 /** The contest state of a poke check one tick after it starts (every attribute 70). */
 export function startPoke(): ContestState {
-  const h = duel(d, d, 0.6, 0);
+  const h = pokeDuel(d, d);
   duelStep(h);
   const c = h.st.contests[0];
   if (!c) throw new Error('no poke check started');
@@ -1075,7 +1083,7 @@ export function hitOutcomes(hitter: PlayerDef, tgt: PlayerDef, closing: number, 
 export function pokeOutcomes(defender: PlayerDef, carrier: PlayerDef, n: number): { won: number; kept: number; beaten: number } {
   const out = { won: 0, kept: 0, beaten: 0 };
   for (let i = 0; i < n; i++) {
-    const h = duel(defender, carrier, 0.6, 0);
+    const h = pokeDuel(defender, carrier);
     let c: ContestState | null = null;
     for (let k = 0; k < 180 && (c === null || h.st.contests.includes(c)); k++) { duelStep(h); c ??= h.st.contests[0] ?? null; }
     const o = c?.data.outcome;
@@ -1164,6 +1172,29 @@ export function icedWithWingerOffside(): GameEvent | null {
   return refereeUntilCall(st);
 }
 
+/**
+ * A rush: home C carries the puck up ice at 8 m/s from the neutral zone (x -7) to the blue line while home LW, 2.5 m
+ * ahead of him and flying, keeps the shape team play gives him (the real assignJobs and skating every tick). How far
+ * past the blue line (m) the winger's centre got while the puck was still outside the zone, less his body radius
+ * (> 0: offside).
+ */
+export function wingerAheadOnRush(): number {
+  const st = stateWith({ carrier: 'home', puckX: -7, carrierSlot: 'C' });
+  for (const k of st.skaters) if (!(k.side === 'home' && (k.slot === 'C' || k.slot === 'LW'))) k.onIce = false;
+  const c = skater(st, 'home', 'C'), lw = skater(st, 'home', 'LW');
+  lw.pos = { x: -4.5, y: 8 }; lw.vel = { x: 8.5, y: 0 };
+  let worst = -Infinity;
+  for (let t = 0; t < 30 * 4 && st.puck.pos.x < RINK.blueLineX; t++) {
+    st.tick++;
+    c.pos.x += 8 * DT; c.vel = { x: 8, y: 0 };
+    st.puck.pos = { x: c.pos.x + 0.6, y: c.pos.y };
+    assignJobs(st, defs, tactics);
+    stepSkater(lw, harnessMoves.get(lw.id)!, DT);
+    worst = Math.max(worst, lw.pos.x - RINK.blueLineX - harnessMoves.get(lw.id)!.radius);
+  }
+  return worst;
+}
+
 // ---- calibration (Task 12) ----
 
 /** What one calibration game leaves behind: its box score without the event log, event counts and contest starts. */
@@ -1248,7 +1279,10 @@ export function runGames(n: number, o: CalibrationOpts = {}): GameRecord[] {
       let msg: ReturnType<typeof receiveMessageOnPort>;
       while ((msg = receiveMessageOnPort(port)) === undefined) {
         const now = Atomics.load(done, 0);
-        if (now < 0) throw new Error('a calibration worker failed');
+        if (now < 0) {
+          for (const q of ports) { const m = receiveMessageOnPort(q)?.message as { error?: string } | undefined; if (m?.error !== undefined) throw new Error(`calibration worker: ${m.error}`); }
+          throw new Error('a calibration worker failed');
+        }
         Atomics.wait(done, 0, now, 1000);
       }
       const m = msg.message as { records?: GameRecord[]; error?: string };

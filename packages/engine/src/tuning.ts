@@ -15,16 +15,18 @@ export const TUNING = {
     shotDistanceScale: 9,
     maxShotDistance: 25,
     /** Base weight of each kind of option, before situation, skill and tendency. */
-    weight: { shoot: 2.2, pass: 1, carry: 3, dump: 0.15, protect: 0.25 },
+    weight: { shoot: 0.45, pass: 1, carry: 3, dump: 0.15, protect: 0.25 },
     /** Shoot weight is scaled by openNetWeight[0] with the goalie square, up to the sum of both with him shaded openNetShade m off. */
     openNetWeight: [0.85, 0.5] as [number, number],
     openNetShade: 0.6,
+    /** Shoot weight is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
+    shootPressure: 3,
     /** Largest share any one kind of option (all passing lanes together count as one kind) may have of the draw. */
     maxShare: 0.97,
     /** Passes shorter or longer than this (m) are not considered. */
     passRange: [2.5, 35] as [number, number],
     /** A dump from his own half (behind the centre line) would be icing: its weight is scaled by this. */
-    icingDump: 0.25,
+    icingDump: 0.1,
     /** Carry weight is scaled by carrySpace[0] + carrySpace[1] * space ahead (0..1). */
     carrySpace: [0.25, 0.75] as [number, number],
     /** Protect weight is scaled by protectBase + pressure. */
@@ -34,6 +36,8 @@ export const TUNING = {
     carrySwerve: 3,
     /** Outside the offensive zone with a teammate wholly in it, he carries no closer than this (m) to the blue line. */
     holdUpGap: 1,
+    /** A teammate counts as in the zone if he will be wholly in it this many seconds from now at his speed. */
+    offsideLookahead: 0.5,
     /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
     protectStep: 2,
     protectSpeedCap: 0.4,
@@ -92,15 +96,15 @@ export const TUNING = {
      * counted), plus perPoint per point of goalie skill over 70, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 0.4,
+      base: 1.7,
       perReactionSecond: 5,
-      perPoint: 0.04,
+      perPoint: 0.05,
       screened: 0.6,
       /** Per m/s he is still moving when the puck arrives. */
       perMovingSpeed: 0.25,
       /** Per metre the shot passes wide of his centre beyond his body's reach, and again (steeper) beyond his stretch. */
       body: 0.45, perBodyMetre: 2,
-      stretch: 1, perStretchMetre: 4,
+      stretch: 1, perStretchMetre: 5,
       /** Per metre the shot arrives above `highFrom` (just under the bar is hardest). */
       highFrom: 0.9, perHighMetre: 1.5,
     },
@@ -128,7 +132,7 @@ export const TUNING = {
 
   /** Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from the shooter; chance base + perPoint * shotBlocking. */
   block: {
-    maxZ: 1.1, path: 0.5, clearOfShooter: 1.5, base: 0.12, perPoint: 0.004,
+    maxZ: 1.1, path: 0.9, clearOfShooter: 1.5, base: 0.25, perPoint: 0.004,
     /** A blocked puck keeps this share of its speed, turned back by up to this spread (rad, one sd). */
     keep: [0.1, 0.3] as [number, number],
     spread: 1.2,
@@ -140,8 +144,11 @@ export const TUNING = {
     triggerRange: 1.6,
     /** ...where "beside" reaches this far behind square: the cosine of the angle off the carrier's facing is at least this... */
     frontCos: -0.2,
-    /** ...at most once per this many seconds. */
+    /** ...when he makes up his mind to (a draw against pokeAttemptChance), which he does at most once per this many seconds. */
     cooldownSeconds: 1.5,
+    /** Attempt chance: attemptBase + attemptPerPoint * (stickChecking - 50), within [0.03, 0.97]. */
+    attemptBase: 0.12,
+    attemptPerPoint: 0.004,
     /** Beyond this distance (m) at the end of the reach the stick cannot get there: the contest ends with no result. */
     stickReach: 2.2,
     /** The carrier is favoured by this many rating points. */
@@ -160,13 +167,13 @@ export const TUNING = {
   /** Body checks (contests/hit.ts). */
   hit: {
     /** A skater thinks about a hit on an opponent this close (m)... */
-    triggerRange: 3,
+    triggerRange: 1.8,
     /** ...whom he is closing on faster than this (m/s)... */
-    minClosing: 2,
+    minClosing: 7.5,
     /** ...who has the puck or let it go less than this long ago (s)... */
-    releaseWindowSeconds: 0.6,
+    releaseWindowSeconds: 0.3,
     /** ...and makes up his mind (one draw against hitAttemptChance) at most once per this many seconds. */
-    decideSeconds: 2,
+    decideSeconds: 10,
     /** Target speed (m/s) assumed for his side of the momentum term, and the term's scale in rating points. */
     braceSpeed: 2,
     momentumScale: 30,

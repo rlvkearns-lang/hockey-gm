@@ -15,6 +15,8 @@ const BLUE = RINK.blueLineX;
 const ONSIDE_MARGIN = 1;
 /** Braking (m/s^2) assumed when easing toward the blue line; below every skater's real deceleration. */
 const ONSIDE_BRAKE = 6;
+/** An attacker whose target is within this far (m) of his onside limit eases up as if it were at the limit. */
+const ONSIDE_EASE_FROM = 2;
 /** Typical top speed (m/s), to turn a safe approach speed into a speedCap fraction. */
 const TYPICAL_TOP_SPEED = 9;
 /** Under a delayed offside, the offending team skates to this far (m) outside the blue line to tag up. */
@@ -149,6 +151,9 @@ function facePuck(s: SkaterState, puck: Vec2): void {
   if (s.faceTarget) { s.faceTarget.x = puck.x; s.faceTarget.y = puck.y; } else s.faceTarget = { x: puck.x, y: puck.y };
 }
 
+/** How well a defenceman reads a rush (sets his gap in the neutral zone). */
+const READS = { defensivePositioning: 0.7, iq: 0.3 };
+
 /** Off-puck positioning for `phase`, in attack-relative coordinates. */
 function shape(state: GameState, s: SkaterState, d: PlayerDef, phase: ShapePhase, tactic: Tactics, dir: 1 | -1): void {
   const puck = state.puck.pos;
@@ -198,7 +203,7 @@ function shape(state: GameState, s: SkaterState, d: PlayerDef, phase: ShapePhase
     }
     case 'neutralDefence': {
       if (isD) {
-        const reads = composite(d.attrs, { defensivePositioning: 0.7, iq: 0.3 });
+        const reads = composite(d.attrs, READS);
         const approach = Math.max(0, -state.puck.vel.x * dir);
         const gap = 6 + (100 - reads) * 0.05 + approach * 0.6;
         setRel(s, Math.max(-24, pr - gap), lane * 4 + pl * 0.3, dir);
@@ -268,11 +273,10 @@ function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boole
     s.speedCap = 1;
   } else if (pr < BLUE) {
     const limit = chasing ? Math.max(BLUE - ONSIDE_MARGIN, Math.min(pr, BLUE)) : BLUE - ONSIDE_MARGIN;
-    if (s.target.x * dir > limit) {
-      s.target.x = limit * dir;
-      const room = limit - s.pos.x * dir;
-      if (room > 0) s.speedCap = Math.min(s.speedCap, Math.max(0.15, Math.sqrt(2 * ONSIDE_BRAKE * room) / TYPICAL_TOP_SPEED));
-    }
+    if (s.target.x * dir > limit) s.target.x = limit * dir;
+    // Heading for the line (his target at it or just short of it), he eases up in time to stop short of it.
+    const room = limit - s.pos.x * dir;
+    if (room > 0 && limit - s.target.x * dir < ONSIDE_EASE_FROM) s.speedCap = Math.min(s.speedCap, Math.max(0.15, Math.sqrt(2 * ONSIDE_BRAKE * room) / TYPICAL_TOP_SPEED));
   }
   scratchVel.x = 0;
   scratchVel.y = 0;

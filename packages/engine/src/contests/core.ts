@@ -117,6 +117,17 @@ export function carrierOf(state: GameState): SkaterState | null {
   return null;
 }
 
+const CARRIER = 'core.carrier';
+
+/** carrierOf for triggers: worked out once per round of triggers (kept in `ctx.memo`, emptied whenever a contest starts). */
+export function carrierNow(ctx: ContestCtx): SkaterState | null {
+  const m = ctx.memo.get(CARRIER) as SkaterState | null | undefined;
+  if (m !== undefined) return m;
+  const c = carrierOf(ctx.state);
+  ctx.memo.set(CARRIER, c);
+  return c;
+}
+
 /** True while `id` may not start a contest of `kind`. */
 export function onCooldown(state: GameState, id: string, kind: string): boolean {
   for (const c of state.contestCooldowns) if (c.id === id && c.kind === kind && state.tick < c.untilTick) return true;
@@ -226,9 +237,10 @@ export function contestTick(
   if (state.phase !== 'live') return; // a trapped puck was whistled dead
 
   ctx.memo.clear();
+  const kinds = contestKinds();
   for (const s of state.skaters) {
     if (!isFree(s)) continue;
-    for (const k of contestKinds()) {
+    for (const k of kinds) {
       const ps = k.trigger(ctx, s);
       if (ps === null) continue;
       begin(ctx, k, ps);

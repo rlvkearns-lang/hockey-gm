@@ -13,11 +13,13 @@ const scratch: (Movement | null)[] = [];
 export function resolveBodies(
   skaters: SkaterState[],
   move: (id: string) => Movement,
+  /** Each skater's Movement, parallel to `skaters`, when the caller already has them (then `move` is not asked). */
+  moves?: readonly Movement[],
 ): { a: string; b: string; closing: number }[] {
   const contacts: { a: string; b: string; closing: number }[] = [];
   const n = skaters.length;
   scratch.length = n;
-  for (let i = 0; i < n; i++) { const s = skaters[i]!; scratch[i] = s.onIce ? move(s.id) : null; }
+  for (let i = 0; i < n; i++) { const s = skaters[i]!; scratch[i] = s.onIce ? moves?.[i] ?? move(s.id) : null; }
   for (let i = 0; i < n; i++) {
     const a = skaters[i]!;
     const ma = scratch[i];

@@ -18,6 +18,7 @@ export type Decision =
 
 const GOAL = RINK.goalLineX;
 const T = TUNING.brain;
+const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 /** 0.6 at 0, 1.4 at 100: how much a skill rating scales an option. */
@@ -55,8 +56,8 @@ const laneValues: number[] = [];
  * time. Passing is worth his best lane; when he passes, the lane is drawn in proportion to how good he sees each. He
  * sees only his best 1 + floor(vision / 25) passing lanes, judged with an error that shrinks with IQ. Pressure lowers the score of
  * shooting, passing and carrying, less so for a poised player, and raises dumping and protecting.
- * With the puck outside the offensive zone he keeps it onside: no pass to a teammate wholly in the zone, and while one
- * is in there he holds up at the blue line instead of carrying in.
+ * With the puck outside the offensive zone he keeps it onside: no pass to a teammate wholly in the zone (or about to
+ * be), and while one is in there he holds up at the blue line instead of carrying in.
  */
 export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, rng: Rng): Decision {
   const s = skaterById(state, me.id);
@@ -88,8 +89,14 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   const outside = rx <= RINK.blueLineX;
   let mateOffside = false;
   for (const t of state.skaters) {
-    if (!t.onIce || t.side !== s.side || t === s || t.downT > 0) continue;
-    if (outside && t.pos.x * dir > RINK.blueLineX + bodyRadius(defs.get(t.id)!.weightKg)) { mateOffside = true; continue; }
+    if (!t.onIce || t.side !== s.side || t === s) continue;
+    // Any teammate wholly in the zone, or about to be (where he will be in T.offsideLookahead s), counts for offside,
+    // even one who is down or heading off.
+    if (outside && (t.pos.x + Math.max(0, t.vel.x * dir) * dir * T.offsideLookahead) * dir > RINK.blueLineX + bodyRadius(defs.get(t.id)!.weightKg)) {
+      mateOffside = true;
+      continue;
+    }
+    if (t.downT > 0) continue;
     if (!canReceivePass(state, t)) continue; // still counts for offside, but is no pass target
     const l = dist(p, t.pos);
     if (l < T.passRange[0] || l > T.passRange[1]) continue;
@@ -117,7 +124,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
 
   // An open side of the net (the goalie shaded off the line to it) makes a better shot.
   const open = clamp(Math.abs(goalieShade(state, s.side)) / T.openNetShade, 0, 1);
-  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * skill(composite(a, { shootingAccuracy: 0.6, shootingPower: 0.4 })) * tend.shoot * calm;
+  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * skill(composite(a, SHOOTING)) * tend.shoot * calm ** T.shootPressure;
   const passSkill = T.weight.pass * skill(a.passing) * tend.pass * calm;
   const carryW = T.weight.carry * (T.carrySpace[0] + T.carrySpace[1] * spaceAhead) * skill(a.puckHandling) * tend.carry * calm;
   const zone = zoneOf(p.x, dir);

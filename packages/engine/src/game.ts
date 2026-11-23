@@ -121,20 +121,26 @@ export function createGame(setup: GameSetup): Game {
   const bodies = state.skaters.map((sk) => ({ def: defs.get(sk.id)!, legs: legs(sk.energy), move: movementOf(defs.get(sk.id)!, legs(sk.energy)), toi: 0 }));
   const bodyById = new Map(state.skaters.map((sk, i) => [sk.id, bodies[i]!]));
   const move = (id: string): Movement => bodyById.get(id)!.move;
-  /** On-ice skaters, refilled in place each tick. */
+  /** On-ice skaters, refilled in place each tick, and their bookkeeping (same order). */
   const onIceList: SkaterState[] = [];
+  const onIceBodies: (typeof bodies)[number][] = [];
+  const onIceMoves: Movement[] = [];
   /** Loose puck position before this tick's step (scratch). */
   const prevPuck = { x: 0, y: 0 };
   const onIceSkaters = (): SkaterState[] => {
     onIceList.length = 0;
+    onIceBodies.length = 0;
+    onIceMoves.length = 0;
     const all = state.skaters;
     for (let i = 0; i < all.length; i++) {
       const sk = all[i]!;
       if (!sk.onIce) continue;
-      onIceList.push(sk);
       const b = bodies[i]!;
       const l = legs(sk.energy);
       if (b.legs !== l) { b.legs = l; b.move = movementOf(b.def, l); }
+      onIceList.push(sk);
+      onIceBodies.push(b);
+      onIceMoves.push(b.move);
     }
     return onIceList;
   };
@@ -148,21 +154,19 @@ export function createGame(setup: GameSetup): Game {
     events.push({ tick: state.tick, period: state.period, clock: state.clock, ...e });
   };
 
-  /** Movement, body separation, boards and net frames for every on-ice skater. */
+  /** Movement, body separation, boards and net frames for the on-ice skaters (onIceSkaters(), with onIceMoves). */
   function moveSkaters(skaters: SkaterState[]): void {
-    stepSkaters(skaters);
-    resolveBodies(skaters, move);
-    for (const s of skaters) {
-      const r = move(s.id).radius;
+    for (let i = 0; i < skaters.length; i++) {
+      const s = skaters[i]!;
+      if (s.downT > 0) s.downT = Math.max(0, s.downT - DT);
+      stepSkater(s, onIceMoves[i]!, DT);
+    }
+    resolveBodies(skaters, move, onIceMoves);
+    for (let i = 0; i < skaters.length; i++) {
+      const s = skaters[i]!;
+      const r = onIceMoves[i]!.radius;
       resolveBoards(s.pos, s.vel, r, 0);
       resolveNets(s.pos, s.vel, r);
-    }
-  }
-
-  function stepSkaters(skaters: SkaterState[]): void {
-    for (const s of skaters) {
-      if (s.downT > 0) s.downT = Math.max(0, s.downT - DT);
-      stepSkater(s, move(s.id), DT);
     }
   }
 
@@ -259,7 +263,7 @@ export function createGame(setup: GameSetup): Game {
     const call = refereeTick(state, prevPuckX, defs);
     if (call) events.push(call);
 
-    for (const sk of skaters) bodyById.get(sk.id)!.toi += DT;
+    for (const b of onIceBodies) b.toi += DT;
     const liveTicks = Math.round((PERIOD_SECONDS - state.clock) / DT) + 1;
     state.clock = Math.max(0, (PERIOD_TICKS - liveTicks) * DT);
 

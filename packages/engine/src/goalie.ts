@@ -5,6 +5,7 @@ import { stopPlay } from './faceoff';
 import type { PuckEvent } from './puck';
 import { FACEOFF_DOTS, RINK, resolveBoards } from './rink';
 import type { Rng } from './rng';
+import { wrapAngle } from './skating';
 import { TUNING } from './tuning';
 import type { GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, Side, SkaterState } from './types';
 import { dist, hypot2, segDistXY, type Vec2 } from './vec';
@@ -35,8 +36,7 @@ const SHOT_MAX_SECONDS = 3;
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 const other = (s: Side): Side => (s === 'home' ? 'away' : 'home');
 const logistic = (x: number): number => 1 / (1 + Math.exp(-x));
-/** Wrap an angle to (-pi, pi]. */
-const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+const wrap = wrapAngle;
 
 function goalieAttrs(defs: Map<string, PlayerDef>, id: string): GoalieAttrs {
   const a = defs.get(id)?.goalie;

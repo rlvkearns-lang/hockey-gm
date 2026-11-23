@@ -6,7 +6,7 @@ import { TUNING } from '../tuning';
 import type { ContestState, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
-  carrierOf, contestRating, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS, winProb,
+  carrierNow, carrierOf, contestRating, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx,
 } from './core';
 
@@ -46,9 +46,9 @@ export const netFrontContest: Contest = {
 
   trigger(ctx, s) {
     const state = ctx.state;
-    if (s.slot === null || !FORWARDS.includes(s.slot) || onCooldown(state, s.id, KIND)) return null;
-    const carrier = carrierOf(state);
-    if (!carrier || carrier.side !== s.side || carrier === s || zoneOf(state.puck.pos.x, state.attackDir[s.side]) !== 'O') return null;
+    const carrier = carrierNow(ctx);
+    if (!carrier || carrier.side !== s.side || carrier === s || s.slot === null || !FORWARDS.includes(s.slot)) return null;
+    if (zoneOf(state.puck.pos.x, state.attackDir[s.side]) !== 'O' || onCooldown(state, s.id, KIND)) return null;
     if (dist(s.pos, ozoneSpotPos(state, s.side, 'netFront', spotScratch)) > T.spotRange) return null;
     let o: SkaterState | null = null, od = T.triggerRange;
     for (const t of state.skaters) {
