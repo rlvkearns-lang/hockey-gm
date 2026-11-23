@@ -36,3 +36,18 @@ Working notes from conversation with the owner on 2026-11-23, to be folded into 
 ## Moving through a season and delegation (2026-11-23)
 - Owner: some things should be passed to assistant GMs. Example: a fourth-line grinder picked up as a free agent who is upset about his ice time. The owner wants to be aware of it but hand it off.
 - [my call, proposed to owner] An inbox with three levels: must decide (stops the sim), yours if you want it (the assistant GM handles it after a short wait unless the owner steps in), and for information. Delegation rules the owner sets (for example: complaints from depth players, AHL lineups, waiver claims, contracts under a set value). The assistant acts and leaves a one-line note of what he did and how it went. Assistant GMs are hired staff with their own ability and personality, so a good one settles things and a poor one can make them worse. Sim controls: next day, next game, next event, to a date; always stops for must-decide items, and the owner can tune what counts.
+
+## Team looks, expansion and relocation (owner, 2026-11-23)
+
+- Team look: generated crests by default (the owner has no design skills and does not want to supply art). The optional logo pack stays possible **[my call]**.
+- A custom expansion team can be designed by the player (name, city, colours, crest and jerseys picked from generated options).
+- Expansion is a switch. When on, it unfolds as a story: rumours that a city (for example Houston) wants a team, then breaking news, then a generated team joins.
+- Teams can relocate.
+- The player can start his own expansion team right at the start of a game.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Expansion as events over time: rumours on the social feed, a league vote, an announcement a season ahead, an expansion draft with protected lists, then the new team's first season. Divisions and schedule adjust.
+- Relocation the same way: a struggling market (attendance, arena, owner) leads to rumours, then a move with a new name and look; fans and players react (a player who bought a house there).
+- Starting as an expansion GM: design the team, hire staff, go through the expansion draft and entry draft, with patient owner expectations for the first years.
+- Designing a look is choosing, not drawing: pick colours, pick a crest from several generated from the name and city, pick a jersey pattern.
