@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:single": "vite build --config vite.single.config.ts",
+    "build:single": "vite build --config vite.single.config.ts && vite build --config vite.single.config.ts --mode skating",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "shots": "node scripts/watch-shots.mjs"
   },
   "dependencies": {
     "@hockey/engine": "*",

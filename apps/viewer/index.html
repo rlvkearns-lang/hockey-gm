@@ -3,91 +3,163 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Skating Test</title>
+<title>Hockey Game Viewer</title>
 <style>
 :root {
-  --bg: #f3f5f8; --panel: #ffffff; --text: #1b2330; --muted: #5b6575; --line: #c9d0db;
-  --accent: #1b2330; --on-accent: #ffffff; --chip: #e7ebf1; --stage: #20252d; --stage-text: #e8ecf2; --overlay: rgba(255,255,255,0.92);
-  --home: #b3202e; --away: #1b4fa0;
+  --bg: #eef1f5; --panel: #ffffff; --text: #18202b; --muted: #5a6474; --line: #c8d0db; --track: #d5dbe4;
+  --accent: #18202b; --on-accent: #ffffff; --stage: #15181d; --stage-text: #e8ecf2; --focus: #2a6fdb; --warn-bg: #fff4d6; --warn-text: #5c4300;
+  --home: #9e1b2a; --home-trim: #f2f3f5; --away: #f2f3f5; --away-trim: #1d4fa8; --home-ink: #9e1b2a; --away-ink: #1d4fa8;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #12161d; --panel: #1b212b; --text: #e8ecf2; --muted: #9aa5b5; --line: #334055;
-    --accent: #e8ecf2; --on-accent: #12161d; --chip: #252d3a; --stage: #0d1014; --stage-text: #e8ecf2; --overlay: rgba(27,33,43,0.92);
-    --home: #ff5a5f; --away: #6fa8ff;
+    --bg: #0f1318; --panel: #1a2029; --text: #e6eaf0; --muted: #98a3b3; --line: #313c4c; --track: #2c3542;
+    --accent: #e6eaf0; --on-accent: #0f1318; --stage: #15181d; --stage-text: #e8ecf2; --focus: #7fb0ff; --warn-bg: #3a2f12; --warn-text: #ffe3a1;
+    --home-ink: #ff6b74; --away-ink: #8ab8ff;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #12161d; --panel: #1b212b; --text: #e8ecf2; --muted: #9aa5b5; --line: #334055;
-  --accent: #e8ecf2; --on-accent: #12161d; --chip: #252d3a; --stage: #0d1014; --stage-text: #e8ecf2; --overlay: rgba(27,33,43,0.92);
-  --home: #ff5a5f; --away: #6fa8ff;
+  --bg: #0f1318; --panel: #1a2029; --text: #e6eaf0; --muted: #98a3b3; --line: #313c4c; --track: #2c3542;
+  --accent: #e6eaf0; --on-accent: #0f1318; --stage: #15181d; --stage-text: #e8ecf2; --focus: #7fb0ff; --warn-bg: #3a2f12; --warn-text: #ffe3a1;
+  --home-ink: #ff6b74; --away-ink: #8ab8ff;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
-body { background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 12px 16px 24px; overflow-x: hidden; }
-main { max-width: 1100px; margin: 0 auto; }
-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 8px; }
-h1 { font-size: 20px; margin: 0; }
-#scoreline { font-variant-numeric: tabular-nums; font-weight: 600; }
-#scoreline .home { color: var(--home); }
-#scoreline .away { color: var(--away); }
-#scoreline .muted { color: var(--muted); font-weight: 400; }
-.stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--stage); border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
-#view { display: block; width: 100%; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 12px 16px 28px; overflow-x: hidden; }
+main { max-width: 1180px; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 16px; margin-bottom: 10px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h1 .home { color: var(--home-ink); } h1 .away { color: var(--away-ink); } h1 .vs { color: var(--muted); font-weight: 400; font-size: 16px; }
+header a { color: var(--muted); font-size: 14px; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* The picture, with the score bug and small notes over it. */
+.stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--stage); border-radius: 10px; overflow: hidden; }
+.stage canvas { display: block; width: 100%; height: 100%; }
 #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--stage-text); font-size: 18px; background: var(--stage); text-align: center; padding: 16px; }
 #loading[hidden] { display: none; }
-.readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; margin: 10px 0 6px; }
-#skating { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
-#who { color: var(--muted); }
-.controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
-.group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.group > span, .controls label { color: var(--muted); }
+.bug { position: absolute; left: 2.2%; top: 3.5%; display: flex; flex-direction: column; font-size: clamp(10px, 1.45vw, 16px); color: #fff; font-variant-numeric: tabular-nums; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35)); pointer-events: none; }
+.bug-row { display: flex; align-items: stretch; border-radius: 0.35em; overflow: hidden; background: rgba(14, 17, 22, 0.86); }
+.bug .team { display: flex; align-items: center; gap: 0.45em; padding: 0.3em 0.6em 0.3em 0; }
+.bug .chip { display: block; width: 0.4em; align-self: stretch; }
+.bug .chip.home { background: linear-gradient(90deg, var(--home) 60%, var(--home-trim) 60%); }
+.bug .chip.away { background: linear-gradient(90deg, var(--away) 60%, var(--away-trim) 60%); }
+.bug .abbr { font-weight: 700; letter-spacing: 0.04em; min-width: 2.4em; }
+.bug .n { font-weight: 800; min-width: 1em; text-align: right; font-size: 1.12em; }
+.bug .time { display: flex; align-items: center; gap: 0.5em; padding: 0.3em 0.7em; background: rgba(255, 255, 255, 0.12); font-weight: 600; }
+.bug-sub { align-self: flex-start; margin-top: 0.2em; padding: 0.15em 0.6em; border-radius: 0.3em; background: rgba(14, 17, 22, 0.72); font-size: 0.82em; color: #d9dee6; }
+.over { position: absolute; font-size: clamp(10px, 1.2vw, 13px); color: #fff; background: rgba(14, 17, 22, 0.72); border-radius: 6px; padding: 3px 8px; pointer-events: none; }
+#fps { right: 1.5%; bottom: 2.5%; font-variant-numeric: tabular-nums; }
+#benchNote { left: 2.2%; bottom: 2.5%; }
+.over[hidden] { display: none; }
+
+/* The time line: a slider across the whole game, the periods under it and a mark at each goal above it. */
+.timeline { display: flex; align-items: center; gap: 12px; margin: 14px 0 4px; }
+.track { position: relative; flex: 1; min-width: 0; height: 44px; }
+#scrub { position: absolute; left: 0; right: 0; top: 14px; width: 100%; margin: 0; height: 16px; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; }
+#scrub::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) var(--pct, 0%), var(--track) var(--pct, 0%)); }
+#scrub::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) var(--pct, 0%), var(--track) var(--pct, 0%)); }
+#scrub::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -5px; border-radius: 50%; background: var(--accent); border: 2px solid var(--panel); }
+#scrub::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--panel); }
+#scrub:disabled { cursor: default; opacity: 0.5; }
+.periods { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 1; }
+.periods .split { position: absolute; top: 11px; width: 2px; height: 16px; margin-left: -1px; border-radius: 1px; background: var(--muted); }
+.periods .label { position: absolute; top: 29px; transform: translateX(-50%); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.goals { position: absolute; left: 0; right: 0; top: 0; height: 12px; }
+.goals button { position: absolute; top: -1px; width: 13px; height: 13px; margin-left: -6.5px; padding: 0; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid; cursor: pointer; }
+.goals button.home { background: var(--home); border-color: var(--home-trim); box-shadow: 0 0 0 1px var(--home); }
+.goals button.away { background: var(--away); border-color: var(--away-trim); }
+.goals button:hover { transform: rotate(-45deg) scale(1.25); }
+.when { min-width: 8.5em; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+
+.line { margin: 6px 0; padding: 8px 12px; border-radius: 8px; }
+#summary { background: var(--panel); border: 1px solid var(--line); font-weight: 600; }
+#slow { background: var(--warn-bg); color: var(--warn-text); }
+#slow button { margin-left: 8px; padding: 3px 10px; }
+.line[hidden] { display: none; }
+
+/* Controls */
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 10px 0; }
+.group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.group > .name, .controls label { color: var(--muted); }
+.group > .name { margin-right: 4px; }
 .controls label { display: flex; align-items: center; gap: 6px; min-width: 0; }
 button, input, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; }
 button { cursor: pointer; }
-button:disabled { opacity: 0.5; cursor: default; }
-button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; min-width: 80px; }
-button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+button:disabled, select:disabled, input:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; min-width: 86px; }
 .seg button { padding: 6px 10px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 select { max-width: 100%; }
-#player { max-width: min(78vw, 360px); }
-input[type=number] { width: 7em; }
-.jumps { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
-.jumps > span { color: var(--muted); }
-.jumps button { background: var(--chip); }
-.jumps button small { color: var(--muted); margin-left: 6px; font-variant-numeric: tabular-nums; }
-.hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
-@media (max-width: 560px) { #skating { font-size: 19px; } h1 { font-size: 18px; } .seg button { padding: 6px 8px; } }
+#follow { max-width: min(80vw, 340px); }
+#seed { width: 6.5em; }
+input[type=checkbox] { width: 16px; height: 16px; padding: 0; margin: 0; accent-color: var(--accent); }
+.hint { color: var(--muted); font-size: 13px; margin: 12px 0 0; }
+kbd { font: inherit; font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--panel); }
+@media (max-width: 560px) {
+  body { padding: 10px 16px 24px; }
+  h1 { font-size: 17px; }
+  .seg button { padding: 6px 8px; }
+  .when { min-width: 0; font-size: 13px; }
+  .controls { gap: 8px 12px; }
+}
 </style>
 </head>
 <body>
 <main>
   <header>
-    <h1>Skating test</h1>
-    <div id="scoreline" role="status" aria-live="off">&nbsp;</div>
+    <h1 id="title">Hockey Game Viewer</h1>
+    <a id="skatingLink" hidden>Skating test</a>
   </header>
-  <div class="stage">
-    <canvas id="view" aria-label="3D view of the followed skater"></canvas>
+  <div class="stage" id="stage">
+    <div class="bug" id="bug" aria-label="Score">
+      <div class="bug-row">
+        <span class="team"><i class="chip home"></i><span class="abbr" id="bugHome">HOME</span><span class="n" id="bugHomeScore">0</span></span>
+        <span class="team"><i class="chip away"></i><span class="abbr" id="bugAway">AWAY</span><span class="n" id="bugAwayScore">0</span></span>
+        <span class="time"><span id="bugPeriod">1st</span><span id="bugClock">20:00</span></span>
+      </div>
+      <div class="bug-sub" id="bugShots">Shots 0 – 0</div>
+    </div>
+    <div class="over" id="benchNote" hidden></div>
+    <div class="over" id="fps" hidden>– fps</div>
     <div id="loading">Simulating…</div>
   </div>
-  <div class="readout"><span id="skating">Skating: –</span><span id="who"></span></div>
+
+  <div class="timeline">
+    <div class="track">
+      <div class="periods" id="periods"></div>
+      <div class="goals" id="goals"></div>
+      <input type="range" id="scrub" min="0" max="1" step="1" value="0" aria-label="Game time">
+    </div>
+    <span class="when" id="when">1st · 20:00</span>
+  </div>
+  <p class="line" id="summary" hidden></p>
+  <p class="line" id="slow" hidden>The picture is running slowly on this computer. Quality Low will be smoother.<button id="toLow">Switch to Low</button></p>
+
   <div class="controls">
     <button id="play" class="primary">Play</button>
-    <div class="group seg" role="group" aria-label="Speed"><span>Speed</span>
-      <button data-speed="0.25">0.25x</button><button data-speed="0.5">0.5x</button><button data-speed="1" aria-pressed="true">1x</button><button data-speed="2">2x</button>
+    <div class="group seg" role="group" aria-label="Speed"><span class="name">Speed</span>
+      <button data-speed="0.5">0.5x</button><button data-speed="1" aria-pressed="true">1x</button><button data-speed="2">2x</button><button data-speed="4">4x</button>
     </div>
-    <label>Player <select id="player"></select></label>
-    <div class="group seg" role="group" aria-label="Camera"><span>Camera</span>
-      <button data-camera="follow" aria-pressed="true">Follow</button><button data-camera="side">Side</button><button data-camera="above">Above</button>
+    <button id="toEnd">Skip to end</button>
+  </div>
+  <div class="controls">
+    <div class="group seg" role="group" aria-label="Camera"><span class="name">Camera</span>
+      <button data-camera="broadcast" aria-pressed="true">Broadcast</button><button data-camera="overhead">Overhead</button><button data-camera="netHome">Behind home net</button><button data-camera="netAway">Behind away net</button><button data-camera="iceLevel">Ice level</button><button data-camera="follow">Follow player</button>
     </div>
   </div>
-  <div class="jumps" id="jumps"><span>Jump to</span></div>
+  <div class="controls">
+    <label>Follow <select id="follow"></select></label>
+    <div class="group seg" role="group" aria-label="Quality"><span class="name">Quality</span>
+      <button data-quality="low" aria-pressed="true">Low</button><button data-quality="high">High</button>
+    </div>
+    <label><input type="checkbox" id="showFps"> Show frame rate</label>
+  </div>
   <div class="controls">
     <label>Seed <input id="seed" type="number" value="42" step="1"></label>
-    <button id="newgame">New game</button>
+    <button id="newGame">New game</button>
   </div>
-  <p class="hint">The chosen player is drawn in full and skates on a yellow ring; everyone else is a flat disc with his number and a notch showing which way he faces. "Jump to" finds moments in this game worth judging for the chosen player. Slow it down with Speed.</p>
+  <p class="hint">Keys: <kbd>Space</kbd> play or pause · <kbd>←</kbd> <kbd>→</kbd> back or ahead 5 seconds · <kbd>1</kbd>–<kbd>6</kbd> camera. The marks above the time line are goals: click one to see it from just before. The same seed always plays the same game.</p>
 </main>
-<script type="module" src="/src/main.ts"></script>
+<script type="module" src="/src/watch.ts"></script>
 </body>
 </html>

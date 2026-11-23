@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skating Test</title>
+<style>
+:root {
+  --bg: #f3f5f8; --panel: #ffffff; --text: #1b2330; --muted: #5b6575; --line: #c9d0db;
+  --accent: #1b2330; --on-accent: #ffffff; --chip: #e7ebf1; --stage: #20252d; --stage-text: #e8ecf2; --overlay: rgba(255,255,255,0.92);
+  --home: #b3202e; --away: #1b4fa0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12161d; --panel: #1b212b; --text: #e8ecf2; --muted: #9aa5b5; --line: #334055;
+    --accent: #e8ecf2; --on-accent: #12161d; --chip: #252d3a; --stage: #0d1014; --stage-text: #e8ecf2; --overlay: rgba(27,33,43,0.92);
+    --home: #ff5a5f; --away: #6fa8ff;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12161d; --panel: #1b212b; --text: #e8ecf2; --muted: #9aa5b5; --line: #334055;
+  --accent: #e8ecf2; --on-accent: #12161d; --chip: #252d3a; --stage: #0d1014; --stage-text: #e8ecf2; --overlay: rgba(27,33,43,0.92);
+  --home: #ff5a5f; --away: #6fa8ff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 12px 16px 24px; overflow-x: hidden; }
+main { max-width: 1100px; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 8px; }
+h1 { font-size: 20px; margin: 0; }
+#scoreline { font-variant-numeric: tabular-nums; font-weight: 600; }
+#scoreline .home { color: var(--home); }
+#scoreline .away { color: var(--away); }
+#scoreline .muted { color: var(--muted); font-weight: 400; }
+.stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--stage); border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+#view { display: block; width: 100%; height: 100%; }
+#loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--stage-text); font-size: 18px; background: var(--stage); text-align: center; padding: 16px; }
+#loading[hidden] { display: none; }
+.readout { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; margin: 10px 0 6px; }
+#skating { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#who { color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; }
+.group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.group > span, .controls label { color: var(--muted); }
+.controls label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+button, input, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; }
+button { cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; min-width: 80px; }
+button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.seg button { padding: 6px 10px; }
+select { max-width: 100%; }
+#player { max-width: min(78vw, 360px); }
+input[type=number] { width: 7em; }
+.jumps { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.jumps > span { color: var(--muted); }
+.jumps button { background: var(--chip); }
+.jumps button small { color: var(--muted); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+@media (max-width: 560px) { #skating { font-size: 19px; } h1 { font-size: 18px; } .seg button { padding: 6px 8px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Skating test</h1>
+    <div id="scoreline" role="status" aria-live="off">&nbsp;</div>
+  </header>
+  <div class="stage">
+    <canvas id="view" aria-label="3D view of the followed skater"></canvas>
+    <div id="loading">Simulating…</div>
+  </div>
+  <div class="readout"><span id="skating">Skating: –</span><span id="who"></span></div>
+  <div class="controls">
+    <button id="play" class="primary">Play</button>
+    <div class="group seg" role="group" aria-label="Speed"><span>Speed</span>
+      <button data-speed="0.25">0.25x</button><button data-speed="0.5">0.5x</button><button data-speed="1" aria-pressed="true">1x</button><button data-speed="2">2x</button>
+    </div>
+    <label>Player <select id="player"></select></label>
+    <div class="group seg" role="group" aria-label="Camera"><span>Camera</span>
+      <button data-camera="follow" aria-pressed="true">Follow</button><button data-camera="side">Side</button><button data-camera="above">Above</button>
+    </div>
+  </div>
+  <div class="jumps" id="jumps"><span>Jump to</span></div>
+  <div class="controls">
+    <label>Seed <input id="seed" type="number" value="42" step="1"></label>
+    <button id="newgame">New game</button>
+  </div>
+  <p class="hint">The chosen player is drawn in full and skates on a yellow ring; everyone else is a flat disc with his number and a notch showing which way he faces. "Jump to" finds moments in this game worth judging for the chosen player. Slow it down with Speed.</p>
+</main>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

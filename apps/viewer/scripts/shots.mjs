@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
 const here = dirname(fileURLToPath(import.meta.url));
-const page = resolve(here, '../dist-single/index.html');
+const page = resolve(here, '../dist-single/skating.html');
 const out = resolve(process.argv[2] ?? join(process.cwd(), 'viewer-shots'));
 const prefix = process.argv[3] ?? '';
 if (!existsSync(page)) throw new Error(`build first: ${page} is missing`);
