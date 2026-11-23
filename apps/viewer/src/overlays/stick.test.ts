@@ -7,6 +7,7 @@ import { isCut, probeOf } from '../cuts';
 import { createCursor, lerpAngle, type Playback, type Recording } from '../playback';
 import type { SkaterPose, Vec3 } from '../pose-mix';
 import { createGameScene, seekScene, type GameScene } from '../scene';
+import { CONTACT_FRAME_BOUND, contactFrames as contactFramesOf } from '../test/contact-frames';
 import { recorded, testSetup } from '../test/game';
 import { buildTimeline, type Timeline } from '../timeline';
 import { faceoffCrouch } from './faceoff';
@@ -136,6 +137,10 @@ describe('stick actions', () => {
     expect(r.worst).toBeLessThan(0.35);
     // Beyond the brief: the actions leave the hips and the skates to the gait (the scene's real-game bound is 10 cm).
     expect(r.worstBody).toBeLessThan(0.1);
+    // Milestone 3 Task 4: the frames of a hit's impact and of a fall and getting up (test/contact-frames.ts, from engine
+    // facts) are measured apart, against the larger bound stated for them.
+    expect(r.contactFrames).toBeGreaterThan(500);
+    expect(r.worstContact).toBeLessThan(CONTACT_FRAME_BOUND);
   });
   it('seeking into the middle of a wind-up shows the wind-up', () => {
     const { rec, tl } = game(42); const rel = rec.events.find(e => e.type === 'release' && e.detail.kind === 'shot')!;
@@ -251,9 +256,10 @@ describe('stick actions', () => {
  * ice as the scene does (blended between the frame's ticks, the earlier tick across an engine cut, everyone afresh
  * after a cut), and measure the largest move in a frame of a hand or the blade heel, and of the hips or a skate, for
  * every skater on the ice in every frame but his first on the ice and those across an engine cut; count the frames in
- * which a stick action shows on him, and the poses with a number that is not finite.
+ * which a stick action shows on him, and the poses with a number that is not finite. Frames of a hit's impact or of a
+ * fall and getting up (test/contact-frames.ts) are measured apart (worstContact).
  */
-function drivePeriod(seed: number): { worst: number; worstBody: number; posed: number; active: number; bad: number } {
+function drivePeriod(seed: number): { worst: number; worstBody: number; posed: number; active: number; bad: number; worstContact: number; contactFrames: number } {
   const g = game(seed), pb = g.pb;
   const end = g.rec.events.find((e) => e.type === 'periodEnd')!.tick;
   const defs = new Map([...g.setup.home.players, ...g.setup.away.players].map((d) => [d.id, d]));
@@ -264,7 +270,8 @@ function drivePeriod(seed: number): { worst: number; worstBody: number; posed: n
     tick: 0, alpha: 0, time: 0, state: pb.frame().next, skaters: samples, goalies: new Map(),
     puck: { engine: { x: 0, y: 0, z: 0 }, drawn: { x: 0, y: 0, z: 0 }, carrierId: null }, contests: [], timeline: g.tl, rink: RINK, defends: { home: -1, away: 1 },
   };
-  let worst = 0, worstBody = 0, posed = 0, active = 0, bad = 0;
+  let worst = 0, worstBody = 0, posed = 0, active = 0, bad = 0, worstContact = 0, contactFrames = 0;
+  const cf = contactFramesOf();
   for (let i = 1; i <= end * 2; i++) {
     pb.seek(i * 0.5);
     const f = pb.frame(), prev = f.prev, a = f.alpha;
@@ -296,7 +303,11 @@ function drivePeriod(seed: number): { worst: number; worstBody: number; posed: n
       posed++;
       if (!finitePose(pose)) bad++;
       const was = last.get(p.id);
-      if (was && !cut) {
+      const contact = cf.at((f.tick + a) * DT, prev, next, p.id);
+      if (was && !cut && contact) {
+        worstContact = Math.max(worstContact, poseDistance(was.pose, pose), Math.abs(was.pose.hipY - pose.hipY), dist3(was.pose.legs[0].foot, pose.legs[0].foot), dist3(was.pose.legs[1].foot, pose.legs[1].foot));
+        contactFrames++;
+      } else if (was && !cut) {
         worst = Math.max(worst, poseDistance(was.pose, pose));
         if (on || was.on) active++;
         worstBody = Math.max(worstBody, Math.abs(was.pose.hipY - pose.hipY), dist3(was.pose.legs[0].foot, pose.legs[0].foot), dist3(was.pose.legs[1].foot, pose.legs[1].foot));
@@ -304,7 +315,7 @@ function drivePeriod(seed: number): { worst: number; worstBody: number; posed: n
       last.set(p.id, { pose, on });
     }
   }
-  return { worst, worstBody, posed, active, bad };
+  return { worst, worstBody, posed, active, bad, worstContact, contactFrames };
 }
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 

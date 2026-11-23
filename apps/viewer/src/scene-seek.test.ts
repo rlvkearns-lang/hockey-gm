@@ -1,11 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import type { GameSetup, GameState } from '@hockey/engine';
+import { DT, type GameSetup, type GameState } from '@hockey/engine';
 import { bodyDims } from './body';
 import { carryPoint } from './carry';
 import { initialGait, poseOf, type Pose } from './gait';
 import type { Playback } from './playback';
 import { createGameScene, PREROLL_SECONDS, seekScene, type GameScene } from './scene';
+import { CONTACT_FRAME_BOUND, contactFrames as contactFramesOf } from './test/contact-frames';
 import { sharedPlayback } from './test/game';
 
 /**
@@ -235,21 +236,27 @@ describe('continuity in a real game', () => {
     const sc = createGameScene(game);
     seekScene(pb, sc, 1200);
     const last = new Map<string, Pose>();
-    let worst = 0;
+    let worst = 0, worstContact = 0, worstAt = '';
+    // Milestone 3 Task 4: the frames of a hit's impact and of a fall and getting up (test/contact-frames.ts, from engine
+    // facts) are measured apart, against the larger bound stated for them.
+    const cf = contactFramesOf();
     for (let i = 0; i < 60 * 120; i++) {
       pb.advance(1 / 60); sc.update(pb.frame(), 1 / 60);
-      const cut = sc.cutNow();
-      for (const s of pb.frame().prev.skaters) {
+      const cut = sc.cutNow(), fr = pb.frame();
+      for (const s of fr.prev.skaters) {
         const f = sc.figure(s.id)!;
         if (!f.onIce || !f.pose) { last.delete(s.id); continue; }
         const was = last.get(s.id);
-        if (was && !cut) worst = Math.max(worst, moved(was, f.pose));
+        const contact = cf.at((fr.tick + fr.alpha) * DT, fr.prev, fr.next, s.id);
+        if (was && !cut && contact) worstContact = Math.max(worstContact, moved(was, f.pose));
+        else if (was && !cut) { const m = moved(was, f.pose); if (m > worst) { worst = m; worstAt = `${fr.tick}+${fr.alpha} ${s.id}`; } }
         last.set(s.id, copyPose(f.pose));
       }
     }
     sc.dispose();
     // Today's worst is 9.1 cm (blends under the engine's rapid changes; the synthetic bound in gait.test.ts is 6).
     expect(worst).toBeGreaterThan(0.03);
-    expect(worst).toBeLessThan(0.1);
+    expect(worst, worstAt).toBeLessThan(0.1);
+    expect(worstContact).toBeLessThan(CONTACT_FRAME_BOUND);
   });
 });

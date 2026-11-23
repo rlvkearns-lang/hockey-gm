@@ -29,9 +29,12 @@ import { sharedPlayback } from './test/game';
 // Re-pinned by Task 3's fix round 1 (the glove held open at his side in the stance, a light pocket, the held puck at
 // the pocket's face, the goalie held facing the shot in dead play, goals he commits to and loses, sticks raised
 // overhead in celebration): 5: 0c5debb176ec837d and 42: 4a7c530204679412 before, which 420d200 gives.
+// Re-pinned by Task 4 (poke checks, hits, falls and getting up, and the body pass that keeps drawn figures apart and
+// inside the boards): 5: 97e20551b0cad32b and 42: eba1ba61baa6f591 before (Task 3's follow-up, 35aa72d), which this
+// code still gives with CONTACT_OVERLAYS taken out of OVERLAYS and BODY_PASS the identity.
 const PICTURE_HASH: Record<number, string> = {
-  5: '97e20551b0cad32b',
-  42: 'eba1ba61baa6f591',
+  5: '1a1e930df3a85d3a',
+  42: 'bebcaef406426b2b',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */

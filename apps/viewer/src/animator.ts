@@ -4,6 +4,7 @@ import type { BodyDims } from './body';
 import { stickhandle } from './carry';
 import { gaitRaw, initialGait, stepGait, type GaitState, type Motion } from './gait';
 import { fitGoalie, goalieMotion, goalieRaw, initialGoalieGait, mixGoalieRaw, stepGoalie, type GoalieFigurePose, type GoalieGait } from './goalie-pose';
+import { CONTACT_OVERLAYS, contactBodyPass } from './overlays/contact';
 import { faceoffCrouch } from './overlays/faceoff';
 import { GOALIE_CATCHES, goalieReach, goalieTrack } from './overlays/goalie';
 import { beatenGoalie, blockOverlay, celebrateOverlay } from './overlays/reactions';
@@ -31,7 +32,7 @@ export { GOALIE_CATCHES, goalieHeldPuck } from './overlays/goalie';
  */
 
 /** The registered overlays, in the order they are applied (later ones see the earlier ones' result). */
-export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, ...STICK_OVERLAYS, blockOverlay as Overlay, celebrateOverlay as Overlay];
+export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, ...STICK_OVERLAYS, blockOverlay as Overlay, celebrateOverlay as Overlay, ...CONTACT_OVERLAYS];
 
 export function initialSkaterAnim(): SkaterAnim {
   return { gait: initialGait(), fresh: true, carrying: false, slots: {} };
@@ -106,10 +107,10 @@ export function poseSkater(anim: SkaterAnim, sample: SkaterSample, ctx: AnimCont
 export const GOALIE_OVERLAYS: readonly GoalieOverlay[] = [goalieTrack, goalieReach as GoalieOverlay, beatenGoalie as GoalieOverlay];
 
 /**
- * The pass over all drawn bodies between posing and drawing (Task 4 pushes overlapping bodies apart here). For now
- * the identity: every body is drawn where its overlays asked.
+ * The pass over all drawn bodies between posing and drawing: overlapping bodies pushed apart and kept inside the
+ * boards (overlays/contact.ts contactBodyPass).
  */
-export const BODY_PASS: BodyPass = () => {};
+export const BODY_PASS: BodyPass = contactBodyPass;
 
 export function initialGoalieAnim(): GoalieAnim {
   return { gait: initialGoalieGait(), fresh: true, slots: {} };

@@ -6,7 +6,7 @@
 // contact sheet per sequence; then the page at laptop and phone widths in light and dark, the frame rate at both
 // qualities, and log.json (per frame: is the puck in the picture, how tall the nearest players are drawn; console
 // errors; network requests; the score bug against the event log). ONLY=actions saves the stick-action sequences;
-// ONLY=saves the saves, blocks and goal reactions.
+// ONLY=saves the saves, blocks and goal reactions; ONLY=contact poke checks, hits and falls.
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -375,6 +375,104 @@ if (only && only.includes('saves')) {
     }
   }
   await sctx.close();
+}
+
+// ---- Poke checks, hits and falls (ONLY=contact): 8-frame sequences of a poke check won, a poke check beaten, a landed
+// open-ice hit with a fall and get-up, a hit into the boards, an absorbed hit and a bounced hit, each from the side at ice
+// level (a fixed camera square to the line between the two men, window.__watch.aimAt), the follow camera (on the
+// target or the checker) and the broadcast camera, plus a contact sheet per sequence. Examples come from the event log
+// with nobody else within 2.5 m of either man around the moment. `CONTACT_SKIP` (e.g. hitFall=1) takes a later one.
+if (only && only.includes('contact')) {
+  const { ctx: kctx, p: kp } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light', deviceScaleFactor: 2 });
+  await kp.evaluate(() => window.__watch.setManual(true));
+  const skip = Object.fromEntries((process.env.CONTACT_SKIP ?? '').split(',').filter(Boolean).map((x) => x.split('=')).map(([k, v]) => [k, Number(v)]));
+  const found = await kp.evaluate(({ skip }) => {
+    const w = window.__watch, ev = w.events(), out = {}, n = {};
+    const take = (k, v) => { if (out[k]) return; n[k] = (n[k] ?? 0) + 1; if (n[k] > (skip[k] ?? 0)) out[k] = v; };
+    const R = 8.53, HL = 30.48, HW = 12.955;
+    const boardsGap = (x, y) => { const ax = Math.abs(x), ay = Math.abs(y), cx = HL - R, cy = HW - R; return ax > cx && ay > cy ? R - Math.hypot(ax - cx, ay - cy) : Math.min(HL - ax, HW - ay); };
+    // Both men in the clear: nobody else within 2.5 m of either at these ticks.
+    const clear = (ticks, a, b) => {
+      for (const t of ticks) {
+        w.seekPlain(t); const s = w.state();
+        const A = s.skaters.find((x) => x.id === a), B = s.skaters.find((x) => x.id === b);
+        if (!A || !B || !A.onIce || !B.onIce || s.phase !== 'live') return false;
+        if (s.skaters.some((o) => o.onIce && o.id !== a && o.id !== b && (Math.hypot(o.pos.x - A.pos.x, o.pos.y - A.pos.y) < 2.5 || Math.hypot(o.pos.x - B.pos.x, o.pos.y - B.pos.y) < 2.5))) return false;
+      }
+      return true;
+    };
+    for (const e of ev) {
+      if (e.tick < 300) continue;
+      if (e.type === 'contestEnd' && e.detail.kind === 'pokeCheck') {
+        const st = ev.find((f) => f.type === 'contestStart' && f.detail.contestId === e.detail.contestId);
+        if (!st) continue;
+        const [checker, carrier] = st.detail.participants;
+        const k = e.detail.result === 'take' || e.detail.result === 'loose' ? 'pokeWon' : e.detail.result === 'beaten' ? 'pokeBeaten' : null;
+        if (!k || out[k] || !clear([st.tick - 6, st.tick + 4, e.tick], checker, carrier)) continue;
+        take(k, { tick: st.tick, a: checker, b: carrier, focus: checker, end: e.tick });
+      } else if (e.type === 'hit') {
+        const T = e.tick, hitter = e.playerId, target = e.otherId;
+        w.seekPlain(T); const s = w.state(), t = s.skaters.find((x) => x.id === target), h = s.skaters.find((x) => x.id === hitter);
+        if (!t || !h) continue;
+        const D = e.detail.result === 'landed' ? t.downT : e.detail.result === 'bounced' ? h.downT : 0;
+        const endT = T + Math.ceil(D * 30 - 1e-6);
+        const near = boardsGap(t.pos.x, t.pos.y) < 2;
+        const k = e.detail.result === 'landed' ? (near ? 'hitBoards' : 'hitFall') : e.detail.result;
+        if (out[k] || !clear([T - 10, T, T + 6], hitter, target)) continue;
+        take(k, { tick: T, a: hitter, b: target, focus: e.detail.result === 'bounced' ? hitter : target, end: endT });
+      }
+    }
+    return out;
+  }, { skip });
+  console.log('contact', JSON.stringify(found));
+  log.contact = found;
+  for (const [k, v] of Object.entries(found)) {
+    const o = k.startsWith('poke') ? [-6, -2, 1, 4, 7, 10, 16, 26]
+      : v.end > v.tick ? [-12, -5, -2, 1, 6, Math.round((v.end - v.tick) * 0.5), v.end - v.tick - 4, v.end - v.tick + 9]
+        : [-12, -6, -3, -1, 1, 4, 10, 20];
+    for (const view of ['side', 'follow', 'broadcast']) {
+      const r = await kp.evaluate(({ v, o, view }) => {
+        const w = window.__watch;
+        w.setSpeed(1);
+        w.seekPlain(v.tick - 1);
+        const s = w.state(), A = s.skaters.find((x) => x.id === v.a), B = s.skaters.find((x) => x.id === v.b);
+        const mx = (A.pos.x + B.pos.x) / 2, mz = (A.pos.y + B.pos.y) / 2;
+        const dx = B.pos.x - A.pos.x, dz = B.pos.y - A.pos.y, l = Math.hypot(dx, dz) || 1;
+        // Square to the line between them, on the side nearer the middle of the rink (away from the boards).
+        let nx = -dz / l, nz = dx / l;
+        if ((mx + nx) ** 2 / 900 + (mz + nz) ** 2 / 169 > (mx - nx) ** 2 / 900 + (mz - nz) ** 2 / 169) { nx = -nx; nz = -nz; }
+        const pose = { pos: { x: mx + nx * 6.5, y: 0.7, z: mz + nz * 6.5 }, look: { x: mx, y: 0.75, z: mz }, fov: 42 };
+        if (view === 'side') w.aimAt(pose); else { w.aimAt(null); w.setFollow(v.focus); w.setCamera(view); }
+        const start = v.tick + o[0];
+        w.seek(start - 18);
+        w.step(18 / 30);
+        const sheet = document.createElement('canvas'), c0 = document.querySelector('.stage canvas');
+        const fw = 480, fh = 360;
+        sheet.width = fw * 4; sheet.height = fh * 2;
+        const g = sheet.getContext('2d');
+        g.fillStyle = '#000'; g.fillRect(0, 0, sheet.width, sheet.height);
+        const shots = [];
+        let at = start;
+        for (let i = 0; i < o.length; i++) {
+          const t = v.tick + o[i];
+          if (t > at) { w.step((t - at) / 30); at = t; }
+          const url = w.grab();
+          const sw = c0.width * (view === 'side' ? 0.62 : 0.8), sh = sw * 0.75;
+          g.drawImage(c0, (c0.width - sw) / 2, (c0.height - sh) / 2, sw, sh, (i % 4) * fw, Math.floor(i / 4) * fh, fw, fh);
+          const rel = Math.round((t - v.tick) * 10) / 10;
+          g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect((i % 4) * fw, Math.floor(i / 4) * fh, 120, 22);
+          g.fillStyle = '#fff'; g.font = '16px sans-serif'; g.fillText(`${i + 1}  T${rel >= 0 ? '+' : ''}${rel}`, (i % 4) * fw + 4, Math.floor(i / 4) * fh + 16);
+          shots.push({ url, tick: w.info().tick });
+        }
+        w.aimAt(null);
+        return { shots, sheet: sheet.toDataURL('image/jpeg', 0.9) };
+      }, { v, o, view });
+      save(`ct-${k}-${view}-sheet.jpg`, r.sheet);
+      r.shots.forEach((s, i) => save(`ct-${k}-${view}-${i + 1}.png`, s.url));
+      console.log('contact seq', k, view, 'T', v.tick, 'frames', r.shots.map((s) => s.tick).join(' '));
+    }
+  }
+  await kctx.close();
 }
 
 // ---- Puck in frame through two minutes of play, per camera (every 0.25 s).

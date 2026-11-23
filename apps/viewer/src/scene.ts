@@ -225,6 +225,8 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
   };
   /** Where a goalie holds the puck this frame (filled after the goalies are posed). */
   const heldPuck = { x: 0, y: 0, z: 0 };
+  /** The goalie who holds it this frame (his body pass offset moves the held puck with him). */
+  let heldBy: GoalieFig | null = null;
   const puckInput: PuckDrawInput = {
     tick: 0, alpha: 0, prevCarrier: null, nextCarrier: null, engine: { x: 0, z: 0 }, height: 0, nextPuck: { x: 0, z: 0 }, held: null,
     holder: (id) => {
@@ -307,7 +309,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     const s = fig.sample!, b = fig.body;
     fig.pose = poseGoalie(fig.anim, s, ctx, fig.dims, goalieOverlays);
     // A goalie holding the puck (after a save or a cover): the puck machine draws it where he has it.
-    if (goalieHeldPuck(fig.anim, s, ctx, fig.pose, heldPuck)) puckInput.held = heldPuck;
+    if (goalieHeldPuck(fig.anim, s, ctx, fig.pose, heldPuck)) { puckInput.held = heldPuck; heldBy = fig; }
     b.onIce = true; b.pos.x = s.pos.x; b.pos.y = s.pos.y; b.facing = s.facing;
     b.offset.x = 0; b.offset.z = 0;
   }
@@ -401,9 +403,12 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     for (const fig of skaters) if (fig.sample) fig.anim = stepSkater(fig.anim, fig.sample, ctx, h, skaterOverlays);
     for (const fig of goalies) fig.anim = stepGoalieAnim(fig.anim, fig.sample!, ctx, h, goalieOverlays);
     for (const fig of skaters) poseSkaterFig(fig);
-    puckInput.held = null;
+    puckInput.held = null; heldBy = null;
     for (const fig of goalies) poseGoalieFig(fig);
     bodyPass(bodies, ctx, h);
+    // A puck a goalie holds goes where the pass draws him.
+    const holder = heldBy as GoalieFig | null;
+    if (holder) { heldPuck.x += holder.body.offset.x; heldPuck.z += holder.body.offset.z; }
     for (const fig of skaters) drawSkater(fig);
     for (const fig of goalies) drawGoalie(fig);
     updatePuck(frame, h);
