@@ -152,3 +152,4 @@ Proposed shape **[my call]**:
 
 - Lottery: non-playoff teams weighted by finish, shown as an event with the reveal, and the real limits on how far a team can jump. Rules as a setting so they can follow the current NHL format.
 - Rivalry is a number between each pair of teams that rises with playoff series, close and nasty games, big hits and fights, lopsided trades and offer sheets between them, and geography; it fades slowly without fuel. A rivalry game starts hotter (see game temperature in `notes-engine-play.md`), draws more fan and media attention, and matters more to players' and fans' feelings. Rivalries also form between individual players.
+- Owner agreed to the lottery and rivalry shapes above (2026-11-23).
