@@ -1,6 +1,6 @@
-import { RINK, type GameState, type SkaterState } from '@hockey/engine';
+import { RINK, type GameState, type GoalieState, type SkaterState } from '@hockey/engine';
 import { bodyDims } from '../body';
-import type { AnimContext, SkaterSample } from '../animator';
+import type { AnimContext, GoalieSample, SkaterSample } from '../animator';
 import { buildTimeline } from '../timeline';
 
 /** Helpers for animator tests: a skater sample and a frame context made up by hand (no recorded game). */
@@ -33,4 +33,10 @@ export function contextWith(o: { phase?: GameState['phase']; faceoffSpot?: { x: 
     puck: { engine: { x: 0, y: 0, z: 0 }, drawn: { x: 0, y: 0, z: 0 }, carrierId: null },
     contests: [], timeline: buildTimeline([]), rink: RINK, defends: { home: -1, away: 1 },
   };
+}
+
+/** A goalie in his stance at the left net, facing up the ice, standing still. */
+export function goalieSample(): GoalieSample {
+  const state = { id: 'g1', pos: { x: -26, y: 0 }, vel: { x: 0, y: 0 }, facing: 0, pose: 'stance', poseT: 0 } as GoalieState;
+  return { id: 'g1', side: 'home', dims: bodyDims(188, 88), pos: { x: -26, y: 0 }, facing: 0, state };
 }

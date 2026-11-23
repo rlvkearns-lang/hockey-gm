@@ -1,12 +1,14 @@
 import type { ContestState, GameState, GoalieState, RINK, Side, SkaterState } from '@hockey/engine';
 import type { BodyDims } from './body';
 import type { GaitState, Motion } from './gait';
+import type { GoalieGait, GoalieRaw } from './goalie-pose';
 import type { RawPose, Vec3 } from './pose-mix';
 import type { Timeline } from './timeline';
 
 /**
  * What the animator and its overlays work with (pure, types and small helpers only; animator.ts re-exports all of it):
- * a figure's sample for the frame, the frame's context, a skater's animation state and the overlay contract.
+ * a figure's sample for the frame, the frame's context, skaters' and goalies' animation state, the overlay contracts
+ * and the pairwise body pass.
  * Overlays (overlays/*.ts) import from here, so they and animator.ts do not import each other.
  */
 
@@ -102,4 +104,49 @@ export function toBodyFrame(s: SkaterSample, p: Vec2, at: 'frame' | 'tick' = 'fr
   const dx = p.x - o.x, dy = p.y - o.y, c = Math.cos(f), n = Math.sin(f);
   return { x: dx * c + dy * n, y: 0, z: (s.right ? -1 : 1) * (-dx * n + dy * c) };
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Goalies
+
+/**
+ * A goalie's animation state: his gait, each goalie overlay's own state by its id (plain data, rebuilt by the
+ * pre-roll as the skaters' are), and `fresh`: the next step starts it all afresh.
+ */
+export type GoalieAnim = { gait: GoalieGait; fresh: boolean; slots: Readonly<Record<string, unknown>> };
+
+/**
+ * A goalie overlay: the same contract as a skater's over the goalie's raw pose (goalie-pose.ts GoalieRaw, in the
+ * left-catching frame: x forward, z to his right, glove on his left). `apply` may move the glove, the blocker, the
+ * stick heel and blade, each leg's ankle (where the pad goes) and knee hint, and the pelvis and torso, before the limbs
+ * are solved; to blend toward a key pose the engine is not showing, return goalieKeyRaw(pose, dims, side) (or a mix
+ * of it, mixGoalieRaw). Goalies are never drawn offset.
+ */
+export type GoalieOverlay<S = unknown> = {
+  id: string;
+  step?(slot: S | undefined, sample: GoalieSample, ctx: AnimContext, dt: number): S;
+  weight(anim: GoalieAnim, sample: GoalieSample, ctx: AnimContext): number;
+  apply(raw: GoalieRaw, anim: GoalieAnim, sample: GoalieSample, ctx: AnimContext, dims: BodyDims): GoalieRaw;
+};
+
+/** A goalie overlay's state for this goalie (undefined before its first step, or after he starts afresh). */
+export const goalieSlotOf = <S>(anim: GoalieAnim, id: string): S | undefined => anim.slots[id] as S | undefined;
+
+// ---------------------------------------------------------------------------------------------------------------
+// The pairwise body pass
+
+/**
+ * Every figure's drawn body for this frame, between the pose pass and the draw (scene.ts): where the engine has him
+ * (`pos`, engine x, y), whether he is drawn (`onIce`), and `offset`, the world x, z offset his overlays asked for,
+ * which a body pass may change before he is drawn there. `eased` is the pass's own state for him (kept across frames,
+ * zeroed when the scene is reset). One object per figure, made once: a pass must not allocate per frame.
+ */
+export type DrawnBody = {
+  readonly id: string; readonly kind: 'skater' | 'goalie'; readonly side: Side;
+  /** Filled by the scene each frame (a pass reads them): drawn, engine place and facing (blended). */
+  onIce: boolean; readonly pos: Vec2; facing: number;
+  offset: { x: number; z: number };
+  eased: { x: number; z: number };
+};
+/** A pass over all the drawn bodies of a frame (`dt` game seconds): adjusts their offsets in place. */
+export type BodyPass = (bodies: readonly DrawnBody[], ctx: AnimContext, dt: number) => void;
 

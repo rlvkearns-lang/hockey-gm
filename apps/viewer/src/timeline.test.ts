@@ -38,6 +38,25 @@ describe('timeline', () => {
       expect(tl.shotsAt(Infinity).home + tl.shotsAt(Infinity).away).toBe(ev.filter((e) => e.type === 'shot').length);
     }
   });
+  it('finds events by the part a player has in them (player, other or either), as a plain scan does', () => {
+    for (const seed of [5, 42]) {
+      const ev = recorded(seed).events, tl = buildTimeline(ev);
+      const has = (e: (typeof ev)[number], id: string, role: 'player' | 'other' | 'either'): boolean =>
+        role === 'player' ? e.playerId === id : role === 'other' ? e.otherId === id : e.playerId === id || e.otherId === id;
+      const passes = ev.filter((e) => e.type === 'pass' && e.otherId).slice(0, 25);
+      const saves = ev.filter((e) => e.type === 'shot' && e.otherId).slice(0, 10);
+      for (const ref of [...passes, ...saves]) for (const id of [ref.playerId!, ref.otherId!]) for (const role of ['player', 'other', 'either'] as const) {
+        for (const t of [ref.tick - 40, ref.tick - 1, ref.tick, ref.tick + 3]) {
+          expect(tl.next(ref.type, t, 120, id, role), `${role} next`).toBe(ev.find((e) => e.type === ref.type && e.tick > t && e.tick <= t + 120 && has(e, id, role)));
+          expect(tl.last(ref.type, t, 120, id, role), `${role} last`).toBe(ev.filter((e) => e.type === ref.type && e.tick <= t && e.tick >= t - 120 && has(e, id, role)).at(-1));
+        }
+      }
+      // "The pass on its way to me": the receiver finds it by his part as its other player.
+      const p = passes[0]!;
+      expect(tl.last('pass', p.tick + 2, 30, p.otherId!, 'other')).toBe(p);
+      expect(tl.last('pass', p.tick + 2, 30, p.otherId!)).not.toBe(p);
+    }
+  });
   it('a lookup is indexed: a million of them take well under a second', () => {
     const tl = buildTimeline(recorded(5).events);
     const t0 = performance.now();

@@ -8,6 +8,9 @@ import type { GameEvent, GameEventOf, GameEventType, Side } from '@hockey/engine
  * Every lookup is a binary search over a list kept per event type (and per type and player), never a scan of the log.
  * Events are returned as the log holds them (the same objects).
  */
+/** Which part of an event a player has: its `playerId`, its `otherId`, or either. */
+export type Role = 'player' | 'other' | 'either';
+
 export type Timeline = {
   /** Every goal, in order. */
   readonly goals: readonly GameEventOf<'goal'>[];
@@ -19,10 +22,14 @@ export type Timeline = {
   scoreAt(tick: number): { home: number; away: number };
   /** Every event in which `id` is the player or the other player, with `fromTick <= tick <= toTick`, in order. */
   forPlayer(id: string, fromTick: number, toTick: number): GameEvent[];
-  /** The first event of `type` (by `playerId`, if given) with `afterTick < tick <= afterTick + withinTicks`. */
-  next<T extends GameEventType>(type: T, afterTick: number, withinTicks: number, playerId?: string): GameEventOf<T> | undefined;
-  /** The latest event of `type` (by `playerId`, if given) with `atOrBeforeTick - withinTicks <= tick <= atOrBeforeTick`. */
-  last<T extends GameEventType>(type: T, atOrBeforeTick: number, withinTicks: number, playerId?: string): GameEventOf<T> | undefined;
+  /**
+   * The first event of `type` with `afterTick < tick <= afterTick + withinTicks`; with `playerId`, only events in
+   * which he has `role`: 'player' (the event's playerId, the default), 'other' (its otherId: the receiver of a pass,
+   * the goalie of a shot, the man beaten) or 'either'.
+   */
+  next<T extends GameEventType>(type: T, afterTick: number, withinTicks: number, playerId?: string, role?: Role): GameEventOf<T> | undefined;
+  /** The latest event of `type` with `atOrBeforeTick - withinTicks <= tick <= atOrBeforeTick`; `playerId` and `role` as for next. */
+  last<T extends GameEventType>(type: T, atOrBeforeTick: number, withinTicks: number, playerId?: string, role?: Role): GameEventOf<T> | undefined;
   /** A contest's `contestStart` and, once it has ended, its `contestEnd`; undefined for an id the log never started. */
   contest(contestId: number): { start: GameEventOf<'contestStart'>; end?: GameEventOf<'contestEnd'> } | undefined;
 };
@@ -59,15 +66,17 @@ export function buildTimeline(events: readonly GameEvent[]): Timeline {
   const contests = new Map<number, { start: GameEventOf<'contestStart'>; end?: GameEventOf<'contestEnd'> }>();
   for (const e of sorted) {
     push(byType, e.type, e);
-    if (e.playerId !== null) { push(byTypePlayer, `${e.type}|${e.playerId}`, e); push(byPlayer, e.playerId, e); }
-    if (e.otherId !== null && e.otherId !== e.playerId) push(byPlayer, e.otherId, e);
+    if (e.playerId !== null) { push(byTypePlayer, `${e.type}|player|${e.playerId}`, e); push(byTypePlayer, `${e.type}|either|${e.playerId}`, e); push(byPlayer, e.playerId, e); }
+    if (e.otherId !== null) push(byTypePlayer, `${e.type}|other|${e.otherId}`, e);
+    if (e.otherId !== null && e.otherId !== e.playerId) { push(byPlayer, e.otherId, e); push(byTypePlayer, `${e.type}|either|${e.otherId}`, e); }
     if (e.type === 'shot' && e.side) shots[e.side].push(e.tick);
     else if (e.type === 'goal') { goals.push(e); if (e.side) goalTicks[e.side].push(e.tick); }
     else if (e.type === 'periodEnd') periodEnds.push(e.tick);
     else if (e.type === 'contestStart') contests.set(e.detail.contestId, { start: e });
     else if (e.type === 'contestEnd') { const c = contests.get(e.detail.contestId); if (c && !c.end) c.end = e; }
   }
-  const listOf = (type: string, playerId?: string): List | undefined => (playerId === undefined ? byType.get(type) : byTypePlayer.get(`${type}|${playerId}`));
+  const listOf = (type: string, playerId?: string, role: Role = 'player'): List | undefined =>
+    (playerId === undefined ? byType.get(type) : byTypePlayer.get(`${type}|${role}|${playerId}`));
   return {
     goals,
     periodEnds,
@@ -78,14 +87,14 @@ export function buildTimeline(events: readonly GameEvent[]): Timeline {
       if (!l) return [];
       return l.events.slice(lower(l.ticks, fromTick), upper(l.ticks, toTick));
     },
-    next<T extends GameEventType>(type: T, afterTick: number, withinTicks: number, playerId?: string) {
-      const l = listOf(type, playerId);
+    next<T extends GameEventType>(type: T, afterTick: number, withinTicks: number, playerId?: string, role?: Role) {
+      const l = listOf(type, playerId, role);
       if (!l) return undefined;
       const i = upper(l.ticks, afterTick);
       return i < l.ticks.length && l.ticks[i]! <= afterTick + withinTicks ? (l.events[i] as GameEventOf<T>) : undefined;
     },
-    last<T extends GameEventType>(type: T, atOrBeforeTick: number, withinTicks: number, playerId?: string) {
-      const l = listOf(type, playerId);
+    last<T extends GameEventType>(type: T, atOrBeforeTick: number, withinTicks: number, playerId?: string, role?: Role) {
+      const l = listOf(type, playerId, role);
       if (!l) return undefined;
       const i = upper(l.ticks, atOrBeforeTick) - 1;
       return i >= 0 && l.ticks[i]! >= atOrBeforeTick - withinTicks ? (l.events[i] as GameEventOf<T>) : undefined;

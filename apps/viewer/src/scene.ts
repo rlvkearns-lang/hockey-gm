@@ -1,14 +1,17 @@
 import * as THREE from 'three';
 import { DT, RINK, type GameEvent, type GameSetup, type GameState, type GoalieState, type Side, type SkaterState } from '@hockey/engine';
 import {
-  initialGoalieAnim, initialSkaterAnim, poseGoalie, poseSkater, refreshSkater, stepGoalieAnim, stepSkater, turnRateOf,
-  type AnimContext, type GoalieAnim, type GoalieSample, type SkaterAnim, type SkaterSample,
+  BODY_PASS, GOALIE_OVERLAYS, initialGoalieAnim, initialSkaterAnim, OVERLAYS, poseGoalie, poseSkater, refreshGoalie, refreshSkater,
+  stepGoalieAnim, stepSkater, turnRateOf,
+  type AnimContext, type BodyPass, type DrawnBody, type GoalieAnim, type GoalieOverlay, type GoalieSample, type Overlay, type SkaterAnim,
+  type SkaterSample,
 } from './animator';
 import { buildArena, TEAM_COLORS as ARENA_TEAM_COLORS, type ArenaQuality } from './arena';
 import { bodyDims, type BodyDims } from './body';
 import { carryPoint, initialPuckDraw, stepPuckDraw, type IcePoint, type PuckDraw, type PuckDrawInput } from './carry';
 import { cutKind, emptyProbe, goalieJumped, isCut, lastCutAtOrBefore, probeOf, puckJumped, skaterJumped, type CutKind } from './cuts';
 import type { SkaterPose } from './gait';
+import type { GoalieFigurePose } from './goalie-pose';
 import { createGoalieRig, type GoalieRig } from './goalie-rig';
 import { lerpAngle, type Frame, type Playback } from './playback';
 import { createRigKit, createSkaterRig, isSharedTexture, type RigColors, type SkaterRig } from './rig';
@@ -64,7 +67,11 @@ export type GameScene = {
  * `hipY` is the drawn pelvis height (m). `pose` is a skater's drawn pose in his body frame before the mirror for a
  * right shot (null for a goalie, or before he is first drawn).
  */
-export type FigureView = { readonly position: THREE.Vector3; readonly facing: number; readonly onIce: boolean; readonly hipY: number; readonly pose: Readonly<SkaterPose> | null };
+export type FigureView = {
+  readonly position: THREE.Vector3; readonly facing: number; readonly onIce: boolean; readonly hipY: number; readonly pose: Readonly<SkaterPose> | null;
+  /** A goalie's drawn figure (body frame, as drawn; null for a skater). */
+  readonly goaliePose: Readonly<GoalieFigurePose> | null;
+};
 
 /** Team colours until the league stage brings real ones: home in a dark red jersey, away in white with blue trim. */
 export const TEAM_COLORS: Record<Side, RigColors> = ARENA_TEAM_COLORS;
@@ -73,31 +80,57 @@ export const TEAM_COLORS: Record<Side, RigColors> = ARENA_TEAM_COLORS;
 export const PUCK_SCALE = 1.5;
 const PUCK_R = 0.0381 * PUCK_SCALE, PUCK_H = 0.0254 * PUCK_SCALE;
 
-type MutableView = { position: THREE.Vector3; facing: number; onIce: boolean; hipY: number; pose: SkaterPose | null };
+type MutableView = { position: THREE.Vector3; facing: number; onIce: boolean; hipY: number; pose: SkaterPose | null; goaliePose: GoalieFigurePose | null };
 
 type SkaterFig = {
-  id: string; dims: BodyDims; rig: SkaterRig;
+  id: string; side: Side; right: boolean; dims: BodyDims; rig: SkaterRig;
   anim: SkaterAnim;
-  /** This frame's sample (kept and refilled every frame, shared with the animator's context). */
-  sample: SkaterSample;
+  /**
+   * This frame's sample (made from his engine state the first time he is sampled, then refilled every frame and
+   * shared with the animator's context); null before the first update.
+   */
+  sample: SkaterSample | null;
+  /** His pose this frame (null while off the ice) and his drawn body (overlays' offset, then the body pass). */
+  pose: SkaterPose | null;
+  body: DrawnBody;
   /** Index into GameState.skaters (checked each frame, searched for if it ever moves). */
   idx: number;
   view: MutableView;
   /** Where the puck sits on his blade this frame (world x, z), and where he is drawn (for the puck machine). */
   hold: { blade: IcePoint; position: IcePoint };
 };
-type GoalieFig = { id: string; dims: BodyDims; rig: GoalieRig; anim: GoalieAnim; sample: GoalieSample; side: Side; view: MutableView };
+type GoalieFig = {
+  id: string; dims: BodyDims; rig: GoalieRig; anim: GoalieAnim; side: Side; view: MutableView;
+  /** As a skater's: made at the first update, refilled every frame. */
+  sample: GoalieSample | null;
+  pose: GoalieFigurePose | null;
+  body: DrawnBody;
+};
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
-/**
- * `timeline` is the game's event timeline (timeline.ts, built once per recording and shared with the page), or
- * `events` the event log to build one from: the animator reads it (a pad save kicks out the pad on the side the
- * engine's own save event puts the puck, rather than the side the drawn puck happens to be on). Without either, the
- * scene animates from engine state alone.
- */
-export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality; events?: readonly GameEvent[]; timeline?: Timeline } = {}): GameScene {
+const newBody = (id: string, kind: 'skater' | 'goalie', side: Side): DrawnBody =>
+  ({ id, kind, side, onIce: false, pos: { x: 0, y: 0 }, facing: 0, offset: { x: 0, z: 0 }, eased: { x: 0, z: 0 } });
+
+/** The scene's options. */
+export type GameSceneOptions = {
+  quality?: ArenaQuality;
+  /**
+   * `timeline` is the game's event timeline (timeline.ts, built once per recording and shared with the page), or
+   * `events` the event log to build one from: the animator reads it (a pad save kicks out the pad on the side the
+   * engine's own save event puts the puck, rather than the side the drawn puck happens to be on). Without either, the
+   * scene animates from engine state alone.
+   */
+  events?: readonly GameEvent[];
+  timeline?: Timeline;
+  /** The overlays and body pass to use instead of the registered ones (animator.ts), for tests. */
+  animation?: { skaters?: readonly Overlay[]; goalies?: readonly GoalieOverlay[]; bodyPass?: BodyPass };
+};
+
+export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): GameScene {
   const quality: ArenaQuality = opts.quality ?? 'low';
+  const skaterOverlays = opts.animation?.skaters ?? OVERLAYS, goalieOverlays = opts.animation?.goalies ?? GOALIE_OVERLAYS;
+  const bodyPass = opts.animation?.bodyPass ?? BODY_PASS;
   const timeline = opts.timeline ?? buildTimeline(opts.events ?? []);
   const root = new THREE.Group();
   root.name = 'game';
@@ -127,17 +160,13 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
       figures.add(rig.root);
       const dims = bodyDims(def.heightCm, def.weightKg);
       const fig: SkaterFig = {
-        id: def.id, dims, rig, anim: initialSkaterAnim(), idx: skaters.length,
-        sample: {
-          id: def.id, side, right: def.shoots === 'R', dims, onIce: false, pos: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, facing: 0,
-          accelAlong: 0, turnRate: 0, down: false, carrying: false, state: null as unknown as SkaterState,
-        },
-        view: { position: new THREE.Vector3(), facing: 0, onIce: false, hipY: 0, pose: null },
+        id: def.id, side, right: def.shoots === 'R', dims, rig, anim: initialSkaterAnim(), idx: skaters.length,
+        sample: null, pose: null, body: newBody(def.id, 'skater', side),
+        view: { position: new THREE.Vector3(), facing: 0, onIce: false, hipY: 0, pose: null, goaliePose: null },
         hold: { blade: { x: 0, z: 0 }, position: { x: 0, z: 0 } },
       };
       skaters.push(fig);
       byId.set(def.id, fig);
-      skaterSamples.set(def.id, fig.sample);
     }
     const gDef = setup[side].players.find((p) => p.id === setup[side].lines.goalie);
     if (gDef) {
@@ -145,15 +174,15 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
       figures.add(rig.root);
       const dims = bodyDims(gDef.heightCm, gDef.weightKg);
       const fig: GoalieFig = {
-        id: gDef.id, dims, rig, anim: initialGoalieAnim(), side,
-        sample: { id: gDef.id, side, dims, pos: { x: 0, y: 0 }, facing: 0, state: null as unknown as GoalieState },
-        view: { position: new THREE.Vector3(), facing: 0, onIce: true, hipY: 0, pose: null },
+        id: gDef.id, dims, rig, anim: initialGoalieAnim(), side, sample: null, pose: null, body: newBody(gDef.id, 'goalie', side),
+        view: { position: new THREE.Vector3(), facing: 0, onIce: true, hipY: 0, pose: null, goaliePose: null },
       };
       goalies.push(fig);
       byId.set(gDef.id, fig);
-      goalieSamples.set(gDef.id, fig.sample);
     }
   }
+  /** Every figure's drawn body, in the scene's order (skaters, then goalies), for the body pass. */
+  const bodies: readonly DrawnBody[] = [...skaters.map((f) => f.body), ...goalies.map((g) => g.body)];
 
   // ---- The puck: a short black disc with a light rim, and a small shadow.
   const puck = new THREE.Group();
@@ -211,16 +240,31 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
   };
 
   /**
-   * Fill his sample for the frame: on the ice at the earlier tick, his place, velocity and facing blended between the
-   * ticks, the change of speed and the turn over the tick. If the engine takes him off at the later one (it puts him
-   * on the bench at the door), he carries on along his velocity for that last tick, so he is never drawn skating in
-   * place. `p === n` reads one tick only.
+   * Fill his sample for the frame (made from his engine state the first time). On the ice at the earlier tick: his
+   * place, velocity and facing blended between the ticks, the change of speed and the turn over the tick. If the
+   * engine takes him off at the later one (it puts him on the bench at the door), he carries on along his velocity for
+   * that last tick, so he is never drawn skating in place. `p === n` reads one tick only. Off the ice: his engine state
+   * at the earlier tick, standing where the engine has him, `onIce` false.
    */
   function sampleSkater(fig: SkaterFig, prev: GameState, next: GameState, a: number): void {
     const p = findSkater(prev.skaters, fig);
+    if (!p) { if (fig.sample) fig.sample.onIce = false; return; }
     const nAny = findSkater(next.skaters, fig);
-    const s = fig.sample;
-    if (!p || !p.onIce) { s.onIce = false; return; }
+    let s = fig.sample;
+    if (!s) {
+      s = {
+        id: fig.id, side: fig.side, right: fig.right, dims: fig.dims, onIce: false, pos: { x: p.pos.x, y: p.pos.y }, vel: { x: 0, y: 0 },
+        facing: p.facing, accelAlong: 0, turnRate: 0, down: false, carrying: false, state: p,
+      };
+      fig.sample = s;
+      skaterSamples.set(fig.id, s);
+    }
+    if (!p.onIce) {
+      s.onIce = false;
+      s.pos.x = p.pos.x; s.pos.y = p.pos.y; s.vel.x = p.vel.x; s.vel.y = p.vel.y; s.facing = p.facing;
+      s.accelAlong = 0; s.turnRate = 0; s.down = p.downT > 0; s.carrying = false; s.state = p;
+      return;
+    }
     const n = nAny && nAny.onIce ? nAny : p;
     s.onIce = true;
     s.pos.x = p === n ? p.pos.x + p.vel.x * a * DT : lerp(p.pos.x, n.pos.x, a);
@@ -235,22 +279,44 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
   }
 
   function sampleGoalie(fig: GoalieFig, prev: GameState, next: GameState, a: number): void {
-    const p = prev.goalies[fig.side], n = next.goalies[fig.side], s = fig.sample;
+    const p = prev.goalies[fig.side], n = next.goalies[fig.side];
+    let s = fig.sample;
+    if (!s) {
+      s = { id: fig.id, side: fig.side, dims: fig.dims, pos: { x: 0, y: 0 }, facing: 0, state: n };
+      fig.sample = s;
+      goalieSamples.set(fig.id, s);
+    }
     s.pos.x = lerp(p.pos.x, n.pos.x, a); s.pos.y = lerp(p.pos.y, n.pos.y, a);
     s.facing = lerpAngle(p.facing, n.facing, a);
     s.state = n;
   }
 
-  /** Draw him: his pose on his rig at his place (plus any offset the overlays ask for), and the puck spot on his blade. */
+  /** His pose for the frame and the offset his overlays ask for (into his drawn body). */
+  function poseSkaterFig(fig: SkaterFig): void {
+    const s = fig.sample, b = fig.body;
+    if (!s || !s.onIce) { fig.pose = null; b.onIce = false; b.offset.x = 0; b.offset.z = 0; return; }
+    const { pose, offset } = poseSkater(fig.anim, s, ctx, fig.dims, skaterOverlays);
+    fig.pose = pose;
+    b.onIce = true; b.pos.x = s.pos.x; b.pos.y = s.pos.y; b.facing = s.facing;
+    b.offset.x = offset.x; b.offset.z = offset.z;
+  }
+
+  function poseGoalieFig(fig: GoalieFig): void {
+    const s = fig.sample!, b = fig.body;
+    fig.pose = poseGoalie(fig.anim, s, ctx, fig.dims, goalieOverlays);
+    b.onIce = true; b.pos.x = s.pos.x; b.pos.y = s.pos.y; b.facing = s.facing;
+    b.offset.x = 0; b.offset.z = 0;
+  }
+
+  /** Draw him: his pose on his rig at his place plus his body's offset, and the puck spot on his blade. */
   function drawSkater(fig: SkaterFig): void {
-    const view = fig.view, s = fig.sample;
-    if (!s.onIce) {
+    const view = fig.view, s = fig.sample, pose = fig.pose;
+    if (!s || !pose) {
       view.onIce = false;
       fig.rig.root.visible = false;
       return;
     }
-    const { pose, offset } = poseSkater(fig.anim, s, ctx, fig.dims);
-    const x = s.pos.x + offset.x, z = s.pos.y + offset.z, facing = s.facing;
+    const x = s.pos.x + fig.body.offset.x, z = s.pos.y + fig.body.offset.z, facing = s.facing;
     fig.rig.apply(pose, x, z, facing);
     fig.rig.root.visible = true;
     view.pose = pose;
@@ -267,10 +333,12 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
   }
 
   function drawGoalie(fig: GoalieFig): void {
-    const gp = poseGoalie(fig.anim, fig.dims), s = fig.sample;
-    fig.rig.apply(gp, s.pos.x, s.pos.y, s.facing);
+    const gp = fig.pose!, s = fig.sample!;
+    const x = s.pos.x + fig.body.offset.x, z = s.pos.y + fig.body.offset.z;
+    fig.rig.apply(gp, x, z, s.facing);
     fig.view.hipY = gp.hipY;
-    fig.view.position.set(s.pos.x, 0, s.pos.y);
+    fig.view.goaliePose = gp;
+    fig.view.position.set(x, 0, z);
     fig.view.facing = s.facing;
   }
 
@@ -302,7 +370,7 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
       cut = cutKind(shown, prev);
       if (cut) {
         if (puckJumped(shown, prev)) puckDraw = { ...puckDraw, fresh: true };
-        for (const g of goalies) if (goalieJumped(shown, prev, g.side)) g.anim = { ...g.anim, fresh: true };
+        for (const g of goalies) if (goalieJumped(shown, prev, g.side)) g.anim = refreshGoalie(g.anim);
         for (const f of skaters) {
           findSkater(prev.skaters, f);
           if (skaterJumped(shown, prev, f.idx)) f.anim = refreshSkater(f.anim);
@@ -322,9 +390,15 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
     ctx.puck.engine.y = Math.max(0, lerp(prev.puck.z, next.puck.z, a));
     ctx.puck.drawn.x = drawn.x; ctx.puck.drawn.y = drawn.y; ctx.puck.drawn.z = drawn.z;
     ctx.puck.carrierId = next.carrierId;
-    // Sample and step everyone first, then pose and draw everyone (a pose may read the other figures' samples).
-    for (const fig of skaters) { sampleSkater(fig, prev, next, a); fig.anim = stepSkater(fig.anim, fig.sample, ctx, h); }
-    for (const fig of goalies) { sampleGoalie(fig, prev, next, a); fig.anim = stepGoalieAnim(fig.anim, fig.sample, ctx, h); }
+    // Sample everyone, then step everyone, then pose everyone (a step or a pose reads this frame's samples of all the
+    // figures), then the pass over all the drawn bodies, then draw everyone, then the puck from the blades drawn.
+    for (const fig of skaters) sampleSkater(fig, prev, next, a);
+    for (const fig of goalies) sampleGoalie(fig, prev, next, a);
+    for (const fig of skaters) if (fig.sample) fig.anim = stepSkater(fig.anim, fig.sample, ctx, h, skaterOverlays);
+    for (const fig of goalies) fig.anim = stepGoalieAnim(fig.anim, fig.sample!, ctx, h, goalieOverlays);
+    for (const fig of skaters) poseSkaterFig(fig);
+    for (const fig of goalies) poseGoalieFig(fig);
+    bodyPass(bodies, ctx, h);
     for (const fig of skaters) drawSkater(fig);
     for (const fig of goalies) drawGoalie(fig);
     updatePuck(frame, h);
@@ -333,6 +407,7 @@ export function createGameScene(setup: GameSetup, opts: { quality?: ArenaQuality
   function reset(): void {
     for (const f of skaters) f.anim = initialSkaterAnim();
     for (const g of goalies) g.anim = initialGoalieAnim();
+    for (const b of bodies) { b.eased.x = 0; b.eased.z = 0; }
     puckDraw = initialPuckDraw();
     shown.tick = -1;
     cut = null;

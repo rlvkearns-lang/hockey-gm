@@ -310,9 +310,40 @@ function inReach(hand: Vec3, shoulder: Vec3, reach: number): Vec3 {
   return l > reach ? add(shoulder, mul(r, reach / l)) : hand;
 }
 
-export function goaliePoseOf(g: GoalieGait, d: BodyDims, catches: 'L' | 'R'): GoalieFigurePose {
+/**
+ * A goalie's pose before its limbs are solved (the left-catching frame: goaliePoseOf mirrors the fitted figure for a
+ * right-catching goalie). The key poses shown are mixed into it; overlays (animator.ts GoalieOverlay) may then move
+ * its targets: the pelvis and torso, each leg's knee hint and ankle (where the pad goes), the glove and the blocker
+ * (pulled into reach by the fit), the stick heel and the way the blade runs. `shuffle` is how much of the skates'
+ * sideways shuffle is shown (`move`, 0..1), the lead skate's T-push turn (`tPush`, 0..1), the shuffle cycle (`q`) and
+ * his sideways speed (`lat`, its sign picks the lead skate); fitGoalie adds the steps to the ankles.
+ */
+export type GoalieRawLeg = { knee: Vec3; ankle: Vec3; up: Vec3; toe: Vec3; face: Vec3 };
+export type GoalieRaw = {
+  hipY: number; pitch: number; roll: number; look: number;
+  legs: [GoalieRawLeg, GoalieRawLeg];
+  glove: Vec3; gloveFace: Vec3; blocker: Vec3; blockerFace: Vec3; heel: Vec3; bladeDir: Vec3;
+  shuffle: { move: number; tPush: number; q: number; lat: number };
+};
+
+/** The side a pad save kicks out to, in the left-catching frame of the raw pose. */
+const rawSide = (g: GoalieGait, catches: 'L' | 'R'): 1 | -1 => ((g.side ?? 1) > 0 ? 1 : -1) * (catches === 'R' ? -1 : 1) as 1 | -1;
+
+/** One key pose as a raw pose (no shuffle): for an overlay that blends toward a pose the engine is not showing. */
+export function goalieKeyRaw(p: GoaliePose, d: BodyDims, side: 1 | -1): GoalieRaw {
+  const key = keyPose(p, d, side);
+  return {
+    hipY: key.hipY, pitch: key.pitch, roll: key.roll, look: key.look,
+    legs: [{ ...key.legs[0] }, { ...key.legs[1] }],
+    glove: key.glove, gloveFace: key.gloveFace, blocker: key.blocker, blockerFace: key.blockerFace, heel: key.heel, bladeDir: key.bladeDir,
+    shuffle: { move: 0, tPush: 0, q: 0, lat: 0 },
+  };
+}
+
+/** The raw pose a gait shows: its key poses mixed by their shares, with the shuffle it calls for. */
+export function goalieRaw(g: GoalieGait, d: BodyDims, catches: 'L' | 'R'): GoalieRaw {
   // Worked out catching left; a right-catching goalie is the mirror image, so his pad save to his right is a left one here.
-  const side: 1 | -1 = ((g.side ?? 1) > 0 ? 1 : -1) * (catches === 'R' ? -1 : 1) as 1 | -1;
+  const side = rawSide(g, catches);
   const mix = mixOf(g);
   let hipY = 0, pitch = 0, roll = 0, look = 0;
   const zero = (): Vec3 => v3(0, 0, 0);
@@ -330,20 +361,53 @@ export function goaliePoseOf(g: GoalieGait, d: BodyDims, catches: 'L' | 'R'): Go
     blocker = add(blocker, mul(key.blocker, w)); blockerFace = add(blockerFace, mul(key.blockerFace, w));
     heel = add(heel, mul(key.heel, w)); bladeDir = add(bladeDir, mul(key.bladeDir, w));
   }
-
   // Shuffle: on his feet (stance, glove, blocker) sideways movement steps the skates, lead skate first.
-  const k = scaleOf(d);
   const standing = (mix.get('stance') ?? 0) + (mix.get('glove') ?? 0) + (mix.get('blocker') ?? 0);
   const lat = fin(g.lat ?? 0);
   const move = clamp01(Math.abs(lat) / GOALIE.shuffleFull) * standing;
   const tPush = clamp01((Math.abs(lat) - GOALIE.tPushFrom) / GOALIE.tPushSpan) * standing;
-  const q = frac(fin(g.shuffle));
+  return {
+    hipY, pitch, roll, look, legs: [legAcc[0]!, legAcc[1]!],
+    glove, gloveFace, blocker, blockerFace, heel, bladeDir,
+    shuffle: { move, tPush, q: frac(fin(g.shuffle)), lat },
+  };
+}
+
+const mixV = (a: Vec3, b: Vec3, w: number): Vec3 => v3(a.x + (b.x - a.x) * w, a.y + (b.y - a.y) * w, a.z + (b.z - a.z) * w);
+/** `a` and `b` mixed: `a` itself at w <= 0, `b` itself at w >= 1 (the shuffle cycle and lead are `a`'s). */
+export function mixGoalieRaw(a: GoalieRaw, b: GoalieRaw, w: number): GoalieRaw {
+  const k = fin(w);
+  if (k <= 0) return a;
+  if (k >= 1) return b;
+  const n = (x: number, y: number): number => x + (y - x) * k;
+  const leg = (i: 0 | 1): GoalieRawLeg => {
+    const p = a.legs[i], q = b.legs[i];
+    return { knee: mixV(p.knee, q.knee, k), ankle: mixV(p.ankle, q.ankle, k), up: mixV(p.up, q.up, k), toe: mixV(p.toe, q.toe, k), face: mixV(p.face, q.face, k) };
+  };
+  return {
+    hipY: n(a.hipY, b.hipY), pitch: n(a.pitch, b.pitch), roll: n(a.roll, b.roll), look: n(a.look, b.look),
+    legs: [leg(0), leg(1)],
+    glove: mixV(a.glove, b.glove, k), gloveFace: mixV(a.gloveFace, b.gloveFace, k), blocker: mixV(a.blocker, b.blocker, k),
+    blockerFace: mixV(a.blockerFace, b.blockerFace, k), heel: mixV(a.heel, b.heel, k), bladeDir: mixV(a.bladeDir, b.bladeDir, k),
+    shuffle: { move: n(a.shuffle.move, b.shuffle.move), tPush: n(a.shuffle.tPush, b.shuffle.tPush), q: a.shuffle.q, lat: a.shuffle.lat },
+  };
+}
+
+/**
+ * Solve a raw pose onto his body: the shuffle's steps added to the ankles (never through the ice), each leg a two-bone
+ * solve from the hip to the ankle bending toward its knee hint, the shoulders from the torso, the hands pulled into
+ * reach, the blade heel on or above the ice; mirrored for a right-catching goalie.
+ */
+export function fitGoalie(raw: GoalieRaw, d: BodyDims, catches: 'L' | 'R'): GoalieFigurePose {
+  const { hipY, pitch, roll, look } = raw;
+  const k = scaleOf(d);
+  const { move, tPush, q, lat } = raw.shuffle;
   const steps = [shuffleFoot(q, 0.2, 0.35), shuffleFoot(q, 0, 0.35)];
   const lead: 0 | 1 = lat >= 0 ? 1 : 0;
 
   const hw = hipHalf(d);
   const legs = ([0, 1] as const).map((i): GoalieLegPose => {
-    const a = legAcc[i]!;
+    const a = raw.legs[i];
     const hip = v3(0, hipY, sideZ(i) * hw);
     const up = norm(a.up);
     let toe = norm(a.toe, v3(1, 0, 0));
@@ -365,6 +429,7 @@ export function goaliePoseOf(g: GoalieGait, d: BodyDims, catches: 'L' | 'R'): Go
 
   const shoulders = ([0, 1] as const).map((i) => add(v3(0, hipY, 0), torsoRotate(v3(0, d.torso, (sideZ(i) * d.shoulderWidth) / 2), pitch, roll))) as [Vec3, Vec3];
   const reach = (d.upperArm + d.forearm) * 0.995;
+  const { glove, gloveFace, blocker, blockerFace, heel, bladeDir } = raw;
   const out: GoalieFigurePose = {
     catches: 'L', hipY, pitch, roll, look, legs, shoulders,
     glove: inReach(glove, shoulders[0], reach), gloveFace: norm(gloveFace, v3(1, 0, 0)),
@@ -372,4 +437,9 @@ export function goaliePoseOf(g: GoalieGait, d: BodyDims, catches: 'L' | 'R'): Go
     blade: { heel: v3(heel.x, Math.max(0, heel.y), heel.z), dir: norm(bladeDir, v3(0, 0, -1)) },
   };
   return catches === 'R' ? mirrorFigure(out) : out;
+}
+
+/** A goalie's figure: the gait's raw pose, solved (goalieRaw then fitGoalie). */
+export function goaliePoseOf(g: GoalieGait, d: BodyDims, catches: 'L' | 'R'): GoalieFigurePose {
+  return fitGoalie(goalieRaw(g, d, catches), d, catches);
 }

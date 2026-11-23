@@ -1,9 +1,9 @@
 import { DT } from '@hockey/engine';
-import { motionOfSample, type AnimContext, type GoalieSample, type Overlay, type SkaterAnim, type SkaterSample } from './anim-context';
+import { motionOfSample, type AnimContext, type BodyPass, type GoalieAnim, type GoalieOverlay, type GoalieSample, type Overlay, type SkaterAnim, type SkaterSample } from './anim-context';
 import type { BodyDims } from './body';
 import { stickhandle } from './carry';
 import { gaitRaw, initialGait, stepGait, type GaitState, type Motion } from './gait';
-import { goalieMotion, goaliePoseOf, initialGoalieGait, stepGoalie, type GoalieFigurePose, type GoalieGait } from './goalie-pose';
+import { fitGoalie, goalieMotion, goalieRaw, initialGoalieGait, mixGoalieRaw, stepGoalie, type GoalieFigurePose, type GoalieGait } from './goalie-pose';
 import { faceoffCrouch } from './overlays/faceoff';
 import { fitBody, mixRaw, type SkaterPose } from './pose-mix';
 
@@ -98,23 +98,32 @@ export function poseSkater(anim: SkaterAnim, sample: SkaterSample, ctx: AnimCont
 // ---------------------------------------------------------------------------------------------------------------
 // Goalies
 
-/** A goalie's animation state: his gait and whether the next step starts it afresh. */
-export type GoalieAnim = { gait: GoalieGait; fresh: boolean };
+/** The registered goalie overlays, in the order they are applied (none yet). */
+export const GOALIE_OVERLAYS: readonly GoalieOverlay[] = [];
+
+/**
+ * The pass over all drawn bodies between posing and drawing (Task 4 pushes overlapping bodies apart here). For now
+ * the identity: every body is drawn where its overlays asked.
+ */
+export const BODY_PASS: BodyPass = () => {};
 
 export function initialGoalieAnim(): GoalieAnim {
-  return { gait: initialGoalieGait(), fresh: true };
+  return { gait: initialGoalieGait(), fresh: true, slots: {} };
 }
+
+/** The same goalie animation, to start afresh at its next step. */
+export const refreshGoalie = (a: GoalieAnim): GoalieAnim => (a.fresh ? a : { ...a, fresh: true });
 
 /** A save event older than this (s) no longer says which side a pad save goes to. */
 export const SAVE_SIDE_SECONDS = 1.5;
 const SAVE_SIDE_TICKS = Math.round(SAVE_SIDE_SECONDS / DT);
 
 /**
- * Advance a goalie's animation. A pad save kicks out the pad on the side the engine's own `save` event (from the
- * timeline, if recent) puts the puck, else the side the engine's puck is on. A fresh start shows the engine's pose
- * at once.
+ * Advance a goalie's animation: his gait, then each goalie overlay's state. A pad save kicks out the pad on the side
+ * the engine's own `save` event (from the timeline, if recent) puts the puck, else the side the engine's puck is on. A
+ * fresh start shows the engine's pose at once and starts every overlay's state afresh.
  */
-export function stepGoalieAnim(anim: GoalieAnim, sample: GoalieSample, ctx: AnimContext, dt: number): GoalieAnim {
+export function stepGoalieAnim(anim: GoalieAnim, sample: GoalieSample, ctx: AnimContext, dt: number, overlays: readonly GoalieOverlay[] = GOALIE_OVERLAYS): GoalieAnim {
   const n = sample.state;
   const input = goalieMotion(n);
   // Which side of him the puck is (+1 his right): a pad save kicks out the pad on that side.
@@ -122,15 +131,33 @@ export function stepGoalieAnim(anim: GoalieAnim, sample: GoalieSample, ctx: Anim
   const sx = save ? save.pos.x : ctx.puck.engine.x, sz = save ? save.pos.y : ctx.puck.engine.z;
   const toRight = (sx - sample.pos.x) * -Math.sin(sample.facing) + (sz - sample.pos.y) * Math.cos(sample.facing);
   input.side = toRight >= 0 ? 1 : -1;
-  if (anim.fresh) {
-    const pose = n.poseT > 0 ? n.pose : 'stance';
-    return { gait: { ...initialGoalieGait(), pose, from: pose, t: 1, side: input.side >= 0 ? 1 : -1 }, fresh: false };
-  }
   const h = Number.isFinite(dt) && dt > 0 ? dt : 0;
-  return h > 0 ? { gait: stepGoalie(anim.gait, input, h), fresh: false } : anim;
+  const fresh = anim.fresh;
+  let gait: GoalieGait;
+  if (fresh) {
+    const pose = n.poseT > 0 ? n.pose : 'stance';
+    gait = { ...initialGoalieGait(), pose, from: pose, t: 1, side: input.side >= 0 ? 1 : -1 };
+  } else gait = h > 0 ? stepGoalie(anim.gait, input, h) : anim.gait;
+  let slots = fresh ? {} : anim.slots;
+  for (const ov of overlays) {
+    if (!ov.step) continue;
+    const next = ov.step(fresh ? undefined : anim.slots[ov.id], sample, ctx, h);
+    if (slots === anim.slots) slots = { ...anim.slots };
+    (slots as Record<string, unknown>)[ov.id] = next;
+  }
+  return gait === anim.gait && slots === anim.slots && !fresh ? anim : { gait, fresh: false, slots };
 }
 
-/** A goalie's pose. The engine's goalies all catch with the left hand. */
-export function poseGoalie(anim: GoalieAnim, dims: BodyDims): GoalieFigurePose {
-  return goaliePoseOf(anim.gait, dims, 'L');
+/**
+ * A goalie's pose: the gait's raw pose, each goalie overlay mixed in by its weight, solved once. The engine's goalies
+ * all catch with the left hand.
+ */
+export function poseGoalie(anim: GoalieAnim, sample: GoalieSample, ctx: AnimContext, dims: BodyDims, overlays: readonly GoalieOverlay[] = GOALIE_OVERLAYS): GoalieFigurePose {
+  let raw = goalieRaw(anim.gait, dims, 'L');
+  for (const ov of overlays) {
+    const w = ov.weight(anim, sample, ctx);
+    if (!(w > 0)) continue;
+    raw = mixGoalieRaw(raw, ov.apply(raw, anim, sample, ctx, dims), Math.min(1, w));
+  }
+  return fitGoalie(raw, dims, 'L');
 }

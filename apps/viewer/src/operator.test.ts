@@ -14,6 +14,42 @@ describe('camera operator', () => {
   });
 
   // Beyond the brief's list.
+  it('the cut rule does not depend on frame rate in a run that does cut (ice level changing spot as the puck runs the ice)', () => {
+    const run = (hz: number): number => {
+      let st = initialOperator('iceLevel'), cuts = 0;
+      for (let i = 0; i < 8 * hz; i++) {
+        const t = i / hz, x = -26 + 13 * t - (t > 4 ? 2 * 13 * (t - 4) : 0); // up the ice and back
+        const r = stepOperator(st, { puck: { x, y: 0, z: 2 }, attackingRight: true }, i === 0 ? 0 : 1 / hz);
+        st = r.state; if (r.cut && i > 0) cuts++;
+      }
+      return cuts;
+    };
+    const c30 = run(30);
+    expect(c30).toBeGreaterThan(1);
+    expect(run(60)).toBe(c30); expect(run(144)).toBe(c30);
+  });
+  it('a camera target that jumps 5 to 7 m within one engine tick is judged the same at every frame rate', () => {
+    // The follow camera behind a skater whom something carries `jump` metres sideways within one tick, either all at
+    // once at the tick or spread across its frames; he otherwise skates at 6 m/s.
+    const run = (hz: number, jump: number, spread: boolean): number => {
+      let st = withCamera(initialOperator('follow'), 'follow'), cuts = 0;
+      const t0 = 1, tick = 1 / 30;
+      for (let i = 0; i < 2 * hz; i++) {
+        const t = i / hz;
+        const k = spread ? Math.min(1, Math.max(0, (t - t0) / tick)) : t >= t0 ? 1 : 0;
+        const pos = { x: -10 + 6 * t, y: 0, z: jump * k };
+        const r = stepOperator(st, { puck: pos, attackingRight: true, followed: { pos, facing: 0, vel: { x: 6, y: 0, z: 0 } } }, i === 0 ? 0 : 1 / hz);
+        st = r.state; if (r.cut && i > 0) cuts++;
+      }
+      return cuts;
+    };
+    for (const spread of [false, true]) {
+      for (const jump of [4, 6, 7]) {
+        const want = jump > 5 ? 1 : 0;
+        for (const hz of [30, 60, 144]) expect(run(hz, jump, spread), `${jump} m ${spread ? 'spread' : 'at once'} at ${hz} Hz`).toBe(want);
+      }
+    }
+  });
   it('a change of ends, a new angle or a seek cuts; an angle whose spot jumps (ice level) cuts there at any frame rate', () => {
     let st = initialOperator('iceLevel');
     const at = (x: number) => ({ puck: { x, y: 0, z: 0 }, attackingRight: true });
