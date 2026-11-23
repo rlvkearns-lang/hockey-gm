@@ -7,7 +7,7 @@ import { OTHER_SEEDS, SHARED_SEED, testSetup } from './setup-of';
 export { OTHER_SEEDS, SHARED_SEED, testSetup };
 
 declare module 'vitest' {
-  export interface ProvidedContext { recordingFile: string; otherRecordingFiles: Record<number, string>; onStepSeen: { count: number; inOrder: boolean } }
+  export interface ProvidedContext { recordingFile: string; otherRecordingFiles: Record<number, string>; onStepSeen: { count: number; inOrder: boolean }; cameraPathsFile: string }
 }
 
 let cached: Recording | null = null;

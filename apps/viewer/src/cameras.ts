@@ -3,23 +3,31 @@ import type { Vec3 } from './gait';
 
 /**
  * The watch page's camera angles (pure: no three.js, no DOM). Each angle is a rule from where the play is to where
- * the camera stands, what it looks at and how wide it sees; easeCamera moves a camera toward its target smoothly.
+ * the camera stands, what it looks at and how wide it sees; the operator (operator.ts) gives it a calm point to watch
+ * (the play with a dead zone round it, not the puck's every move) and moves the camera toward the angle's target with
+ * limited speed and acceleration. Every angle is calm: the players move, not the frame.
  *
  * World coordinates as everywhere in the viewer: engine x is world x, engine y is world z, up is world y. The benches
  * are on the side of BENCH_DOORS; the broadcast and ice-level cameras are on the other side, so on television the
  * benches are in the background.
  */
 
-export type CameraName = 'broadcast' | 'overhead' | 'netHome' | 'netAway' | 'iceLevel' | 'follow';
-export const CAMERA_NAMES: readonly CameraName[] = ['broadcast', 'overhead', 'netHome', 'netAway', 'iceLevel', 'follow'];
+export type CameraName = 'broadcast' | 'overhead' | 'overheadWide' | 'netHome' | 'netAway' | 'iceLevel' | 'follow';
+/** In the order of the page's buttons and its keys 1 to 7. */
+export const CAMERA_NAMES: readonly CameraName[] = ['broadcast', 'overhead', 'overheadWide', 'netHome', 'netAway', 'iceLevel', 'follow'];
 
 export type CameraInput = {
-  /** Where the puck is drawn (y is its height). */
+  /** The point to watch: where the puck is drawn (y is its height), or the operator's calm point round it. */
   puck: Vec3;
   /** The puck's velocity (world, m/s), if known: the broadcast camera looks a little ahead of it. */
   puckVel?: Vec3;
-  /** The player the follow angle is behind; without one, follow shows the broadcast view. */
-  followed?: { pos: Vec3; facing: number; vel: Vec3 };
+  /**
+   * The player the follow angle is behind; without one, follow shows the broadcast view. `heading` (the operator's
+   * smoothed direction of his travel) is used when given, so the camera does not swing when he turns his body.
+   */
+  followed?: { pos: Vec3; facing: number; vel: Vec3; heading?: number };
+  /** The overhead camera's zone: the x of the middle of the zone it shows (the operator picks it); default from the puck. */
+  zoneX?: number;
   /** The home team attacks toward +x (periods 1 and 3); it defends the net at -x. */
   attackingRight: boolean;
   /** How much tighter the broadcast camera frames the play (1 normally; more on a small picture, such as a phone). */
@@ -73,8 +81,14 @@ function insideBoards(x: number, z: number, inset: number): { x: number; z: numb
 
 // ---- The angles. Distances in metres, fields of view in degrees (vertical).
 
-/** Broadcast: high in the stands opposite the benches; it pans along the rink with the puck and stops short of the ends. */
-const BROADCAST = { height: 15.5, back: 29, fov: 29, maxLook: 21, follow: 0.55, lead: 0.45, maxLead: 4, zFollow: 0.35, nearBias: 1.2 };
+/**
+ * Broadcast: a television camera on a fixed platform high in the stands opposite the benches, at centre ice. It pans
+ * (turns) to follow the play and never chases the puck: it looks along the rink at the operator's calm point (no
+ * further than `maxLook` toward an end), at a steady height and tilt (`nearBias` m toward its own side of centre, so the
+ * near boards are at the bottom of the picture and the far ones well inside it). Only a tight picture (`zoom`, a
+ * phone) also tilts to follow the play across the ice.
+ */
+const BROADCAST = { height: 15.5, back: 29, fov: 29, maxLook: 21, nearBias: 4.5 };
 /**
  * On a board battle the broadcast camera frames it `zoom` times tighter and looks at its spot. On the near boards
  * (within `nearFrom` m of them) it climbs `rise` m higher and comes `closer` m in from its rail, so its line of sight
@@ -85,8 +99,15 @@ const BATTLE_VIEW = { zoom: 2.3, rise: 3, closer: 6.5, nearFrom: 4 };
 export const BOARD_TOP = 1.07;
 /** On a goal's hold the broadcast and overhead cameras may look this much further toward the end (m), and the broadcast one frames this many times tighter. */
 const GOAL_VIEW = { reach: 4.5, overheadReach: 7, zoom: 1.35 };
-/** Overhead: under the roof lights, over the puck's half; it stops where the end boards are still in the picture. */
-const OVERHEAD = { height: 28, maxLook: 18.5, zFollow: 0.45, fov: 62 };
+/**
+ * Overhead: under the roof lights, straight down on one zone at a time: the defensive, neutral or offensive third, with
+ * overlap (a 16:9 picture shows the whole width of the ice and about 48 m of its length). The zones' middles are at
+ * -zoneX, 0 and zoneX (the end ones reach just past the end boards); the operator picks one and slides between them.
+ * Never turned: the near side always at the bottom of the picture, +x always to the right.
+ */
+const OVERHEAD = { height: 28, fov: 52, zoneX: 7.7 };
+/** Overhead, whole rink: still, high over centre ice (under the roof lights), the whole rink in a 16:9 picture. */
+const OVERHEAD_WIDE = { height: 28.5, fov: 64 };
 /**
  * Behind a net: inside the end boards, above and behind the net (the glass is behind it, the net below its line of
  * sight). It aims at the play and zooms with its distance: wide with the net, goalie and crease in front when play is
@@ -96,24 +117,24 @@ const NET = { fromGoalLine: 3.05, height: 6, farRise: 5, farLift: 0.08, minOut: 
 /**
  * Ice level: rinkside cameras at a few fixed spots just inside the near boards, at the eye height of a fan by the
  * glass. It takes the spot whose distance to the puck is nearest `ideal` (never under `minDist`) and keeps it while
- * the puck stays between `minDist` and `maxDist` from it, so it cuts between spots now and then rather than sliding.
+ * the puck stays between `keepMin` and `keepMax` from it, so it cuts between spots now and then rather than sliding.
  */
-const ICE = { inset: 2.2, height: 1.8, spots: [-19, -6.5, 6.5, 19], minDist: 8, ideal: 12, maxDist: 25, halfView: 5 };
-/** Follow: behind and above him along his travel, a little higher to see the play round him. */
+const ICE = { inset: 2.2, height: 1.8, spots: [-19, -6.5, 6.5, 19], minDist: 8, ideal: 12, maxDist: 25, keepMin: 7.5, keepMax: 32, halfView: 5 };
+/** Follow: behind and above him along his travel (the operator's smoothed heading of it), a little higher to see the play round him. */
 const FOLLOW = { back: 6, height: 3.1, ahead: 2.5, lookY: 0.8, fov: 50, turnSpeed: 1.2 };
+/** Below this speed (m/s) a skater's travel has no direction: the follow camera keeps the heading it had. */
+export const FOLLOW_TURN_SPEED = FOLLOW.turnSpeed;
 
 function broadcast(input: CameraInput): CameraPose {
-  const { puck, puckVel } = input;
-  const lead = puckVel ? clamp(puckVel.x * BROADCAST.lead, -BROADCAST.maxLead, BROADCAST.maxLead) : 0;
+  const { puck } = input;
   const gk = clamp(input.goal?.k ?? 0, 0, 1), maxLook = BROADCAST.maxLook + GOAL_VIEW.reach * gk;
-  const lx = clamp(puck.x + lead, -maxLook, maxLook);
+  const lx = clamp(puck.x, -maxLook, maxLook);
   const zoom = Math.max(1, input.zoom ?? 1) * (1 + (GOAL_VIEW.zoom - 1) * gk);
-  // Toward the near boards only a little in the wide view (the near stands would fill the bottom); a tight view
-  // (zoom) follows the puck across the ice, or a puck on the near boards would drop out of the bottom of the picture.
-  const wide = NEAR * BROADCAST.nearBias + clamp(NEAR * puck.z * BROADCAST.zFollow, -4, 1.8) * NEAR;
-  const lz = zoom > 1 ? clamp(puck.z * 0.8, -10, 11) : wide;
+  // A steady tilt in the wide view; a tight view (zoom) follows the play across the ice, or a puck on the near boards
+  // would drop out of the bottom of the picture.
+  const lz = zoom > 1 ? clamp(puck.z * 0.8, -10, 11) : NEAR * BROADCAST.nearBias;
   // On a goal's hold it looks at the net itself.
-  const pose = { pos: v3(lx * BROADCAST.follow, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, toward(lz, puck.z, gk)), fov: BROADCAST.fov / zoom };
+  const pose = { pos: v3(0, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, toward(lz, puck.z, gk)), fov: BROADCAST.fov / zoom };
   const b = input.battle;
   if (!b || !(b.k > 0)) return pose;
   // A board battle: closer in on its spot; on the near boards, higher and steeper over them.
@@ -126,12 +147,21 @@ function broadcast(input: CameraInput): CameraPose {
   return pose;
 }
 
+/** The middle (x) of the overhead camera's zone for a point at x: the defensive, neutral or offensive third. */
+export function overheadZoneX(x: number): number {
+  return x < -RINK.blueLineX ? -OVERHEAD.zoneX : x > RINK.blueLineX ? OVERHEAD.zoneX : 0;
+}
+/** The middles of the overhead camera's three zones. */
+export const OVERHEAD_ZONES: readonly number[] = [-OVERHEAD.zoneX, 0, OVERHEAD.zoneX];
+
 function overhead(input: CameraInput): CameraPose {
-  const maxLook = OVERHEAD.maxLook + GOAL_VIEW.overheadReach * clamp(input.goal?.k ?? 0, 0, 1);
-  const lx = clamp(input.puck.x, -maxLook, maxLook);
-  const lz = input.puck.z * OVERHEAD.zFollow;
+  const lx = input.zoneX ?? overheadZoneX(input.puck.x);
   // A hair toward the broadcast side, so "up" in the picture is the far side (as from the broadcast camera).
-  return { pos: v3(lx, OVERHEAD.height, lz + NEAR * 0.6), look: v3(lx, 0, lz), fov: OVERHEAD.fov };
+  return { pos: v3(lx, OVERHEAD.height, NEAR * 0.6), look: v3(lx, 0, 0), fov: OVERHEAD.fov };
+}
+
+function overheadWide(): CameraPose {
+  return { pos: v3(0, OVERHEAD_WIDE.height, NEAR * 0.6), look: v3(0, 0, 0), fov: OVERHEAD_WIDE.fov };
 }
 
 const fovFor = (halfView: number, dist: number, lo: number, hi: number): number =>
@@ -146,7 +176,8 @@ function behindNet(input: CameraInput, home: boolean): CameraPose {
   // Far play: a little higher, and the play put in the lower part of the picture, so the long stretch of empty ice
   // between this net and the play does not fill the bottom half.
   const far = clamp((out - 10) / 30, 0, 1);
-  const pos = v3(goal + end * NET.fromGoalLine, NET.height + NET.farRise * far, clamp(puck.z * 0.15, -2, 2));
+  // (Square behind the net: it turns to the play, it does not slide.)
+  const pos = v3(goal + end * NET.fromGoalLine, NET.height + NET.farRise * far, 0);
   const flat = Math.hypot(out + NET.fromGoalLine, puck.z - pos.z);
   const fov = fovFor(NET.halfView, Math.hypot(flat, pos.y), NET.minFov, NET.maxFov);
   const lift = flat * Math.tan((fov * NET.farLift * far * Math.PI) / 180);
@@ -159,7 +190,8 @@ function iceLevel(input: CameraInput): CameraPose {
   const dist = (sx: number): number => Math.hypot(puck.x - sx, puck.z - zb);
   const cur = input.current?.pos;
   let cx: number;
-  if (cur && Math.abs(cur.z - zb) < 1e-6 && ICE.spots.includes(cur.x) && dist(cur.x) >= ICE.minDist && dist(cur.x) <= ICE.maxDist) cx = cur.x;
+  // (On a goal's hold it keeps its spot: no cut in the celebration; every spot sees both nets from over 7.5 m.)
+  if (cur && Math.abs(cur.z - zb) < 1e-6 && ICE.spots.includes(cur.x) && ((input.goal?.k ?? 0) > 0 || (dist(cur.x) >= ICE.keepMin && dist(cur.x) <= ICE.keepMax))) cx = cur.x;
   else {
     const ok = ICE.spots.filter((sx) => dist(sx) >= ICE.minDist);
     const pool = ok.length > 0 ? ok : ICE.spots;
@@ -173,10 +205,27 @@ function follow(input: CameraInput): CameraPose {
   const f = input.followed;
   if (!f) return broadcast(input);
   const sp = Math.hypot(f.vel.x, f.vel.z);
-  const heading = sp > FOLLOW.turnSpeed ? Math.atan2(f.vel.z, f.vel.x) : f.facing;
+  const heading = f.heading ?? (sp > FOLLOW.turnSpeed ? Math.atan2(f.vel.z, f.vel.x) : f.facing);
   const c = Math.cos(heading), s = Math.sin(heading);
   const at = insideBoards(f.pos.x - c * FOLLOW.back, f.pos.z - s * FOLLOW.back, 0.4);
   return { pos: v3(at.x, FOLLOW.height, at.z), look: v3(f.pos.x + c * FOLLOW.ahead, FOLLOW.lookY, f.pos.z + s * FOLLOW.ahead), fov: FOLLOW.fov };
+}
+
+/**
+ * Where an angle turns from (world x, z on the ice), for the operator's dead zone (which is in turn and distance from
+ * there): the broadcast platform, the camera behind a net, ice level's spot (`current`, its last place); null for an
+ * angle that does not turn to follow the play (overhead, follow).
+ */
+export function cameraPivot(name: CameraName, attackingRight: boolean, current?: CameraPose): { x: number; z: number } | null {
+  switch (name) {
+    case 'broadcast': return { x: 0, z: NEAR * BROADCAST.back };
+    case 'netHome': case 'netAway': {
+      const end = (name === 'netHome') === attackingRight ? -1 : 1;
+      return { x: end * (RINK.goalLineX + NET.fromGoalLine), z: 0 };
+    }
+    case 'iceLevel': return current ? { x: current.pos.x, z: current.pos.z } : null;
+    default: return null;
+  }
 }
 
 /** Where angle `name` wants the camera for this moment of play. */
@@ -184,6 +233,7 @@ export function cameraTarget(name: CameraName, input: CameraInput): CameraPose {
   switch (name) {
     case 'broadcast': return broadcast(input);
     case 'overhead': return overhead(input);
+    case 'overheadWide': return overheadWide();
     case 'netHome': return behindNet(input, true);
     case 'netAway': return behindNet(input, false);
     case 'iceLevel': return iceLevel(input);

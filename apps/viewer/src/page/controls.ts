@@ -7,7 +7,7 @@ import { $, text } from './hud';
 /**
  * The watch page's controls (DOM only): Play, speeds, camera angles, the player picker, quality, the puck marker, To end, the seed
  * field and New game, the frame-counter switch, and the keys (Space plays or pauses, the arrows step five seconds,
- * 1 to 6 pick an angle). Each control calls one of the page's actions; the page tells the controls what to show.
+ * 1 to 7 pick an angle, in the order of the camera buttons). Each control calls one of the page's actions; the page tells the controls what to show.
  */
 
 /** What the controls ask the page to do. */

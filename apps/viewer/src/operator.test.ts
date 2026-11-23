@@ -7,6 +7,7 @@ import { initialOperator, stepOperator, withCamera } from './operator';
 import { createCursor } from './playback';
 import { recorded, testSetup } from './test/game';
 import { buildTimeline, type Timeline } from './timeline';
+import { inPicture, runCameras } from './test/camera-run';
 
 describe('camera operator', () => {
   it('eases on a jump cut and hard-cuts on a restart or a change of ends', () => {
@@ -24,9 +25,10 @@ describe('camera operator', () => {
   it('the cut rule does not depend on frame rate in a run that does cut (ice level changing spot as the puck runs the ice)', () => {
     const run = (hz: number): number => {
       let st = initialOperator('iceLevel'), cuts = 0;
-      for (let i = 0; i < 8 * hz; i++) {
-        const t = i / hz, x = -26 + 13 * t - (t > 4 ? 2 * 13 * (t - 4) : 0); // up the ice and back
-        const r = stepOperator(st, { puck: { x, y: 0, z: 2 }, attackingRight: true }, i === 0 ? 0 : 1 / hz);
+      for (let i = 0; i < 16 * hz; i++) {
+        const u = (i / hz) % 8, x = -26 + 13 * u - (u > 4 ? 2 * 13 * (u - 4) : 0); // up the ice and back, twice
+        // (Along the near boards, where it must change spot not to be on top of the puck.)
+        const r = stepOperator(st, { puck: { x, y: 0, z: 9 }, attackingRight: true }, i === 0 ? 0 : 1 / hz);
         st = r.state; if (r.cut && i > 0) cuts++;
       }
       return cuts;
@@ -81,15 +83,17 @@ describe('camera operator', () => {
     }
   });
   it('eases toward the play and never past it; paused (dt 0) it holds still', () => {
+    // (The broadcast camera stands on a fixed platform and turns to the play: its look point moves, not its place.)
     let st = initialOperator('broadcast');
     st = stepOperator(st, { puck: { x: -15, y: 0, z: 0 }, attackingRight: true }, 1 / 60).state;
-    const x0 = st.cam.pos.x;
+    const x0 = st.cam.look.x;
     for (let i = 0; i < 600; i++) {
       const r = stepOperator(st, { puck: { x: 10, y: 0, z: 0 }, attackingRight: true }, 1 / 60);
-      expect(r.pose.pos.x).toBeGreaterThanOrEqual(st.cam.pos.x - 1e-9);
+      expect(r.pose.look.x).toBeGreaterThanOrEqual(st.cam.look.x - 1e-9);
+      expect(r.pose.look.x).toBeLessThanOrEqual(10 + 1e-9);
       st = r.state;
     }
-    expect(st.cam.pos.x).toBeGreaterThan(x0 + 5);
+    expect(st.cam.look.x).toBeGreaterThan(x0 + 5);
     const held = stepOperator(st, { puck: { x: -10, y: 0, z: 0 }, attackingRight: true }, 0);
     expect(held.pose).toEqual(st.cam);
   });
@@ -188,7 +192,8 @@ describe('camera operator', () => {
         const worst = CAMS.map(() => 0), cutsAfter = CAMS.map(() => 0), cutsDuring = CAMS.map(() => 0), lastLook = CAMS.map(() => ({ x: 0, z: 0 }));
         const hold = g.tick + 90;
         runOperators(seed, CAMS.map((cam) => ({ tl, cam })), g.tick - 60, g.tick + 165, (k, t, pose, cut) => {
-          const d = Math.hypot(pose.look.x - net.x, pose.look.z - net.z);
+          // (The overhead camera shows the zone, not a point: the net in its picture counts as on the net.)
+          const d = CAMS[k] === 'overhead' ? (inPicture(pose, { x: net.x, y: 0, z: net.z }) ? 0 : 99) : Math.hypot(pose.look.x - net.x, pose.look.z - net.z);
           if (t === g.tick) worstAtGoal = Math.max(worstAtGoal, d);
           if (t >= g.tick + 12 && t <= hold) worst[k] = Math.max(worst[k]!, d);
           if (t > g.tick && t <= hold && cut) cutsDuring[k]!++;
@@ -226,5 +231,79 @@ describe('camera operator', () => {
       }
     }
     expect(frames).toBeGreaterThan(40 * 80);
+  });
+
+  // The owner's feedback on milestone 3: "overhead is dizzying, broadcast moves too much". Every camera calm.
+  describe('calm cameras', () => {
+    const at = (x: number, z = 0) => ({ puck: { x, y: 0, z }, attackingRight: true, zoom: 1 });
+    it('the broadcast camera does not move for a quick pass back and forth, and pans only once the play leaves the middle of the picture', () => {
+      let st = initialOperator('broadcast');
+      for (let i = 0; i < 120; i++) st = stepOperator(st, at(0), i === 0 ? 0 : 1 / 60).state;
+      const still = st.cam;
+      // Passes back and forth across 8 m, twice a second, for 3 s: the frame does not move.
+      for (let i = 0; i < 180; i++) { const r = stepOperator(st, at(4 * Math.sin((2 * Math.PI * i) / 30)), 1 / 60); st = r.state; expect(r.pose).toEqual(still); }
+      // The play moves 15 m up the ice: it pans, smoothly and without overshoot, and stops.
+      let last = st.cam.look.x, moved = 0;
+      for (let i = 0; i < 300; i++) { const r = stepOperator(st, at(15), 1 / 60); st = r.state; expect(r.pose.look.x).toBeGreaterThanOrEqual(last - 1e-9); moved = r.pose.look.x; last = r.pose.look.x; }
+      expect(moved).toBeGreaterThan(5);
+      expect(st.cam.pos).toEqual(still.pos); // a fixed platform: it turns, it does not travel
+    });
+    it('the overhead camera stays on its zone until the play has been in another for a second, then slides there without a cut; the whole-rink overhead never moves', () => {
+      let st = initialOperator('overhead');
+      for (let i = 0; i < 60; i++) st = stepOperator(st, at(0), i === 0 ? 0 : 1 / 60).state;
+      const zone0 = st.cam;
+      // Into the offensive zone for 0.8 s and back out: no move.
+      for (let i = 0; i < 48; i++) { const r = stepOperator(st, at(14), 1 / 60); st = r.state; expect(r.pose).toEqual(zone0); }
+      for (let i = 0; i < 60; i++) { const r = stepOperator(st, at(2), 1 / 60); st = r.state; expect(r.pose).toEqual(zone0); }
+      // In for 3 s: still for a second, then a slide (no cut, never turned: the same height and offset across).
+      let cuts = 0;
+      for (let i = 0; i < 180; i++) {
+        const r = stepOperator(st, at(14 + Math.sin(i / 9)), 1 / 60); st = r.state; if (r.cut) cuts++;
+        if (i < 58) expect(r.pose).toEqual(zone0);
+        expect(r.pose.pos.y).toBe(zone0.pos.y); expect(r.pose.pos.z - r.pose.look.z).toBeCloseTo(zone0.pos.z - zone0.look.z, 9);
+      }
+      expect(cuts).toBe(0);
+      expect(st.cam.look.x).toBeGreaterThan(zone0.look.x + 5);
+      let wide = initialOperator('overheadWide'), first: CameraPose | null = null;
+      for (let i = 0; i < 600; i++) { const r = stepOperator(wide, at(-28 + (56 * i) / 600, 10 * Math.sin(i / 50)), i === 0 ? 0 : 1 / 60); wide = r.state; first ??= r.pose; expect(r.pose).toEqual(first); }
+    });
+    it('the follow camera follows his travel, not his body: turning on the spot does not swing it', () => {
+      let st = withCamera(initialOperator('follow'), 'follow');
+      const him = (facing: number, vx: number) => ({ ...at(0), followed: { pos: { x: 0, y: 0, z: 0 }, facing, vel: { x: vx, y: 0, z: 0 } } });
+      for (let i = 0; i < 120; i++) st = stepOperator(st, him(0, 5), i === 0 ? 0 : 1 / 60).state;
+      const before = st.cam;
+      // He stops and turns round (his facing swings through half a turn): the camera stays where it was.
+      for (let i = 0; i < 90; i++) { const r = stepOperator(st, him((Math.PI * i) / 90, 0), 1 / 60); st = r.state; expect(Math.hypot(r.pose.pos.x - before.pos.x, r.pose.pos.z - before.pos.z)).toBeLessThan(0.05); }
+    });
+    it('over a period of seed 5 every camera moves calmly: look speed and acceleration, pan reversals and cuts within their limits, and the broadcast camera keeps the puck in the picture', () => {
+      // Measured over the first period of seed 5 at 60 Hz (test/camera-run.ts). Before (the cameras of milestone 3):
+      // look speed p50/p95/p99 (m/s), acceleration p95/p99 (m/s^2), pan reversals a minute, cuts, puck in picture:
+      //   broadcast 3.7/12.4/16.1, 36/199, 51.3, 16, 99.8%; overhead 3.0/10.6/15.0, 21/34, 33.0, 16;
+      //   behind the home net 5.5/14.4/16.4, 28/41, 37.8, 16; ice level 4.7/14.0/16.2, 29/42, 38.1, 304;
+      //   follow 5.0/11.2/15.4, 34/120, 57.6, 140.
+      // After, with a margin: the limits below. (The whole-rink overhead never moves; its cuts are the restarts'.)
+      const lim: Record<string, { sp: [number, number, number]; ac: [number, number]; rev: number; cuts: number }> = {
+        broadcast: { sp: [2.5, 12, 17], ac: [22, 32], rev: 15, cuts: 25 },
+        overhead: { sp: [0.5, 6, 8], ac: [7.5, 7.5], rev: 6, cuts: 25 },
+        overheadWide: { sp: [1e-9, 1e-9, 1e-9], ac: [1e-9, 1e-9], rev: 0, cuts: 25 },
+        netHome: { sp: [4.5, 16, 20], ac: [21, 21], rev: 30, cuts: 25 },
+        netAway: { sp: [4.5, 16, 20], ac: [21, 21], rev: 32, cuts: 25 },
+        iceLevel: { sp: [4.5, 16, 20], ac: [21, 21], rev: 33, cuts: 185 },
+        follow: { sp: [5, 11, 11.5], ac: [12.5, 12.5], rev: 35, cuts: 50 },
+      };
+      const r = runCameras(Object.keys(lim) as CameraName[]);
+      console.log(JSON.stringify(r));
+      for (const [cam, l] of Object.entries(lim)) {
+        const m = r[cam]!;
+        expect(m.lookSpeed.p50, `${cam} speed p50`).toBeLessThanOrEqual(l.sp[0]);
+        expect(m.lookSpeed.p95, `${cam} speed p95`).toBeLessThanOrEqual(l.sp[1]);
+        expect(m.lookSpeed.p99, `${cam} speed p99`).toBeLessThanOrEqual(l.sp[2]);
+        expect(m.lookAccel.p95, `${cam} accel p95`).toBeLessThanOrEqual(l.ac[0]);
+        expect(m.lookAccel.p99, `${cam} accel p99`).toBeLessThanOrEqual(l.ac[1]);
+        expect(m.reversalsPerMin, `${cam} reversals a minute`).toBeLessThanOrEqual(l.rev);
+        expect(m.cuts, `${cam} cuts`).toBeLessThanOrEqual(l.cuts);
+      }
+      expect(r.broadcast!.inFrame).toBeGreaterThanOrEqual(0.99);
+    });
   });
 });

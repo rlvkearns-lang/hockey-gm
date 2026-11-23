@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BENCH_DOORS, RINK } from '@hockey/engine';
-import { CAMERA_NAMES, cameraTarget, easeCamera, easePoint, type CameraInput, type CameraPose } from './cameras';
+import { inPicture } from './test/camera-run';
+import { CAMERA_NAMES, cameraTarget, easeCamera, easePoint, overheadZoneX, type CameraInput, type CameraPose } from './cameras';
 
 const input = (x: number, z: number): CameraInput => ({ puck: { x, y: 0, z }, attackingRight: true, followed: { pos: { x, y: 0, z }, facing: 0, vel: { x: 5, y: 0, z: 0 } } });
 
@@ -9,7 +10,12 @@ describe('cameras', () => {
     for (const name of ['broadcast', 'overhead', 'netHome', 'netAway', 'iceLevel', 'follow'] as const) for (const [x, z] of [[0, 0], [25, 10], [-28, -12], [29, 0]] as const) {
       const c = cameraTarget(name, input(x, z));
       expect(c.pos.y).toBeGreaterThan(0.5); expect(Number.isFinite(c.pos.x + c.pos.z + c.look.x + c.look.z)).toBe(true);
-      if (name !== 'netHome' && name !== 'netAway') expect(Math.hypot(c.look.x - x, c.look.z - z)).toBeLessThan(12);
+      // (The overhead camera shows the zone the play is in, the whole width of the ice and 48 m of its length: the play is
+      // within its half length of where it looks, along the ice.)
+      if (name === 'overhead') expect(Math.abs(c.look.x - x)).toBeLessThan(24);
+      // (The broadcast camera turns along the rink at a steady tilt: the play is in its picture.)
+      else if (name === 'broadcast') expect(inPicture(c, { x, y: 0, z })).toBe(true);
+      else if (name !== 'netHome' && name !== 'netAway') expect(Math.hypot(c.look.x - x, c.look.z - z)).toBeLessThan(12);
     }
   });
   it('the broadcast camera pans with the puck but never past the ends of the rink', () => {
@@ -70,14 +76,15 @@ describe('cameras', () => {
     // Above the net and inside the end boards, so neither the net nor the glass stands between it and the ice.
     for (const c of [r, l, a]) { expect(c.pos.y).toBeGreaterThan(RINK.netHeight + 2); expect(Math.abs(c.pos.x)).toBeLessThan(RINK.halfLength); }
   });
-  it('overhead looks almost straight down, high over the puck\'s half, and sees the whole width of the ice', () => {
+  it('overhead looks almost straight down, high over the puck\'s zone, and sees the whole width of the ice', () => {
     for (const [x, z] of spots) {
       const c = cameraTarget('overhead', input(x, z));
       const h = c.pos.y - c.look.y;
       expect(Math.hypot(c.pos.x - c.look.x, c.pos.z - c.look.z)).toBeLessThan(h * 0.15);
       const halfSeen = h * Math.tan((c.fov * Math.PI) / 360);
       expect(halfSeen).toBeGreaterThan(RINK.halfWidth);
-      expect(Math.sign(c.look.x) === Math.sign(x) || Math.abs(x) < 1).toBe(true);
+      expect(c.look.x).toBe(overheadZoneX(x));
+      expect(Math.sign(c.look.x) === Math.sign(x) || c.look.x === 0).toBe(true);
     }
   });
   it('ice level is low, on the broadcast side, and never on top of the puck', () => {

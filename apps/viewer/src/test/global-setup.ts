@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GlobalSetupContext } from 'vitest/node';
 import { record } from '../playback';
+import { cameraPathsOf } from './camera-paths';
 import { OTHER_SEEDS, SHARED_SEED, testSetup } from './setup-of';
 
 /**
@@ -27,7 +28,7 @@ const sources = (): string[] => {
     }
   };
   walk(resolve(viewer, '../../packages/engine/src'));
-  out.push(resolve(viewer, 'src/playback.ts'), resolve(viewer, 'src/cuts.ts'), resolve(here, 'setup-of.ts'), fileURLToPath(import.meta.url));
+  out.push(resolve(viewer, 'src/playback.ts'), resolve(viewer, 'src/cuts.ts'), resolve(here, 'setup-of.ts'), resolve(here, 'camera-paths.ts'), fileURLToPath(import.meta.url));
   return out;
 };
 
@@ -59,20 +60,24 @@ export default function setup({ provide }: GlobalSetupContext): void {
   for (const f of sources()) hash.update(f).update(readFileSync(f));
   const dir = resolve(viewer, '../../node_modules/.cache/hockey-viewer-tests');
   const key = hash.digest('hex').slice(0, 16);
-  const file = join(dir, `recording-${key}.json`), seenFile = join(dir, `onstep-${key}.json`);
+  const file = join(dir, `recording-${key}.json`), seenFile = join(dir, `onstep-${key}.json`), pathsFile = join(dir, `camera-paths-${key}.json`);
   const otherFiles: Record<number, string> = {};
   for (const seed of OTHER_SEEDS) otherFiles[seed] = join(dir, `recording-${key}-seed${seed}.json`);
-  if (!existsSync(file) || !existsSync(seenFile) || OTHER_SEEDS.some((s) => !existsSync(otherFiles[s]!))) {
+  if (!existsSync(file) || !existsSync(seenFile) || !existsSync(pathsFile) || OTHER_SEEDS.some((s) => !existsSync(otherFiles[s]!))) {
     mkdirSync(dir, { recursive: true });
     // Which ticks onStep saw, for playback.test.ts (this run is the onStep run createPlayback makes).
     let seen = 0, inOrder = true;
-    const rec = record(testSetup(SHARED_SEED), { onStep: (st) => { if (st.tick !== seen) inOrder = false; seen++; } });
+    // (And the first period's puck and player paths for the camera measurements, test/camera-paths.ts.)
+    const setup = testSetup(SHARED_SEED), paths = cameraPathsOf(setup);
+    const rec = record(setup, { onStep: (st) => { if (st.tick !== seen) inOrder = false; seen++; paths.step(st); } });
     writeAtomically(seenFile, JSON.stringify({ count: seen, inOrder }));
+    writeAtomically(pathsFile, JSON.stringify(paths.done()));
     writeAtomically(file, JSON.stringify(rec));
     for (const seed of OTHER_SEEDS) writeAtomically(otherFiles[seed]!, JSON.stringify(record(testSetup(seed))));
     pruneStale(dir, key);
   }
   provide('recordingFile', file);
+  provide('cameraPathsFile', pathsFile);
   provide('otherRecordingFiles', otherFiles);
   provide('onStepSeen', JSON.parse(readFileSync(seenFile, 'utf8')) as { count: number; inOrder: boolean });
 }

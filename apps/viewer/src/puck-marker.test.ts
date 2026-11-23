@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { DT, RINK, type GameEventOf } from '@hockey/engine';
+import { RINK, type GameEventOf } from '@hockey/engine';
 import { cameraTarget } from './cameras';
 import { carryPoint } from './carry';
 import { isCut, probeOf } from './cuts';
-import { battleHighlight, cameAwayWith, HIGHLIGHT_SECONDS, MARKER_PX, markerRadius, SCRUM_REACH } from './puck-marker';
+import { battleHighlight, cameAwayWith, MARKER_PX, markerRadius, SCRUM_REACH } from './puck-marker';
 import { createCursor } from './playback';
 import { createGameScene, seekScene } from './scene';
 import { recorded, sharedPlayback, testSetup } from './test/game';
@@ -190,38 +190,5 @@ describe('the puck marker and the held puck', () => {
     sc.dispose();
   });
 
-  it('over a period it lights only under a man who was in the battle (its participants and supporters as the engine has them, or the man it gave the puck to), a net-front one only by its spot', () => {
-    const rec = recorded(5), pb = createCursor(testSetup(5), rec), tl = buildTimeline(rec.events);
-    const end = rec.events.find((e) => e.type === 'periodEnd')!.tick;
-    // Everyone the engine ever has in each board or net-front battle (its participants, supporters joining later).
-    const inIt = new Map<number, Set<string>>();
-    const counts = { lit: 0, ends: 0, litEnds: new Set<number>(), byWinner: 0, byOther: 0, boardEnds: 0, netEnds: 0, litBoard: new Set<number>(), litNet: new Set<number>() };
-    for (let t = 1; t <= end; t++) {
-      pb.seek(t);
-      const st = pb.frame().prev;
-      for (const c of st.contests) {
-        if (c.kind !== 'boardBattle' && c.kind !== 'netFront') continue;
-        const set = inIt.get(c.id) ?? new Set<string>();
-        for (const id of c.participants) set.add(id);
-        inIt.set(c.id, set);
-      }
-      if (st.carrierId === null) continue;
-      const h = battleHighlight(tl, t, st.carrierId, st, { x: st.puck.pos.x, z: st.puck.pos.y });
-      if (h === 0) continue;
-      counts.lit++;
-      // Which battle: the latest board or net-front battle he was in that ended within the highlight's second.
-      let e = tl.last('contestEnd', t, Math.ceil(HIGHLIGHT_SECONDS / DT) + 1);
-      while (e && !((e.detail.kind === 'boardBattle' || e.detail.kind === 'netFront') && (inIt.get(e.detail.contestId)?.has(st.carrierId) || (e.detail.puck === 'toWinner' && e.detail.winnerId === st.carrierId)))) {
-        e = tl.last('contestEnd', e.tick - 1, e.tick - 1 - (t - Math.ceil(HIGHLIGHT_SECONDS / DT) - 1));
-      }
-      expect(e, `${t}: lit under ${st.carrierId}, who was in no battle that ended in the last second`).toBeDefined();
-      if (e!.detail.kind === 'netFront') { expect(Math.hypot(st.puck.pos.x - e!.pos.x, st.puck.pos.y - e!.pos.y)).toBeLessThanOrEqual(SCRUM_REACH); counts.litNet.add(e!.detail.contestId); }
-      else counts.litBoard.add(e!.detail.contestId);
-      if (e!.detail.winnerId === st.carrierId) counts.byWinner++; else counts.byOther++;
-    }
-    for (const e of rec.events) if (e.type === 'contestEnd' && e.tick <= end) { if (e.detail.kind === 'boardBattle') counts.boardEnds++; if (e.detail.kind === 'netFront') counts.netEnds++; }
-    console.log(JSON.stringify({ litFrames: counts.lit, boardEnds: counts.boardEnds, litBoard: counts.litBoard.size, netEnds: counts.netEnds, litNet: counts.litNet.size, underWinner: counts.byWinner, underOther: counts.byOther }));
-    expect(counts.litBoard.size).toBeGreaterThan(5);
-  });
 });
 

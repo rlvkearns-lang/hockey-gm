@@ -22,7 +22,7 @@ const out = resolve(process.argv[2] ?? join(process.cwd(), 'watch-shots'));
 const seed = Number(process.argv[3] ?? 42);
 const prefix = process.env.PREFIX ?? ''; // e.g. PREFIX=fix1-
 const only = process.env.ONLY ? process.env.ONLY.split(',') : null; // e.g. ONLY=moments,pages,fps
-const cams = process.env.CAMS ? process.env.CAMS.split(',') : ['broadcast', 'overhead', 'netHome', 'netAway', 'iceLevel', 'follow'];
+const cams = process.env.CAMS ? process.env.CAMS.split(',') : ['broadcast', 'overhead', 'overheadWide', 'netHome', 'netAway', 'iceLevel', 'follow'];
 if (!existsSync(pageFile)) throw new Error(`build first: ${pageFile} is missing`);
 mkdirSync(out, { recursive: true });
 

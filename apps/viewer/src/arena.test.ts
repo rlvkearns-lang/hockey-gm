@@ -43,7 +43,7 @@ describe('arena', () => {
     g.traverse((o) => { if (o instanceof THREE.Mesh && o.visible && o.name !== 'glass') solid.push(o); });
     const ray = new THREE.Raycaster();
     const places = [new THREE.Vector3(0, 15.5, 29), new THREE.Vector3(18, 15.5, 29), new THREE.Vector3(-30.2, 6, 0), new THREE.Vector3(30.2, 6, -2),
-      new THREE.Vector3(6.5, 1.8, 10.75), new THREE.Vector3(-19, 1.8, 10.75), new THREE.Vector3(10, 28, 0.6), new THREE.Vector3(5, 3, -9)];
+      new THREE.Vector3(6.5, 1.8, 10.75), new THREE.Vector3(-19, 1.8, 10.75), new THREE.Vector3(10, 28, 0.6), new THREE.Vector3(5, 3, -9), new THREE.Vector3(0, 28.5, 0.6), new THREE.Vector3(-7.7, 28, -0.6)];
     let misses = 0;
     for (const from of places) for (let i = 0; i < 24; i++) for (let j = 0; j < 12; j++) {
       const yaw = (i / 24) * 2 * Math.PI, pitch = -1.2 + (j / 11) * 2.4;
