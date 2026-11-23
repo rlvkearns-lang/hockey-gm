@@ -128,3 +128,16 @@ Proposed shape **[my call, not yet agreed]**:
 - Flags depend on what the scout actually watched (his region and how many viewings), so sending scouts to the right places finds gems others miss.
 - After a few years the GM sees each scout's record: gems that hit, busts he called, and misses. That becomes a reason to keep, promote or replace a scout.
 - Rival teams have scouts too: a player your scout loves may go earlier than his ranking because someone else's scout loved him as well.
+
+- Draft day (owner, 2026-11-23): by default the player makes every pick, with an option to hand off (for example the late rounds to the scouting staff).
+
+## Generated players that make sense (owner, 2026-11-23)
+
+- The owner dislikes generated players in EA's games whose details do not fit together: appearance, hair, birthplace and name all drawn independently.
+
+Proposed shape **[my call]**:
+
+- A generated player is built in order, each step depending on the last: where he is from (weighted by where hockey players really come from), then his family background (most players share their country's majority background; a realistic share have a different or mixed heritage, as real rosters do), then his name from pools that fit that country and background, then his appearance (skin tone, hair colour and texture, eye colour) from what fits that background.
+- Age-dependent details follow age, not chance: grey hair and a receding hairline only on older players, beards filling in with age.
+- Mixed and immigrant backgrounds stay possible and are handled deliberately (for example a Canadian-born player with a Nigerian surname), rather than by random mismatch.
+- Height and weight are drawn together and fit position; birthplace fits the leagues he came through (a Swedish junior from a Swedish town).
