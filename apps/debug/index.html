@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hockey debug view</title>
+<style>
+:root { --bg:#f3f5f8; --panel:#fff; --text:#1b2330; --muted:#5b6575; --line:#c9d0db; --ice:#eef6fb; --home:#d62839; --away:#1b64d6; --accent:#1b2330; --on-accent:#fff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#12161d; --panel:#1b212b; --text:#e8ecf2; --muted:#9aa5b5; --line:#334055; --ice:#1d2a38; --home:#ff6b6b; --away:#5aa0ff; --accent:#e8ecf2; --on-accent:#12161d; } }
+:root[data-theme="dark"] { --bg:#12161d; --panel:#1b212b; --text:#e8ecf2; --muted:#9aa5b5; --line:#334055; --ice:#1d2a38; --home:#ff6b6b; --away:#5aa0ff; --accent:#e8ecf2; --on-accent:#12161d; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 12px 16px 24px; overflow-x: hidden; }
+main { max-width: 1100px; margin: 0 auto; }
+.scoreboard { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; }
+.team { display: flex; align-items: baseline; gap: 10px; font-weight: 600; }
+.team .swatch { width: 14px; height: 14px; border-radius: 50%; display: inline-block; align-self: center; }
+.team .goals { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.clock { text-align: center; }
+.clock .time { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.clock .period { color: var(--muted); }
+#rink { display: block; width: 100%; height: auto; margin: 12px 0; border-radius: 10px; border: 1px solid var(--line); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 12px; }
+.controls label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+button, input, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; min-width: 72px; }
+input[type=number] { width: 9em; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .cols { grid-template-columns: 1fr; } .team .goals { font-size: 32px; } .clock .time { font-size: 26px; } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; min-width: 0; }
+h2 { font-size: 14px; margin: 0 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+#events { height: 220px; overflow-y: auto; font-size: 13px; font-variant-numeric: tabular-nums; }
+#events div { padding: 1px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+#box table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+#box th, #box td { text-align: right; padding: 2px 4px; }
+#box th:first-child, #box td:first-child { text-align: left; }
+#status { color: var(--muted); font-size: 13px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard" role="status" aria-live="off">
+    <div class="team"><span class="swatch" id="homeSwatch"></span><span id="homeName">Home</span><span class="goals" id="homeGoals">0</span></div>
+    <div class="clock"><div class="time" id="clock">20:00</div><div class="period" id="period">Period 1</div></div>
+    <div class="team"><span class="goals" id="awayGoals">0</span><span id="awayName">Away</span><span class="swatch" id="awaySwatch"></span></div>
+  </div>
+  <canvas id="rink" aria-label="Top-down view of the rink"></canvas>
+  <div class="controls">
+    <button id="play" class="primary">Play</button>
+    <button id="step">Step</button>
+    <label>Speed
+      <select id="speed"><option value="1">1x</option><option value="4">4x</option><option value="16">16x</option></select>
+    </label>
+    <button id="toEnd">Sim to end</button>
+    <label>Seed <input id="seed" type="number" value="42" step="1"></label>
+    <button id="restart">New game</button>
+  </div>
+  <div class="cols">
+    <section><h2>Events</h2><div id="events"></div></section>
+    <section id="box"><h2>Box score</h2><div id="boxBody"></div></section>
+  </div>
+  <div id="status"></div>
+</main>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

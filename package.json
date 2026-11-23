@@ -3,14 +3,16 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
-    "test": "npm -w packages/engine run test",
+    "test": "npm -w packages/engine run test && npm -w apps/debug run test",
     "test:calibration": "npm -w packages/engine run test:calibration",
     "bench": "tsx packages/engine/scripts/bench.ts",
-    "typecheck": "tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.test.json",
-    "calibrate": "tsx packages/engine/scripts/calibrate.ts"
+    "typecheck": "tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.test.json && npm -w apps/debug run typecheck",
+    "calibrate": "tsx packages/engine/scripts/calibrate.ts",
+    "debug": "npm -w apps/debug run dev"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
