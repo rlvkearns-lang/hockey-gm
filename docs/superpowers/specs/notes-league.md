@@ -23,3 +23,8 @@ Working notes from conversation with the owner on 2026-11-23, to be folded into 
 - Community practice: fan-made roster files (ZenGM Hockey on Reddit, FHM mods on the OOTP forums). FHM itself is NHL-licensed.
 - Gaps and fallbacks: contracts and pick ownership entered by hand, imported from a community file, or via a paid key; junior/European prospects' ratings derived from draft position and rankings with generated stat lines; the draft-eligible class generated.
 - To do before designing the importer: re-run this research with the hosts allowed so endpoints and terms are verified first-hand.
+
+## Ratings and scouting (owner, 2026-11-23)
+- The GM sees his staff's estimate of a player's ratings, not the truth: sharper for players watched a lot, vaguer for a junior seen twice; better scouts narrow it faster and are wrong less often. An option turns this off to show true ratings.
+- Written scouting reports: the GM sends scouts to watch a prospect and they come back with a report in a scout's voice. Owner's example: "He's got a good motor, but lacks some size, he should continue to grow... but his compete level is next to none, we need to get this guy..."
+- [my call] A report is built from structured findings (what the scout saw, how sure he is, his recommendation), coloured by that scout's own tendencies and blind spots. The findings drive the game; the wording never changes an outcome.
