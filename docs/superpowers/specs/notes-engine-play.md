@@ -18,3 +18,14 @@ Proposed shape **[my call]**:
 - Known from the build: defencemen rarely skate backwards facing the puck; to be fixed.
 
 Order (owner agreed, 2026-11-23): the 3D viewer is built first, on the engine's current style of play. Tactics, cycling, dump and chase, point shots and tips go into the next round of engine work with penalties and power plays, and the totals are re-tuned once after that.
+
+## Injuries that match what was seen (owner, 2026-11-23)
+
+- The injury should fit the play: a player boarded head first likely has a concussion, not a broken toe; a player who falls awkwardly on his foot might have a knee injury.
+
+Proposed shape **[my call, not yet agreed]** (belongs to stage 1 step 3, injuries):
+
+- The engine decides the mechanism first, from facts it already has: what kind of contact (open-ice hit, hit into the boards, blocked shot, awkward fall, puck or stick to the face, fight), how hard (speed and weight), where on the body, and how far from the boards.
+- The body part and kind of injury are drawn from what that mechanism can cause (boarding: head, neck, shoulder; blocked shot: foot, ankle, hand; awkward fall or knee-on-knee: knee, ankle; and so on), with injury-proneness and luck deciding whether and how bad.
+- The injury event carries the mechanism and body part, so the viewer animates that exact thing (the head-first fall into the boards, the player hobbling off on one leg, the trainer coming out) and the replay shows it. The cosmetic layer shows what the engine decided, so what is seen always matches what happened.
+- Severity is not known at once: "left the game, upper body" first, then a diagnosis later from the medical staff, which ties into the people layer (playing hurt, coming back too early).
