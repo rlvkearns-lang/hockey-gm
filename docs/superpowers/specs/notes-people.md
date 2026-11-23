@@ -149,3 +149,4 @@ Proposed shape **[my call, not yet agreed]**:
 - Requests can backfire in the open: a hidden injury that comes out, a reporter noticing the rookie's sudden minutes and asking who decided it.
 - Line-ups, a setting with three levels: coach decides (default; the GM makes requests such as "more minutes for the rookie"); GM sets them but the coach has feelings about it (overruling him often costs trust, and players know who benched them); full manual control with no relationship cost, for players who just want to set lines.
 - The coach's choices come from his style and what he values (veterans over kids, defence first, rides his top line), which is why hiring the right coach matters.
+- Owner agreed (2026-11-23): the three-level line-up setting, and coach requests as described above.
