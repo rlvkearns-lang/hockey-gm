@@ -1,4 +1,5 @@
 import { recordTouch } from '../actions';
+import { TUNING } from '../tuning';
 import type { ContestState, SkaterState } from '../types';
 import { dist, hypot2 } from '../vec';
 import {
@@ -7,35 +8,17 @@ import {
 } from './core';
 
 const KIND = 'pokeCheck';
-/** A defender this close (m) to the carrier, in front of him or beside him, pokes at the puck... */
-const TRIGGER_RANGE = 1.6;
-/** ...where "beside" reaches this far behind square: the cosine of the angle off the carrier's facing is at least this. */
-const FRONT_COS = -0.2;
-/** ...at most once per this many seconds. */
-const COOLDOWN_SECONDS = 1.5;
+const T = TUNING.poke;
 /** Stage lengths (s): the stick goes out, then the outcome shows before the puck moves. */
 const REACH_SECONDS = 0.25;
 const RESOLVE_SECONDS = 0.1;
 /** A badly beaten defender loses a step: his speedCap is halved for this long. */
 const BEATEN_SECONDS = 0.7;
 const BEATEN_SPEED_CAP = 0.5;
-/** Rolls in this bottom share are a failure by a wide margin. */
-const BEATEN_ROLL = 0.15;
-/** Beyond this distance (m) at the end of the reach the stick cannot get there: the contest ends with no result. */
-const STICK_REACH = 2.2;
-/** The carrier is favoured by this many rating points. */
-const CARRIER_EDGE = 12;
-/** A won poke check gives the checker the puck this often; otherwise it is knocked loose. */
-const TAKE_SHARE = 0.5;
-/** A knocked-loose puck leaves at this speed range (m/s), away from the checker, plus half the carrier's velocity. */
-const LOOSE_SPEED: [number, number] = [3, 6];
-const LOOSE_SPREAD = 0.8;
 /** How fast the checker moves while the stick is out (fraction of top speed). */
 const REACH_SPEED_CAP = 0.5;
 /** `data.outcome` codes (numbers, so the state stays plain numeric data). */
 const OUTCOME = { undecided: 0, take: 1, loose: 2, kept: 3, beaten: 4 } as const;
-const STICK = { stickChecking: 0.6, defensivePositioning: 0.25, iq: 0.15 };
-const HANDS = { puckHandling: 0.6, poise: 0.25, balance: 0.15 };
 
 function setTarget(s: SkaterState, x: number, y: number): void {
   s.target.x = x;
@@ -67,8 +50,8 @@ export const pokeCheckContest: Contest = {
     if (!carrier || carrier.side === s.side || !isFree(carrier) || state.puck.z > 0) return null;
     const dx = s.pos.x - carrier.pos.x, dy = s.pos.y - carrier.pos.y;
     const d = hypot2(dx, dy);
-    if (d > TRIGGER_RANGE) return null;
-    if (d > 0 && (Math.cos(carrier.facing) * dx + Math.sin(carrier.facing) * dy) / d < FRONT_COS) return null;
+    if (d > T.triggerRange) return null;
+    if (d > 0 && (Math.cos(carrier.facing) * dx + Math.sin(carrier.facing) * dy) / d < T.frontCos) return null;
     if (onCooldown(state, s.id, KIND)) return null;
     return [s.id, carrier.id];
   },
@@ -76,7 +59,7 @@ export const pokeCheckContest: Contest = {
   start(ctx, participants) {
     const [checkerId, carrierId] = participants as [string, string];
     const state = ctx.state;
-    setCooldown(state, checkerId, KIND, COOLDOWN_SECONDS);
+    setCooldown(state, checkerId, KIND, T.cooldownSeconds);
     steerReach(ctx, skaterById(state, checkerId));
     return {
       id: -1, kind: KIND, stage: 'reach', stageT: 0, participants: participants.slice(), leader: null,
@@ -103,7 +86,7 @@ export const pokeCheckContest: Contest = {
 
     if (c.stage === 'reach') {
       if (c.stageT < REACH_SECONDS - STAGE_EPS) return null;
-      if (dist(checker.pos, carrier.pos) > STICK_REACH) return { winnerId: null, puck: 'unchanged' }; // the stick cannot get there
+      if (dist(checker.pos, carrier.pos) > T.stickReach) return { winnerId: null, puck: 'unchanged' }; // the stick cannot get there
       c.data.outcome = roll(c, ctx, checker, carrier);
       c.leader = c.data.outcome === OUTCOME.take || c.data.outcome === OUTCOME.loose ? checker.id : carrier.id;
       enterStage(c, 'resolve');
@@ -116,10 +99,10 @@ export const pokeCheckContest: Contest = {
 
 /** The poke itself: one roll against winProb of the checker's edge. Returns the `data.outcome` code. */
 function roll(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): number {
-  const edge = contestRating(ctx, c, checker.id, STICK) - contestRating(ctx, c, carrier.id, HANDS) - CARRIER_EDGE;
+  const edge = contestRating(ctx, c, checker.id, T.stick) - contestRating(ctx, c, carrier.id, T.hands) - T.carrierEdge;
   const u = ctx.rng.next();
-  if (u >= 1 - winProb(edge)) return ctx.rng.chance(TAKE_SHARE) ? OUTCOME.take : OUTCOME.loose;
-  return u < BEATEN_ROLL ? OUTCOME.beaten : OUTCOME.kept;
+  if (u >= 1 - winProb(edge)) return ctx.rng.chance(T.takeShare) ? OUTCOME.take : OUTCOME.loose;
+  return u < T.beatenChance ? OUTCOME.beaten : OUTCOME.kept;
 }
 
 function finish(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): ContestResult | null {
@@ -140,8 +123,8 @@ function finish(c: ContestState, ctx: ContestCtx, checker: SkaterState, carrier:
   state.lastTouch = { id: checker.id, side: checker.side };
   state.possession = checker.side;
   recordTouch(state, checker.id, checker.side);
-  const a = Math.atan2(p.y - checker.pos.y, p.x - checker.pos.x) + ctx.rng.gauss() * LOOSE_SPREAD;
-  const v = ctx.rng.range(LOOSE_SPEED[0], LOOSE_SPEED[1]);
+  const a = Math.atan2(p.y - checker.pos.y, p.x - checker.pos.x) + ctx.rng.gauss() * T.looseSpread;
+  const v = ctx.rng.range(T.looseSpeed[0], T.looseSpeed[1]);
   return {
     winnerId: checker.id, puck: 'loose',
     looseVel: { x: Math.cos(a) * v + carrier.vel.x * 0.5, y: Math.sin(a) * v + carrier.vel.y * 0.5 },

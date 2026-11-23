@@ -5,75 +5,28 @@ import { stopPlay } from './faceoff';
 import type { PuckEvent } from './puck';
 import { FACEOFF_DOTS, RINK, resolveBoards } from './rink';
 import type { Rng } from './rng';
+import { TUNING } from './tuning';
 import type { GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, Side, SkaterState } from './types';
 import { dist, hypot2, segDistXY, type Vec2 } from './vec';
 
 const GOAL = RINK.goalLineX;
 const SIDES = ['home', 'away'] as const;
 
-/** Top speed along his arc (m/s): base plus per point of lateral. Cut to POSE_SPEED_FACTOR while showing a save. */
-const GOALIE_SPEED = { base: 1.5, perPoint: 0.035 };
-const POSE_SPEED_FACTOR = 0.4;
-/** How fast he turns square to the puck (rad/s): base plus per point of positioning. */
-const SQUARE_RATE = { base: 2, perPoint: 0.06 };
-/** Depth out from the goal line (m): DEPTH.min with the puck DEPTH.near m away or closer, growing DEPTH.perMetre per metre, at most DEPTH.max. */
-const DEPTH = { min: 0.4, max: 1.3, near: 2, perMetre: 0.06 };
+const G = TUNING.goalie;
+const BLOCK = TUNING.block;
 /** He never stands closer than this to the goal line (m), nor wider than POST_Y from the middle (m). */
 const LINE_GAP = 0.3;
 const POST_Y = 0.75;
-/** He covers a loose puck slower than COVER.speed (m/s), within COVER.reach (m) of him and in his crease, when an opponent is within COVER.threat (m) of it. */
-const COVER = { speed: 3, reach: 1.0, threat: 2.5, maxZ: 0.3 };
+/** His top speed is cut to this share while showing a save. */
+const POSE_SPEED_FACTOR = 0.4;
 /** How long a save pose and a cover are shown (s). */
 const POSE_SECONDS = 0.6;
 const COVER_SECONDS = 1.2;
-
-/**
- * Save chance, as a logistic: SAVE.base, plus SAVE.perReactionSecond per second the puck takes to arrive (at most
- * 1 s counted), plus SAVE.perPoint per point of goalie skill over 70, less the penalties below. Clamped to [0.03, 0.97].
- */
-const SAVE = {
-  base: 0.4,
-  perReactionSecond: 5,
-  perPoint: 0.04,
-  screened: 0.6,
-  /** Per m/s he is still moving when the puck arrives. */
-  perMovingSpeed: 0.25,
-  /** Per metre the shot passes wide of his centre beyond his body's reach, and again (steeper) beyond his stretch. */
-  body: 0.45, perBodyMetre: 2,
-  stretch: 1, perStretchMetre: 4,
-  /** Per metre the shot arrives above `highFrom` (just under the bar is hardest). */
-  highFrom: 0.9, perHighMetre: 1.5,
-};
-/** Goalie skill for the save: weights of his attributes. */
-const SAVE_SKILL: Partial<Record<keyof GoalieAttrs, number>> = { reflexes: 0.35, positioning: 0.25, glove: 0.1, blocker: 0.1, lateral: 0.1, poise: 0.1 };
-/** How much of his facing error (rad) counts as extra lateral miss (m). */
-const SQUARE_MISS_PER_RAD = 0.4;
-/** A save is held (frozen) with chance base + perPoint * reboundControl, by pose, clamped to [0.03, 0.97]. */
-const FREEZE: Record<Exclude<GoaliePose, 'stance' | 'cover'>, { base: number; perPoint: number }> = {
-  glove: { base: 0.45, perPoint: 0.004 },
-  blocker: { base: 0.05, perPoint: 0.002 },
-  pad: { base: 0.15, perPoint: 0.003 },
-  butterfly: { base: 0.25, perPoint: 0.004 },
-};
-/** Rebound speed as a share of the shot's: base less perPoint * reboundControl, within [min, max], times the pose's factor. */
-const REBOUND_SPEED = { base: 0.3, perPoint: 0.0018, min: 0.08, max: 0.4 };
-const REBOUND_POSE_SPEED: Record<Exclude<GoaliePose, 'stance' | 'cover'>, number> = { glove: 0.4, blocker: 1, pad: 1, butterfly: 0.7 };
-/** Rebound direction: angular spread (rad, one sd) of base + perPoint * (100 - reboundControl); blocker saves turn RB_BLOCKER_TURN rad to his right, pad saves RB_PAD_TURN rad wide. */
-const REBOUND_SPREAD = { base: 0.2, perPoint: 0.008 };
-const RB_BLOCKER_TURN = 0.7;
-const RB_PAD_TURN = 0.4;
-/** Rebounds go out at most this far (rad) off straight out from the net, and start this far (m) in front of the goalie. */
-const RB_MAX_ANGLE = 1.35;
+/** Rebounds start this far (m) in front of the goalie. */
 const RB_START = 0.45;
 /** A save above this height (m) is a glove or blocker save; below it, a pad save when this far (m) off his centre, else butterfly. */
 const HIGH_SAVE_Z = 0.5;
 const PAD_OFFSET = 0.35;
-
-/** Blocks: a shot below BLOCK.maxZ (m) can be blocked by a defender within BLOCK.path (m) of its path, more than BLOCK.clearOfShooter (m) from the shooter. */
-const BLOCK = { maxZ: 1.1, path: 0.5, clearOfShooter: 1.5, base: 0.12, perPoint: 0.004 };
-/** A blocked puck keeps this share of its speed, turned back by up to this spread (rad, one sd). */
-const BLOCK_SPEED: [number, number] = [0.1, 0.3];
-const BLOCK_SPREAD = 1.2;
 
 /** A shot that slows below this (m/s), or is still going after this long (s), has missed. */
 const MISS_SPEED = 3;
@@ -119,16 +72,16 @@ export type SaveInput = {
 export function saveChance(input: SaveInput): number {
   const a = input.goalie;
   let skill = 0, w = 0;
-  for (const [k, wt] of Object.entries(SAVE_SKILL) as [keyof GoalieAttrs, number][]) { skill += a[k] * wt; w += wt; }
+  for (const [k, wt] of Object.entries(G.saveSkill) as [keyof GoalieAttrs, number][]) { skill += a[k] * wt; w += wt; }
   skill /= w;
   const reaction = Math.min(1, input.distance / Math.max(1, input.shotSpeed));
   const lm = input.lateralMiss;
-  const logit = SAVE.base + SAVE.perReactionSecond * reaction + SAVE.perPoint * (skill - 70)
-    - (input.screened ? SAVE.screened : 0)
-    - SAVE.perMovingSpeed * input.goalieMovingSpeed
-    - SAVE.perBodyMetre * Math.max(0, lm - SAVE.body)
-    - SAVE.perStretchMetre * Math.max(0, lm - SAVE.stretch)
-    - SAVE.perHighMetre * Math.max(0, input.height - SAVE.highFrom);
+  const logit = G.save.base + G.save.perReactionSecond * reaction + G.save.perPoint * (skill - 70)
+    - (input.screened ? G.save.screened : 0)
+    - G.save.perMovingSpeed * input.goalieMovingSpeed
+    - G.save.perBodyMetre * Math.max(0, lm - G.save.body)
+    - G.save.perStretchMetre * Math.max(0, lm - G.save.stretch)
+    - G.save.perHighMetre * Math.max(0, input.height - G.save.highFrom);
   return clamp(logistic(logit), 0.03, 0.97);
 }
 
@@ -143,7 +96,7 @@ function goalieSpot(p: Vec2, end: 1 | -1, out: Vec2): Vec2 {
     return out;
   }
   const d = hypot2(dx, dy);
-  const depth = clamp(DEPTH.min + (d - DEPTH.near) * DEPTH.perMetre, DEPTH.min, DEPTH.max);
+  const depth = clamp(G.depth.min + (d - G.depth.near) * G.depth.perMetre, G.depth.min, G.depth.max);
   out.x = nx + (dx / d) * depth;
   out.y = clamp((dy / d) * depth, -POST_Y, POST_Y);
   if ((out.x - nx) * end > -LINE_GAP) out.x = nx - end * LINE_GAP;
@@ -160,7 +113,7 @@ function moveGoalie(g: GoalieState, a: GoalieAttrs, p: Vec2, end: 1 | -1, dt: nu
   goalieSpot(p, end, spot);
   const dx = spot.x - g.pos.x, dy = spot.y - g.pos.y;
   const d = hypot2(dx, dy);
-  const top = (GOALIE_SPEED.base + a.lateral * GOALIE_SPEED.perPoint) * (g.poseT > 0 ? POSE_SPEED_FACTOR : 1);
+  const top = (G.speed.base + a.lateral * G.speed.perPoint) * (g.poseT > 0 ? POSE_SPEED_FACTOR : 1);
   const step = Math.min(d, top * dt);
   const k = d > 0 ? step / d : 0;
   g.vel.x = (dx * k) / dt;
@@ -169,7 +122,7 @@ function moveGoalie(g: GoalieState, a: GoalieAttrs, p: Vec2, end: 1 | -1, dt: nu
   g.pos.y += dy * k;
   const want = Math.atan2(p.y - g.pos.y, p.x - g.pos.x);
   const turn = wrap(want - g.facing);
-  const maxTurn = (SQUARE_RATE.base + a.positioning * SQUARE_RATE.perPoint) * dt;
+  const maxTurn = (G.squareRate.base + a.positioning * G.squareRate.perPoint) * dt;
   g.facing = wrap(g.facing + clamp(turn, -maxTurn, maxTurn));
 }
 
@@ -187,14 +140,14 @@ function endDotNear(end: 1 | -1, p: Vec2): Vec2 {
 /** He covers a slow loose puck in his crease when an opponent is close to it: `freeze`, play stops. Otherwise he leaves it for his skaters. */
 function tryCover(state: GameState, side: Side, g: GoalieState, end: 1 | -1, out: GameEvent[]): boolean {
   const pk = state.puck;
-  if (hypot2(pk.vel.x, pk.vel.y) >= COVER.speed || pk.z > COVER.maxZ) return false;
+  if (hypot2(pk.vel.x, pk.vel.y) >= G.cover.speed || pk.z > G.cover.maxZ) return false;
   const nx = end * GOAL;
   if ((pk.pos.x - nx) * end > 0 || hypot2(pk.pos.x - nx, pk.pos.y) > RINK.creaseRadius) return false;
-  if (dist(g.pos, pk.pos) > COVER.reach) return false;
+  if (dist(g.pos, pk.pos) > G.cover.reach) return false;
   let threat = false;
   for (const s of state.skaters) {
     if (!s.onIce || s.side === side || s.downT > 0) continue;
-    if (dist(s.pos, pk.pos) <= COVER.threat) { threat = true; break; }
+    if (dist(s.pos, pk.pos) <= G.cover.threat) { threat = true; break; }
   }
   if (!threat) return false;
   g.pose = 'cover';
@@ -242,8 +195,8 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
     if (shooter && dist(s.pos, shooter.pos) <= BLOCK.clearOfShooter) continue;
     shot.blockTried.push(s.id);
     if (!rng.chance(clamp(BLOCK.base + defs.get(s.id)!.attrs.shotBlocking * BLOCK.perPoint, 0.03, 0.97))) continue;
-    const speed = hypot2(pk.vel.x, pk.vel.y) * rng.range(BLOCK_SPEED[0], BLOCK_SPEED[1]);
-    const angle = Math.atan2(pk.vel.y, pk.vel.x) + Math.PI + rng.gauss() * BLOCK_SPREAD;
+    const speed = hypot2(pk.vel.x, pk.vel.y) * rng.range(BLOCK.keep[0], BLOCK.keep[1]);
+    const angle = Math.atan2(pk.vel.y, pk.vel.x) + Math.PI + rng.gauss() * BLOCK.spread;
     pk.vel.x = Math.cos(angle) * speed;
     pk.vel.y = Math.sin(angle) * speed;
     pk.z = 0;
@@ -349,7 +302,7 @@ export function resolveOnNet(
   const offLine = Math.abs((g.pos.x - fx) * ly - (g.pos.y - fy) * lx) / ll;
   const squareErr = Math.abs(wrap(Math.atan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
   const p = saveChance({
-    goalie: ga, lateralMiss: offLine + squareErr * SQUARE_MISS_PER_RAD, shotSpeed: ev.speed, distance,
+    goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance,
     screened: state.screenedUntilTick[defSide] > state.tick, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
   });
   const detail = `${distance.toFixed(1)}m`;
@@ -362,7 +315,7 @@ export function resolveOnNet(
     out.push(event(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, assistIds: [], detail: pose }));
     const rc = ga.reboundControl;
     const pk = state.puck;
-    if (rng.chance(clamp(FREEZE[pose].base + FREEZE[pose].perPoint * rc, 0.03, 0.97))) {
+    if (rng.chance(clamp(G.freeze[pose].base + G.freeze[pose].perPoint * rc, 0.03, 0.97))) {
       g.pose = 'cover';
       g.poseT = COVER_SECONDS;
       out.push(event(state, { type: 'freeze', side: defSide, playerId: g.id, otherId: null, assistIds: [], detail: 'save' }));
@@ -372,11 +325,11 @@ export function resolveOnNet(
     // Rebound: off the reflected line of the shot, turned by the pose and spread by poor rebound control.
     const out0 = end === 1 ? Math.PI : 0;
     let rel = wrap(Math.atan2(ly / ll, (-lx / ll)) - out0);
-    if (pose === 'blocker') rel -= RB_BLOCKER_TURN;
-    else if (pose === 'pad') rel += (ev.y - g.pos.y) * -end >= 0 ? RB_PAD_TURN : -RB_PAD_TURN;
-    rel = clamp(rel + rng.gauss() * (REBOUND_SPREAD.base + REBOUND_SPREAD.perPoint * (100 - rc)), -RB_MAX_ANGLE, RB_MAX_ANGLE);
+    if (pose === 'blocker') rel -= G.blockerTurn;
+    else if (pose === 'pad') rel += (ev.y - g.pos.y) * -end >= 0 ? G.padTurn : -G.padTurn;
+    rel = clamp(rel + rng.gauss() * (G.reboundSpread.base + G.reboundSpread.perPoint * (100 - rc)), -G.reboundMaxAngle, G.reboundMaxAngle);
     const angle = out0 + rel;
-    const speed = ev.speed * clamp(REBOUND_SPEED.base - REBOUND_SPEED.perPoint * rc, REBOUND_SPEED.min, REBOUND_SPEED.max) * REBOUND_POSE_SPEED[pose];
+    const speed = ev.speed * clamp(G.reboundSpeed.base - G.reboundSpeed.perPoint * rc, G.reboundSpeed.min, G.reboundSpeed.max) * G.reboundPoseSpeed[pose];
     pk.pos.x = g.pos.x + Math.cos(angle) * RB_START;
     pk.pos.y = g.pos.y + Math.sin(angle) * RB_START;
     if (pk.pos.x * end > GOAL - 0.1) pk.pos.x = end * (GOAL - 0.1);

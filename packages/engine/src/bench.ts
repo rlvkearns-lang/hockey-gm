@@ -4,6 +4,7 @@ import { zoneOf } from './rink';
 import type { Rng } from './rng';
 import { movementOf } from './skating';
 import { phaseFor } from './team-play';
+import { TUNING } from './tuning';
 import type { BenchState, BenchUnit, GameEvent, GameSetup, GameState, Position, Side, SkaterState } from './types';
 import { hypot2, type Vec2 } from './vec';
 
@@ -21,21 +22,11 @@ const SLOTS: Record<Unit, readonly Position[]> = { forwards: ['LW', 'C', 'RW'], 
 const UNITS: readonly Unit[] = ['forwards', 'defence'];
 const SIDES = ['home', 'away'] as const;
 
-/**
- * Energy drain per second on the ice: FULL_DRAIN at full effort (top speed) for stamina 50, of which IDLE_SHARE is
- * spent even standing still; times 1 + (50 - stamina) * STAMINA_PER_POINT. A 45 s shift flat out takes a stamina-50
- * player from 1.0 to 0.55.
- */
-const FULL_DRAIN = 0.01;
-const IDLE_SHARE = 0.3;
-const STAMINA_PER_POINT = 0.009;
-/** On the bench the gap to full energy closes by 80% every 90 s (from 0.5: +0.4). */
-const RECOVERY_RATE = -Math.log(0.2) / 90;
-/** On the ice while play is stopped, a skater recovers at this fraction of the bench rate. */
-const STOPPAGE_RECOVERY = 0.5;
-/** A unit is due a change when its mean energy is below this... */
-const TIRED = 0.45;
-/** ...or its shift has passed shiftSeconds; at a stoppage, this fraction of shiftSeconds is enough. */
+/** Energy drain and recovery (see TUNING.fatigue). With the defaults a 45 s shift flat out takes a stamina-50 player from 1.0 to 0.55. */
+const F = TUNING.fatigue;
+/** On the bench the gap to full energy keeps F.benchKeep of itself every F.benchSeconds s. */
+const RECOVERY_RATE = -Math.log(F.benchKeep) / F.benchSeconds;
+/** A unit is due a change when its mean energy is below F.tired, or its shift has passed shiftSeconds; at a stoppage, this fraction of shiftSeconds is enough. */
 const STOPPAGE_SHIFT_FRACTION = 0.5;
 /** Attack-relative x (m) past which the puck is deep in a team's far end: it may change whoever has the puck. */
 const DEEP_X = 20;
@@ -50,9 +41,9 @@ export function iceShares(unit: Unit, n: number): number[] {
 }
 
 /** Energy drained per second at full effort by a skater of this stamina. */
-const fullDrain = (stamina: number): number => FULL_DRAIN * (1 + (50 - stamina) * STAMINA_PER_POINT);
+const fullDrain = (stamina: number): number => F.fullDrain * (1 + (50 - stamina) * F.staminaPerPoint);
 const drained = (energy: number, full: number, effort: number, dt: number): number =>
-  Math.max(0, energy - full * (IDLE_SHARE + (1 - IDLE_SHARE) * effort) * dt);
+  Math.max(0, energy - full * (F.idleShare + (1 - F.idleShare) * effort) * dt);
 /** `energy` after resting long enough to keep `factor` of the gap to full. */
 const rested = (energy: number, factor: number): number => (energy >= 1 ? 1 : 1 - (1 - energy) * factor);
 
@@ -116,7 +107,7 @@ export function benchTick(state: GameState, setup: GameSetup, _rng: Rng, dt: num
   const skaters = state.skaters;
   const info = infoFor(setup, skaters);
   const live = state.phase === 'live';
-  const benchRest = Math.exp(-RECOVERY_RATE * dt), iceRest = Math.exp(-RECOVERY_RATE * dt * STOPPAGE_RECOVERY);
+  const benchRest = Math.exp(-RECOVERY_RATE * dt), iceRest = Math.exp(-RECOVERY_RATE * dt * F.stoppageRecovery);
   let carrierSide: Side | null = null;
   for (let u = 0; u < 4; u++) { energySum[u] = 0; headCount[u] = 0; }
   for (let k = 0; k < skaters.length; k++) {
@@ -165,7 +156,7 @@ function isDue(state: GameState, setup: GameSetup, side: Side, unit: Unit, b: Be
   if (shift >= (state.phase === 'live' ? limit : limit * STOPPAGE_SHIFT_FRACTION)) return true;
   const u = unitIndex(side, unit);
   const n = headCount[u]!;
-  return n > 0 && energySum[u]! / n < TIRED;
+  return n > 0 && energySum[u]! / n < F.tired;
 }
 
 /** The team has the puck in the neutral or offensive zone, or the puck is deep in its far end. */

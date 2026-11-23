@@ -2,6 +2,7 @@ import { blockPickup, recordTouch } from '../actions';
 import { stopPlay } from '../faceoff';
 import { boardsNormal, distToBoards, FACEOFF_DOTS, RINK } from '../rink';
 import { movementOf } from '../skating';
+import { TUNING } from '../tuning';
 import type { ContestState, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
@@ -10,14 +11,7 @@ import {
 } from './core';
 
 const KIND = 'boardBattle';
-/**
- * Trigger: the puck this close (m) to the boards, slower than this (m/s), on the ice and not a shot, with a skater of
- * each team this close (m) to it. A carried puck counts (the carrier is then one of the two), so a carrier rubbed out
- * along the boards ends up in a battle for it.
- */
-const TRIGGER_BOARDS = 1.2;
-const TRIGGER_SPEED = 6;
-const TRIGGER_RANGE = 2;
+const T = TUNING.boardBattle;
 /** `arrive` lasts ARRIVE_SECONDS[0] to [1]; a man this close (m) to the spot has arrived. */
 const ARRIVE_SECONDS: [number, number] = [0.3, 0.8];
 const ARRIVE_REACH = 0.8;
@@ -29,32 +23,16 @@ const PIN_ROUND = 0.2;
 const PIN_MARGIN = 2;
 const PIN_SECONDS: [number, number] = [0.8, 1.6];
 /** `dig`: one stick draw per round, each round lasting DIG_ROUND[0] to [1] s; the stage lasts at least DIG_MIN s.
- * With nobody pinned, DIG_MAX_ROUNDS rounds without a side winning two in a row traps the puck. */
+ * With nobody pinned, T.digMaxRounds rounds without a side winning two in a row traps the puck. */
 const DIG_ROUND: [number, number] = [0.5, 0.62];
 const DIG_MIN = 1;
-const DIG_MAX_ROUNDS = 4;
 /** `resolve` shows the winner this long (s) before the puck moves. */
 const RESOLVE_SECONDS = 0.3;
-/** Rating points: first man in, a pinned man digging (against him), a supporting teammate; mass difference (kg) per point. */
-const FIRST_EDGE = 6;
-const PINNED_EDGE = 10;
-const SUPPORT_EDGE = 8;
-const MASS_PER_POINT = 4;
-/** A free teammate this close (m) to the spot joins as his side's support. */
-const SUPPORT_RANGE = 2.5;
 /** A supporting player stands this far (m) off the boards. */
 const SUPPORT_OFF_BOARDS = 2;
-/** The winner comes away with it clean this often; otherwise it squirts along the boards at SQUIRT_SPEED m/s. */
-const CLEAN_SHARE = 0.6;
-const SQUIRT_SPEED: [number, number] = [2, 4];
-/** Afterwards nobody in it starts another board battle for this long (s), and the loser does not poke at once. */
-const COOLDOWN_SECONDS = 1.5;
-const LOSER_POKE_COOLDOWN = 1;
 /** How hard they skate (fraction of top speed) while shoving and digging. */
 const PIN_SPEED_CAP = 0.4;
 const DIG_SPEED_CAP = 0.3;
-const PIN: Weights = { strength: 0.45, balance: 0.3, compete: 0.25 };
-const DIG: Weights = { stickChecking: 0.35, puckHandling: 0.3, compete: 0.2, agility: 0.15 };
 
 /** No one (for data fields that hold a participant index: 0 is the first participant, 1 the second). */
 const NONE = -1;
@@ -112,8 +90,8 @@ export const boardBattleContest: Contest = {
     const state = ctx.state;
     const p = state.puck;
     if (state.shotInFlight !== null || p.z > 0.1) return null;
-    if (hypot2(p.vel.x, p.vel.y) >= TRIGGER_SPEED || distToBoards(p.pos) > TRIGGER_BOARDS) return null;
-    if (dist(s.pos, p.pos) > TRIGGER_RANGE || onCooldown(state, s.id, KIND) || puckHeldByContest(state)) return null;
+    if (hypot2(p.vel.x, p.vel.y) >= T.triggerSpeed || distToBoards(p.pos) > T.triggerBoards) return null;
+    if (dist(s.pos, p.pos) > T.triggerRange || onCooldown(state, s.id, KIND) || puckHeldByContest(state)) return null;
     const carrier = carrierOf(state);
     if (carrier !== null) {
       // A carrier along the boards: the battle is between him and the opponent on him.
@@ -159,9 +137,9 @@ export const boardBattleContest: Contest = {
   },
 };
 
-/** `s` and the nearest free opponent within TRIGGER_RANGE of the puck, or null. */
+/** `s` and the nearest free opponent within T.triggerRange of the puck, or null. */
 function nearestOpponent(state: GameState, s: SkaterState): string[] | null {
-  let o: SkaterState | null = null, od = TRIGGER_RANGE;
+  let o: SkaterState | null = null, od = T.triggerRange;
   for (const t of state.skaters) {
     if (t.side === s.side || !isFree(t) || onCooldown(state, t.id, KIND)) continue;
     const d = dist(t.pos, state.puck.pos);
@@ -184,7 +162,7 @@ function holdPuck(state: GameState, c: ContestState): void {
   p.vz = 0;
 }
 
-/** Each side without support takes the first free teammate (skater order) within SUPPORT_RANGE of the spot. */
+/** Each side without support takes the first free teammate (skater order) within T.supportRange of the spot. */
 function joinSupport(c: ContestState, ctx: ContestCtx): void {
   const state = ctx.state;
   for (let i = 0; i < 2; i++) {
@@ -192,7 +170,7 @@ function joinSupport(c: ContestState, ctx: ContestCtx): void {
     if (dataOf(c)[key] !== NONE) continue;
     const side = skaterById(state, idOf(c, i)).side;
     for (const s of state.skaters) {
-      if (s.side !== side || !isFree(s) || dist(s.pos, c.spot) > SUPPORT_RANGE) continue;
+      if (s.side !== side || !isFree(s) || dist(s.pos, c.spot) > T.supportRange) continue;
       dataOf(c)[key] = c.participants.length;
       c.participants.push(s.id);
       s.contestId = c.id;
@@ -205,8 +183,8 @@ function joinSupport(c: ContestState, ctx: ContestCtx): void {
 function sideEdge(c: ContestState, ctx: ContestCtx, weights: Weights): number {
   const d = dataOf(c);
   return contestRating(ctx, c, idOf(c, 0), weights) - contestRating(ctx, c, idOf(c, 1), weights)
-    + (d.first === 0 ? FIRST_EDGE : d.first === 1 ? -FIRST_EDGE : 0)
-    + (d.supportA !== NONE ? SUPPORT_EDGE : 0) - (d.supportB !== NONE ? SUPPORT_EDGE : 0);
+    + (d.first === 0 ? T.firstEdge : d.first === 1 ? -T.firstEdge : 0)
+    + (d.supportA !== NONE ? T.supportEdge : 0) - (d.supportB !== NONE ? T.supportEdge : 0);
 }
 
 /** Who gets there first. */
@@ -235,7 +213,7 @@ function pin(c: ContestState, ctx: ContestCtx): void {
   const d = dataOf(c);
   if (Math.abs(d.balance) < PIN_MARGIN && c.stageT >= d.nextAt - STAGE_EPS) {
     const ma = movementOf(ctx.defs.get(idOf(c, 0))!, 1).mass, mb = movementOf(ctx.defs.get(idOf(c, 1))!, 1).mass;
-    const edge = sideEdge(c, ctx, PIN) + (ma - mb) / MASS_PER_POINT;
+    const edge = sideEdge(c, ctx, T.pin) + (ma - mb) / T.massPerPoint;
     d.balance += ctx.rng.next() < winProb(edge) ? 1 : -1;
     d.nextAt += PIN_ROUND;
     if (Math.abs(d.balance) >= PIN_MARGIN) d.pinned = d.balance > 0 ? 1 : 0;
@@ -252,13 +230,13 @@ function pin(c: ContestState, ctx: ContestCtx): void {
 function dig(c: ContestState, ctx: ContestCtx): ContestResult | null {
   const d = dataOf(c);
   if (d.winner === NONE && c.stageT >= d.nextAt - STAGE_EPS) {
-    const pinEdge = d.pinned === 0 ? -PINNED_EDGE : d.pinned === 1 ? PINNED_EDGE : 0;
-    const w = ctx.rng.next() < winProb(sideEdge(c, ctx, DIG) + pinEdge) ? 0 : 1;
+    const pinEdge = d.pinned === 0 ? -T.pinnedEdge : d.pinned === 1 ? T.pinnedEdge : 0;
+    const w = ctx.rng.next() < winProb(sideEdge(c, ctx, T.dig) + pinEdge) ? 0 : 1;
     d.digRounds++;
     if (d.pinned !== NONE) {
       if (w !== d.pinned || d.digLast === d.pinned) d.winner = w;
     } else if (d.digLast === w) d.winner = w;
-    else if (d.digRounds >= DIG_MAX_ROUNDS) return trapped(c, ctx);
+    else if (d.digRounds >= T.digMaxRounds) return trapped(c, ctx);
     d.digLast = w;
     if (d.winner === NONE) d.nextAt += ctx.rng.range(DIG_ROUND[0], DIG_ROUND[1]);
   }
@@ -266,7 +244,7 @@ function dig(c: ContestState, ctx: ContestCtx): ContestResult | null {
     : d.pinned !== NONE ? (d.digLast === d.pinned ? d.pinned : other(d.pinned)) : d.digLast;
   c.leader = ahead === NONE ? null : idOf(c, ahead);
   if (d.winner !== NONE && c.stageT >= DIG_MIN - STAGE_EPS) {
-    d.clean = ctx.rng.chance(CLEAN_SHARE) ? 1 : 0;
+    d.clean = ctx.rng.chance(T.cleanShare) ? 1 : 0;
     enterStage(c, 'resolve');
   }
   return null;
@@ -298,8 +276,8 @@ function finish(c: ContestState, ctx: ContestCtx): ContestResult {
   const outnumbered = (l === 0 ? d.supportA : d.supportB) === NONE;
   const detail = supportIdx !== NONE && outnumbered ? 'support' : d.pinned === NONE ? 'scramble' : d.pinned === l ? 'pinned' : 'stick';
   ctx.emit(contestEvent(state, { type: 'battle', side: winner.side, playerId: winner.id, otherId: idOf(c, l), assistIds: [], detail }));
-  for (const id of c.participants) setCooldown(state, id, KIND, COOLDOWN_SECONDS);
-  setCooldown(state, idOf(c, l), 'pokeCheck', LOSER_POKE_COOLDOWN);
+  for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
+  setCooldown(state, idOf(c, l), 'pokeCheck', T.loserPokeCooldown);
   if (d.clean === 1) return { winnerId: supportIdx !== NONE ? idOf(c, supportIdx) : winner.id, puck: 'toWinner' };
   // He gets a piece of it, but it squirts along the boards.
   state.lastTouch = { id: winner.id, side: winner.side };
@@ -307,7 +285,7 @@ function finish(c: ContestState, ctx: ContestCtx): ContestResult {
   recordTouch(state, winner.id, winner.side);
   const n = boardsNormal(c.spot, { x: 0, y: 0 });
   const dirAlong = ctx.rng.chance(0.5) ? 1 : -1;
-  const v = ctx.rng.range(SQUIRT_SPEED[0], SQUIRT_SPEED[1]);
+  const v = ctx.rng.range(T.squirtSpeed[0], T.squirtSpeed[1]);
   state.puck.vel.x = -n.y * dirAlong * v - n.x * 0.5;
   state.puck.vel.y = n.x * dirAlong * v - n.y * 0.5;
   blockPickup(state, c.participants.slice());

@@ -2,17 +2,16 @@ import { DT } from '../constants';
 import { RINK, zoneOf } from '../rink';
 import { movementOf } from '../skating';
 import { ozoneSpotPos } from '../team-play';
+import { TUNING } from '../tuning';
 import type { ContestState, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
   carrierOf, contestRating, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS, winProb,
-  type Contest, type ContestCtx, type Weights,
+  type Contest, type ContestCtx,
 } from './core';
 
 const KIND = 'netFront';
-/** Trigger: an attacking forward this close (m) to his net-front spot, with a defender this close (m) to him. */
-const SPOT_RANGE = 1.5;
-const TRIGGER_RANGE = 1.5;
+const T = TUNING.netFront;
 /** One round every ROUND_SECONDS; what a round wins (the screen, or the tie-up) lasts EFFECT_SECONDS. */
 const ROUND_SECONDS = 1.2;
 const EFFECT_SECONDS = 1.2;
@@ -22,13 +21,9 @@ const REBOUND_EDGE_SECONDS = 2;
 const PUSH_OUT = 1.5;
 /** A free attacker this far (m) from his net-front spot has left it: the battle is over. */
 const LEAVE_RANGE = 2.5;
-/** Neither may start another for this long (s) after one ends. */
-const COOLDOWN_SECONDS = 1;
 /** How hard each skates (fraction of top speed): the defender leaning on him, the attacker being moved out. */
 const DEFENDER_SPEED_CAP = 0.7;
 const PUSHED_SPEED_CAP = 0.5;
-const MASS_PER_POINT = 4;
-const BODY: Weights = { strength: 0.4, balance: 0.3, compete: 0.3 };
 const FORWARDS = ['LW', 'C', 'RW'];
 
 const spotScratch: Vec2 = { x: 0, y: 0 };
@@ -54,8 +49,8 @@ export const netFrontContest: Contest = {
     if (s.slot === null || !FORWARDS.includes(s.slot) || onCooldown(state, s.id, KIND)) return null;
     const carrier = carrierOf(state);
     if (!carrier || carrier.side !== s.side || carrier === s || zoneOf(state.puck.pos.x, state.attackDir[s.side]) !== 'O') return null;
-    if (dist(s.pos, ozoneSpotPos(state, s.side, 'netFront', spotScratch)) > SPOT_RANGE) return null;
-    let o: SkaterState | null = null, od = TRIGGER_RANGE;
+    if (dist(s.pos, ozoneSpotPos(state, s.side, 'netFront', spotScratch)) > T.spotRange) return null;
+    let o: SkaterState | null = null, od = T.triggerRange;
     for (const t of state.skaters) {
       if (t.side === s.side || !isFree(t) || onCooldown(state, t.id, KIND)) continue;
       const d = dist(t.pos, s.pos);
@@ -84,8 +79,8 @@ export const netFrontContest: Contest = {
       || zoneOf(state.puck.pos.x, state.attackDir[att.side]) !== 'O'
       || (c.stage !== 'tied' && dist(att.pos, ozoneSpotPos(state, att.side, 'netFront', spotScratch)) > LEAVE_RANGE);
     if (over) {
-      setCooldown(state, att.id, KIND, COOLDOWN_SECONDS);
-      setCooldown(state, def.id, KIND, COOLDOWN_SECONDS);
+      setCooldown(state, att.id, KIND, T.cooldownSeconds);
+      setCooldown(state, def.id, KIND, T.cooldownSeconds);
       return { winnerId: c.leader, puck: 'unchanged' };
     }
     if (c.stageT >= ROUND_SECONDS - STAGE_EPS) round(c, ctx, att, def);
@@ -99,7 +94,7 @@ export const netFrontContest: Contest = {
 function round(c: ContestState, ctx: ContestCtx, att: SkaterState, def: SkaterState): void {
   const state = ctx.state;
   const ma = movementOf(ctx.defs.get(att.id)!, 1).mass, md = movementOf(ctx.defs.get(def.id)!, 1).mass;
-  const edge = contestRating(ctx, c, att.id, BODY) - contestRating(ctx, c, def.id, BODY) + (ma - md) / MASS_PER_POINT;
+  const edge = contestRating(ctx, c, att.id, T.body) - contestRating(ctx, c, def.id, T.body) + (ma - md) / T.massPerPoint;
   const effectTick = state.tick + Math.round(EFFECT_SECONDS / DT);
   c.data.rounds!++;
   if (ctx.rng.next() < winProb(edge)) {

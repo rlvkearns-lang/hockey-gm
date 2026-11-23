@@ -24,4 +24,5 @@ export * from './contests/board-battle';
 export * from './contests/net-front';
 export * from './contests/loose-race';
 export * from './stats';
+export * from './tuning';
 export * from './game';

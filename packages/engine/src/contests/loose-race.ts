@@ -3,37 +3,25 @@ import { DT } from '../constants';
 import { distToBoards } from '../rink';
 import { movementOf, type Movement } from '../skating';
 import { isTiedUp, steeredByContest } from '../team-play';
+import { TUNING } from '../tuning';
 import type { ContestState, GameState, PlayerDef, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
   contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
-  type Contest, type ContestCtx, type Weights,
+  type Contest, type ContestCtx,
 } from './core';
 
 const KIND = 'looseRace';
-/** Trigger: a loose puck slower than this (m/s), more than this far (m) from the boards, ... */
-const MAX_PUCK_SPEED = 12;
-const BOARDS_CLEAR = 1.2;
-/** ...that each side's first man would reach within this many seconds of the other's, both within RACE_HORIZON s. */
-const RACE_WINDOW = 0.4;
-const RACE_HORIZON = 1.5;
+const T = TUNING.looseRace;
 /** A man this close (m) to the puck has reached it (the pickup radius). */
 const REACH = 0.9;
-/** Rating points per second of arrival-time difference (a 0.3 s lead is 39 points, about 0.83 before attributes). */
-const EDGE_PER_SECOND = 130;
-/** A roll this close to the threshold is a 50/50 bounce: nobody gets it. */
-const BOUNCE_BAND = 0.08;
-/** The man who won the last net-front round has this edge for the rebound. */
-const REBOUND_EDGE = 10;
 /** `resolve` shows the outcome this long (s); a race not reached within RACE_MAX_SECONDS is off. */
 const RESOLVE_SECONDS = 0.1;
 const RACE_MAX_SECONDS = 2;
-/** A bounce leaves the puck at this speed (m/s), any direction; neither racer may start another race for COOLDOWN s. */
+/** A bounce leaves the puck at this speed (m/s), any direction. */
 const BOUNCE_SPEED: [number, number] = [1, 3];
-const COOLDOWN_SECONDS = 0.8;
 /** Racers lead a moving puck by at most this long (s). */
 const MAX_LEAD_SECONDS = 1;
-const RACE: Weights = { compete: 0.4, agility: 0.3, balance: 0.3 };
 /** `data.outcome` codes. */
 const OUTCOME = { undecided: 0, a: 1, b: 2, bounce: 3 } as const;
 
@@ -69,7 +57,7 @@ function etaOf(ctx: ContestCtx, s: SkaterState): number {
 function raceable(state: GameState): boolean {
   const p = state.puck;
   return state.carrierId === null && state.pendingPass === null && state.shotInFlight === null && p.z <= 0.3
-    && hypot2(p.vel.x, p.vel.y) < MAX_PUCK_SPEED && distToBoards(p.pos) > BOARDS_CLEAR && !puckHeldByContest(state);
+    && hypot2(p.vel.x, p.vel.y) < T.maxPuckSpeed && distToBoards(p.pos) > T.boardsClear && !puckHeldByContest(state);
 }
 
 /** A skater busy in a contest that steers him is counted this much (s) later to the puck. */
@@ -132,7 +120,7 @@ export const looseRaceContest: Contest = {
     const first = firstMen(ctx);
     const mine = first[s.side === 'home' ? 0 : 1], theirs = first[s.side === 'home' ? 1 : 0];
     if (mine.id !== s.id || theirs.id === null) return null;
-    if (Math.max(mine.eta, theirs.eta) > RACE_HORIZON || Math.abs(mine.eta - theirs.eta) > RACE_WINDOW) return null;
+    if (Math.max(mine.eta, theirs.eta) > T.raceHorizon || Math.abs(mine.eta - theirs.eta) > T.raceWindow) return null;
     const o = skaterById(state, theirs.id);
     return eligible(state, o) ? [s.id, o.id] : null;
   },
@@ -170,7 +158,7 @@ export const looseRaceContest: Contest = {
     const o = c.data.outcome;
     if (o === OUTCOME.a || o === OUTCOME.b) {
       const w = o === OUTCOME.a ? a : b;
-      for (const id of c.participants) setCooldown(state, id, KIND, COOLDOWN_SECONDS);
+      for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
       return { winnerId: w.id, puck: 'toWinner' };
     }
     // A bounce: off both sticks, it stays loose.
@@ -183,7 +171,7 @@ export const looseRaceContest: Contest = {
 };
 
 function end(c: ContestState, ctx: ContestCtx, winnerId: string | null): { winnerId: string | null; puck: 'unchanged' } {
-  for (const id of c.participants) setCooldown(ctx.state, id, KIND, COOLDOWN_SECONDS);
+  for (const id of c.participants) setCooldown(ctx.state, id, KIND, T.cooldownSeconds);
   return { winnerId, puck: 'unchanged' };
 }
 
@@ -191,12 +179,12 @@ function end(c: ContestState, ctx: ContestCtx, winnerId: string | null): { winne
 function decide(c: ContestState, ctx: ContestCtx, a: SkaterState, b: SkaterState, ta: number, tb: number): void {
   const state = ctx.state;
   const rb = state.reboundEdge !== null && state.tick < state.reboundEdge.untilTick ? state.reboundEdge.id : null;
-  const edge = (tb - ta) * EDGE_PER_SECOND + contestRating(ctx, c, a.id, RACE) - contestRating(ctx, c, b.id, RACE)
-    + (rb === a.id ? REBOUND_EDGE : 0) - (rb === b.id ? REBOUND_EDGE : 0);
+  const edge = (tb - ta) * T.edgePerSecond + contestRating(ctx, c, a.id, T.race) - contestRating(ctx, c, b.id, T.race)
+    + (rb === a.id ? T.reboundEdge : 0) - (rb === b.id ? T.reboundEdge : 0);
   const threshold = 1 - winProb(edge);
   const u = ctx.rng.next();
   c.data.gap = tb - ta;
-  c.data.outcome = Math.abs(u - threshold) < BOUNCE_BAND ? OUTCOME.bounce : u >= threshold ? OUTCOME.a : OUTCOME.b;
+  c.data.outcome = Math.abs(u - threshold) < T.bounceBand ? OUTCOME.bounce : u >= threshold ? OUTCOME.a : OUTCOME.b;
   c.leader = c.data.outcome === OUTCOME.a ? a.id : c.data.outcome === OUTCOME.b ? b.id : null;
 }
 

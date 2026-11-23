@@ -2,11 +2,14 @@
   "name": "hockey-gm",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "test": "npm -w packages/engine run test",
     "bench": "tsx packages/engine/scripts/bench.ts",
-    "typecheck": "tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.test.json"
+    "typecheck": "tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.test.json",
+    "calibrate": "tsx packages/engine/scripts/calibrate.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

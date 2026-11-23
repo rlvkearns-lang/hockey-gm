@@ -23,6 +23,8 @@ import { tryBlock } from '../src/goalie';
 import { movementOf, stepSkater } from '../src/skating';
 import { refereeTick } from '../src/referee';
 import type { Movement } from '../src/skating';
+import { availableParallelism } from 'node:os';
+import { MessageChannel, receiveMessageOnPort, Worker, type MessagePort } from 'node:worker_threads';
 
 export const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 
@@ -1055,3 +1057,190 @@ export function runRace(o: RaceOpts): RaceOutcome {
 
 /** A dead-heat race in which home C has just won the net-front battle. */
 export const raceWithRebound = (): RaceOutcome => runRace({ aLead: 0, reboundFor: 'a' });
+
+// ---- calibration (Task 12) ----
+
+/** What one calibration game leaves behind: its box score without the event log, event counts and contest starts. */
+export type GameRecord = {
+  index: number;
+  ms: number;
+  score: { home: number; away: number };
+  team: GameResult['team'];
+  players: GameResult['players'];
+  /** Player type of every player id in the game. */
+  types: Record<string, string>;
+  /** Events by type, and by `type:detail` for the kinds whose detail says how it happened. */
+  counts: Record<string, number>;
+  /** Contests started, by kind. */
+  contests: Record<string, number>;
+};
+
+export type CalibrationOpts = { homeOverall?: number; awayOverall?: number };
+
+/** Event types whose detail is counted too (e.g. `hit:landed`, `freeze:trapped`, `takeaway:poke`). */
+const DETAILED = new Set(['hit', 'freeze', 'takeaway', 'battle', 'save', 'pass', 'lineChange']);
+
+/**
+ * Calibration game `i`: two generated teams (home roster seed 2i + 1 at `homeOverall`, away 2i + 2 at `awayOverall`,
+ * both 70 by default), game seed i + 1, played to the end with every new contest counted.
+ */
+export function playRecord(i: number, o: CalibrationOpts = {}): GameRecord {
+  const s: GameSetup = {
+    home: generateTeam(2 * i + 1, `Home ${i}`, 'H', o.homeOverall ?? 70),
+    away: generateTeam(2 * i + 2, `Away ${i}`, 'A', o.awayOverall ?? 70),
+    seed: i + 1,
+    chemistry: [],
+  };
+  const t0 = performance.now();
+  const game = createGame(s);
+  const contests: Record<string, number> = {};
+  const seen = new Set<number>();
+  while (!game.done) {
+    game.step();
+    for (const c of game.state.contests) if (!seen.has(c.id)) { seen.add(c.id); contests[c.kind] = (contests[c.kind] ?? 0) + 1; }
+  }
+  const r = game.result();
+  const ms = performance.now() - t0;
+  const counts: Record<string, number> = {};
+  for (const e of r.events) {
+    counts[e.type] = (counts[e.type] ?? 0) + 1;
+    if (DETAILED.has(e.type)) {
+      const k = `${e.type}:${e.type === 'lineChange' ? e.detail.split(' ')[2] : e.detail}`;
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+  }
+  const types: Record<string, string> = {};
+  for (const p of [...s.home.players, ...s.away.players]) types[p.id] = p.type;
+  return { index: i, ms, score: r.score, team: r.team, players: r.players, types, counts, contests };
+}
+
+const recordCache = new Map<string, GameRecord[]>();
+
+/**
+ * `n` calibration games (playRecord 0 .. n-1), played on worker threads (one per core, at most 8) while this thread
+ * waits, so the call stays synchronous. Results are cached per (n, opts) for the life of the test file.
+ */
+export function runGames(n: number, o: CalibrationOpts = {}): GameRecord[] {
+  const key = JSON.stringify([n, o.homeOverall ?? 70, o.awayOverall ?? 70]);
+  const hit = recordCache.get(key);
+  if (hit) return hit;
+  const nWorkers = Math.max(1, Math.min(8, availableParallelism(), n));
+  const done = new Int32Array(new SharedArrayBuffer(4));
+  const jobs = Array.from({ length: nWorkers }, (_, w) => Array.from({ length: n }, (_, i) => i).filter((i) => i % nWorkers === w));
+  const ports: MessagePort[] = [];
+  const workers: Worker[] = [];
+  for (const indices of jobs) {
+    const { port1, port2 } = new MessageChannel();
+    ports.push(port1);
+    workers.push(new Worker(new URL('./calibration-worker.ts', import.meta.url), {
+      execArgv: ['--import', 'tsx'], workerData: { indices, opts: o, port: port2, done }, transferList: [port2],
+    }));
+  }
+  const out: GameRecord[] = [];
+  try {
+    for (const port of ports) {
+      let msg: ReturnType<typeof receiveMessageOnPort>;
+      while ((msg = receiveMessageOnPort(port)) === undefined) {
+        const now = Atomics.load(done, 0);
+        if (now < 0) throw new Error('a calibration worker failed');
+        Atomics.wait(done, 0, now, 1000);
+      }
+      const m = msg.message as { records?: GameRecord[]; error?: string };
+      if (m.error !== undefined) throw new Error(`calibration worker: ${m.error}`);
+      out.push(...m.records!);
+    }
+  } finally {
+    for (const w of workers) void w.terminate();
+  }
+  out.sort((a, b) => a.index - b.index);
+  recordCache.set(key, out);
+  return out;
+}
+
+const total = (rs: GameRecord[], f: (r: GameRecord) => number): number => rs.reduce((a, r) => a + f(r), 0);
+const countOf = (r: GameRecord, k: string): number => r.counts[k] ?? 0;
+
+export type Summary = {
+  games: number;
+  /** Per team per game. */
+  goals: number; shots: number; hits: number; blocks: number; giveaways: number; takeaways: number; battles: number;
+  faceoffs: number; offsides: number; icings: number;
+  /** Per game, both teams. */
+  faceoffsTotal: number; offsidesTotal: number; icingsTotal: number;
+  /** Saves over shots on goal. */
+  savePct: number;
+  homeWinShare: number; tieShare: number;
+  msPerGame: number;
+};
+
+/** Per-team-per-game means (and per-game totals for the whistles) over the records. */
+export function summarise(rs: GameRecord[]): Summary {
+  const g = rs.length, perTeam = (x: number): number => x / (2 * g);
+  const shots = total(rs, (r) => r.team.home.shots + r.team.away.shots);
+  const goals = total(rs, (r) => r.score.home + r.score.away);
+  return {
+    games: g,
+    goals: perTeam(goals),
+    shots: perTeam(shots),
+    hits: perTeam(total(rs, (r) => r.team.home.hits + r.team.away.hits)),
+    blocks: perTeam(total(rs, (r) => r.team.home.blocks + r.team.away.blocks)),
+    giveaways: perTeam(total(rs, (r) => r.team.home.giveaways + r.team.away.giveaways)),
+    takeaways: perTeam(total(rs, (r) => r.team.home.takeaways + r.team.away.takeaways)),
+    battles: perTeam(total(rs, (r) => countOf(r, 'battle'))),
+    faceoffs: perTeam(total(rs, (r) => countOf(r, 'faceoff'))),
+    offsides: perTeam(total(rs, (r) => countOf(r, 'offside'))),
+    icings: perTeam(total(rs, (r) => countOf(r, 'icing'))),
+    faceoffsTotal: total(rs, (r) => countOf(r, 'faceoff')) / g,
+    offsidesTotal: total(rs, (r) => countOf(r, 'offside')) / g,
+    icingsTotal: total(rs, (r) => countOf(r, 'icing')) / g,
+    savePct: shots === 0 ? 0 : total(rs, (r) => countOf(r, 'save')) / shots,
+    homeWinShare: rs.filter((r) => r.score.home > r.score.away).length / g,
+    tieShare: rs.filter((r) => r.score.home === r.score.away).length / g,
+    msPerGame: total(rs, (r) => r.ms) / g,
+  };
+}
+
+/** Share of games won by each side, and tied. */
+export function winShare(rs: GameRecord[]): { home: number; away: number; tie: number } {
+  const g = rs.length;
+  return {
+    home: rs.filter((r) => r.score.home > r.score.away).length / g,
+    away: rs.filter((r) => r.score.away > r.score.home).length / g,
+    tie: rs.filter((r) => r.score.home === r.score.away).length / g,
+  };
+}
+
+/** Sum of `f` and of time on ice over every player line of each player type. */
+function byType(rs: GameRecord[], f: (p: GameResult['players'][number]) => [number, number]): Record<string, [number, number]> {
+  const out: Record<string, [number, number]> = {};
+  for (const r of rs) for (const p of r.players) {
+    if (r.types[p.id] === 'Goalie') continue;
+    const t = r.types[p.id]!;
+    const [a, b] = f(p);
+    const acc = (out[t] ??= [0, 0]);
+    acc[0] += a;
+    acc[1] += b;
+  }
+  return out;
+}
+
+/** Goals per 60 minutes of ice time, by player type. */
+export function goalsPer60ByType(rs: GameRecord[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [t, [goals, toi]] of Object.entries(byType(rs, (p) => [p.goals, p.toiSeconds]))) out[t] = toi > 0 ? (goals / toi) * 3600 : 0;
+  return out;
+}
+
+/** Share of board battles won, by player type. */
+export function battleWinShareByType(rs: GameRecord[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [t, [won, n]] of Object.entries(byType(rs, (p) => [p.battlesWon, p.battlesWon + p.battlesLost]))) out[t] = n > 0 ? won / n : 0;
+  return out;
+}
+
+/** Player lines of `side`'s players in a result of two generated teams: their ids start with the team's abbr. */
+export function playersOf(r: GameResult, side: Side): GameResult['players'] {
+  const abbrOf = (id: string): string => id.slice(0, id.lastIndexOf('-'));
+  const home = abbrOf(r.players[0]!.id);
+  return r.players.filter((p) => (abbrOf(p.id) === home) === (side === 'home'));
+}

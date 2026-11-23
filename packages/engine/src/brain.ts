@@ -2,6 +2,7 @@ import { executeDump, executePass, executeShot, goalieShade, pressureOn } from '
 import { composite } from './attributes';
 import { BRAIN_INTERVAL_TICKS } from './constants';
 import { RINK, zoneOf } from './rink';
+import { TUNING } from './tuning';
 import { isTiedUp, steeredByContest } from './team-play';
 import { bodyRadius } from './skating';
 import type { Rng } from './rng';
@@ -16,28 +17,7 @@ export type Decision =
   | { kind: 'protect' };
 
 const GOAL = RINK.goalLineX;
-/** Shot quality falls as exp(-distance / SHOT_DISTANCE_SCALE), halving about every 6 m; nothing beyond MAX_SHOT_DISTANCE (m). */
-const SHOT_DISTANCE_SCALE = 9;
-const MAX_SHOT_DISTANCE = 25;
-/** Base weight of each kind of option, before situation, skill and tendency. */
-const WEIGHT = { shoot: 2.2, pass: 1, carry: 3, dump: 0.15, protect: 0.25 };
-/** Shoot weight is scaled by OPEN_NET_WEIGHT[0] with the goalie square, up to the sum of both with him shaded OPEN_NET_SHADE m off. */
-const OPEN_NET_WEIGHT: [number, number] = [0.85, 0.5];
-const OPEN_NET_SHADE = 0.6;
-/** Largest share any one option may have of the draw. */
-const MAX_SHARE = 0.97;
-/** Passes shorter or longer than this (m) are not considered. */
-const PASS_RANGE: [number, number] = [2.5, 35];
-/** A dump from his own half (behind the centre line) would be icing: its weight is scaled by this. */
-const ICING_DUMP = 0.25;
-/** How far ahead (m) a carrier aims each carry decision outside the offensive zone, and how far he swerves. */
-const CARRY_AHEAD = 8;
-const CARRY_SWERVE = 3;
-/** Outside the offensive zone with a teammate wholly in it, he carries no closer than this (m) to the blue line. */
-const HOLD_UP_GAP = 1;
-/** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
-const PROTECT_STEP = 2;
-const PROTECT_SPEED_CAP = 0.4;
+const T = TUNING.brain;
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 /** 0.6 at 0, 1.4 at 100: how much a skill rating scales an option. */
@@ -48,8 +28,8 @@ function shotQuality(rx: number, ly: number): number {
   const dx = GOAL - rx;
   if (dx < 0.3 || rx < RINK.blueLineX) return 0;
   const d = hypot2(dx, ly);
-  if (d > MAX_SHOT_DISTANCE) return 0;
-  return Math.exp(-d / SHOT_DISTANCE_SCALE) * (dx / d);
+  if (d > T.maxShotDistance) return 0;
+  return Math.exp(-d / T.shotDistanceScale) * (dx / d);
 }
 
 function skaterById(state: GameState, id: string): SkaterState | null {
@@ -111,7 +91,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
     if (outside && t.pos.x * dir > RINK.blueLineX + bodyRadius(defs.get(t.id)!.weightKg)) { mateOffside = true; continue; }
     if (!canReceivePass(state, t)) continue; // still counts for offside, but is no pass target
     const l = dist(p, t.pos);
-    if (l < PASS_RANGE[0] || l > PASS_RANGE[1]) continue;
+    if (l < T.passRange[0] || l > T.passRange[1]) continue;
     let laneMin = Infinity, recvMin = Infinity;
     for (const o of state.skaters) {
       if (!o.onIce || o.side === s.side || o.downT > 0) continue;
@@ -135,22 +115,22 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   }
 
   // An open side of the net (the goalie shaded off the line to it) makes a better shot.
-  const open = clamp(Math.abs(goalieShade(state, s.side)) / OPEN_NET_SHADE, 0, 1);
-  const shootW = WEIGHT.shoot * shotQuality(rx, ly) * (OPEN_NET_WEIGHT[0] + OPEN_NET_WEIGHT[1] * open) * skill(composite(a, { shootingAccuracy: 0.6, shootingPower: 0.4 })) * tend.shoot * calm;
-  const passSkill = WEIGHT.pass * skill(a.passing) * tend.pass * calm;
-  const carryW = WEIGHT.carry * (0.25 + 0.75 * spaceAhead) * skill(a.puckHandling) * tend.carry * calm;
+  const open = clamp(Math.abs(goalieShade(state, s.side)) / T.openNetShade, 0, 1);
+  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * skill(composite(a, { shootingAccuracy: 0.6, shootingPower: 0.4 })) * tend.shoot * calm;
+  const passSkill = T.weight.pass * skill(a.passing) * tend.pass * calm;
+  const carryW = T.weight.carry * (T.carrySpace[0] + T.carrySpace[1] * spaceAhead) * skill(a.puckHandling) * tend.carry * calm;
   const zone = zoneOf(p.x, dir);
   // Dump in when the way ahead is closed; clear the own zone only under pressure. From his own half a dump would be
   // icing, so there he would much rather pass or carry.
-  const dumpW = WEIGHT.dump * tend.dump * (rx < 0 ? ICING_DUMP : 1)
+  const dumpW = T.weight.dump * tend.dump * (rx < 0 ? T.icingDump : 1)
     * (zone === 'N' ? 1 - spaceAhead : zone === 'D' ? 0.5 * pressure : 0);
-  const protectW = WEIGHT.protect * (0.1 + pressure) * skill(composite(a, { puckHandling: 0.5, strength: 0.5 }));
+  const protectW = T.weight.protect * (T.protectBase + pressure) * skill(composite(a, { puckHandling: 0.5, strength: 0.5 }));
 
   let total = shootW + carryW + dumpW + protectW;
   let top = Math.max(shootW, carryW, dumpW, protectW);
   for (const v of laneValues) { total += v * passSkill; top = Math.max(top, v * passSkill); }
-  // Parity: no option is drawn more than MAX_SHARE of the time (protect always has some weight, so the rest is > 0).
-  const cap = (MAX_SHARE / (1 - MAX_SHARE)) * (total - top);
+  // Parity: no option is drawn more than T.maxShare of the time (protect always has some weight, so the rest is > 0).
+  const cap = (T.maxShare / (1 - T.maxShare)) * (total - top);
   const w = (x: number): number => Math.min(x, cap);
   if (top > cap) total += cap - top;
   let r = rng.next() * total;
@@ -159,7 +139,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   if ((r -= w(dumpW)) < 0) return { kind: 'dump' };
   if ((r -= w(protectW)) < 0) return { kind: 'protect' };
   const to = carryTarget(rx, ly, zone, aheadLat, aheadD, dir);
-  if (mateOffside && to.x * dir > RINK.blueLineX - HOLD_UP_GAP) to.x = (RINK.blueLineX - HOLD_UP_GAP) * dir;
+  if (mateOffside && to.x * dir > RINK.blueLineX - T.holdUpGap) to.x = (RINK.blueLineX - T.holdUpGap) * dir;
   return { kind: 'carry', to };
 }
 
@@ -171,8 +151,8 @@ function carryTarget(rx: number, ly: number, zone: 'D' | 'N' | 'O', aheadLat: nu
     else if (hypot2(GOAL - rx, ly) > 10) { tx = Math.min(rx + 6, 21); ty = ly * 0.5; } // drive to the slot
     else { tx = Math.min(rx + 3, GOAL - 3.5); ty = (ly >= 0 ? -1 : 1) * 2.5; } // cut across
   } else {
-    tx = rx + CARRY_AHEAD;
-    ty = clamp(ly + (aheadD < 10 ? (aheadLat >= 0 ? -1 : 1) * CARRY_SWERVE : 0), -10, 10);
+    tx = rx + T.carryAhead;
+    ty = clamp(ly + (aheadD < 10 ? (aheadLat >= 0 ? -1 : 1) * T.carrySwerve : 0), -10, 10);
   }
   return { x: tx * dir, y: ty * dir };
 }
@@ -209,11 +189,11 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
         if (od < nearD) { nearD = od; near = o; }
       }
       if (near && nearD > 0) {
-        s.target.x = s.pos.x + ((s.pos.x - near.pos.x) / nearD) * PROTECT_STEP;
-        s.target.y = s.pos.y + ((s.pos.y - near.pos.y) / nearD) * PROTECT_STEP;
+        s.target.x = s.pos.x + ((s.pos.x - near.pos.x) / nearD) * T.protectStep;
+        s.target.y = s.pos.y + ((s.pos.y - near.pos.y) / nearD) * T.protectStep;
       } else { s.target.x = s.pos.x; s.target.y = s.pos.y; }
       s.faceTarget = null;
-      s.speedCap = PROTECT_SPEED_CAP;
+      s.speedCap = T.protectSpeedCap;
       return null;
     }
   }

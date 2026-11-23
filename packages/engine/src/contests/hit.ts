@@ -1,5 +1,6 @@
 import { DT } from '../constants';
 import { bodyRadius, movementOf } from '../skating';
+import { TUNING } from '../tuning';
 import type { ContestState, GameState, PlayerDef, SkaterState } from '../types';
 import { hypot2 } from '../vec';
 import {
@@ -8,14 +9,7 @@ import {
 } from './core';
 
 const KIND = 'hit';
-/** A skater thinks about a hit on an opponent this close (m)... */
-const TRIGGER_RANGE = 3;
-/** ...whom he is closing on faster than this (m/s)... */
-const MIN_CLOSING = 2;
-/** ...who has the puck or let it go less than this long ago (s)... */
-const RELEASE_WINDOW_SECONDS = 0.6;
-/** ...and makes up his mind (one draw against hitAttemptChance) at most once per this many seconds. */
-const DECIDE_SECONDS = 2;
+const T = TUNING.hit;
 /** Stage lengths (s): no contact within CLOSE_MAX_SECONDS is a miss. */
 const CLOSE_MAX_SECONDS = 1.2;
 const IMPACT_SECONDS = 0.15;
@@ -26,13 +20,9 @@ const MISS_RECOVER_SECONDS = 0.8;
 const CONTACT_MARGIN = 0.15;
 /** The hitter aims this far (m) through the target, so he does not ease off before contact. */
 const THROUGH = 1.5;
-/** Target speed (m/s) assumed for his side of the momentum term, and the term's scale in rating points. */
-const BRACE_SPEED = 2;
-const MOMENTUM_SCALE = 12;
 /** A landed hit puts the target down for this long (s), longer the bigger the margin. */
 const DOWN_SECONDS: [number, number] = [0.6, 1.4];
-/** On a roll in this bottom share the hitter bounces off and goes down for BOUNCE_DOWN_SECONDS. */
-const BOUNCE_ROLL = 0.1;
+/** A bounced hitter goes down for this long (s). */
 const BOUNCE_DOWN_SECONDS = 0.5;
 /** Speed (m/s) a hit can leave the target with, at most. */
 const MAX_KNOCKED_SPEED = 10;
@@ -41,14 +31,12 @@ const LOOSE_CARRY = 0.6;
 const LOOSE_PUSH = 1.5;
 /** While regathering the hitter coasts at this fraction of top speed. */
 const RECOVER_SPEED_CAP = 0.3;
-const HITTER = { bodyChecking: 0.5, strength: 0.3, balance: 0.2 };
-const BRACE = { balance: 0.45, strength: 0.35, poise: 0.2 };
 
-/** `t` has the puck, or let it go within RELEASE_WINDOW_SECONDS. */
+/** `t` has the puck, or let it go within T.releaseWindowSeconds. */
 function isHittable(state: GameState, t: SkaterState): boolean {
   if (state.carrierId === t.id) return true;
   const r = state.lastRelease;
-  return r !== null && r.id === t.id && state.tick - r.tick <= Math.round(RELEASE_WINDOW_SECONDS / DT);
+  return r !== null && r.id === t.id && state.tick - r.tick <= Math.round(T.releaseWindowSeconds / DT);
 }
 
 /** Speed (m/s) at which `h` closes on `t` along the line between them (negative when parting). */
@@ -67,8 +55,8 @@ function closingSpeed(h: SkaterState, t: SkaterState): number {
 export function hitChance(
   hitter: PlayerDef, h: SkaterState, target: PlayerDef, t: SkaterState, closing: number, hitterChem = 0, targetChem = 0,
 ): number {
-  const edge = effective(hitter, h, HITTER, hitterChem) - effective(target, t, BRACE, targetChem)
-    + (movementOf(hitter, 1).mass * closing - movementOf(target, 1).mass * BRACE_SPEED) / MOMENTUM_SCALE;
+  const edge = effective(hitter, h, T.hitter, hitterChem) - effective(target, t, T.brace, targetChem)
+    + (movementOf(hitter, 1).mass * closing - movementOf(target, 1).mass * T.braceSpeed) / T.momentumScale;
   return winProb(edge);
 }
 
@@ -77,17 +65,17 @@ export function hitAttemptChance(d: PlayerDef): number {
   return Math.max(0.03, Math.min(0.97, (d.tendencies.hit * d.attrs.aggression) / 100));
 }
 
-/** `t` is an opponent of `h` he could hit now: free, hittable, within TRIGGER_RANGE and being closed on fast enough. */
+/** `t` is an opponent of `h` he could hit now: free, hittable, within T.triggerRange and being closed on fast enough. */
 function inReach(state: GameState, h: SkaterState, t: SkaterState | null): t is SkaterState {
   return t !== null && t.side !== h.side && isFree(t) && isHittable(state, t)
-    && hypot2(t.pos.x - h.pos.x, t.pos.y - h.pos.y) <= TRIGGER_RANGE && closingSpeed(h, t) > MIN_CLOSING;
+    && hypot2(t.pos.x - h.pos.x, t.pos.y - h.pos.y) <= T.triggerRange && closingSpeed(h, t) > T.minClosing;
 }
 
 type Hittable = { carrier: SkaterState | null; released: SkaterState | null };
 const HITTABLE = 'hit.hittable';
 
 /**
- * Who could be hit now: the carrier, and the skater who let the puck go within RELEASE_WINDOW_SECONDS (if he is not the
+ * Who could be hit now: the carrier, and the skater who let the puck go within T.releaseWindowSeconds (if he is not the
  * carrier). Worked out once per round of triggers (kept in `ctx.memo`, emptied whenever a contest starts).
  */
 function hittable(ctx: ContestCtx): Hittable {
@@ -96,7 +84,7 @@ function hittable(ctx: ContestCtx): Hittable {
   const state = ctx.state;
   const carrier = carrierOf(state);
   const r = state.lastRelease;
-  const released = r !== null && r.id !== state.carrierId && state.tick - r.tick <= Math.round(RELEASE_WINDOW_SECONDS / DT) ? skaterById(state, r.id) : null;
+  const released = r !== null && r.id !== state.carrierId && state.tick - r.tick <= Math.round(T.releaseWindowSeconds / DT) ? skaterById(state, r.id) : null;
   const out: Hittable = { carrier, released };
   ctx.memo.set(HITTABLE, out);
   return out;
@@ -128,7 +116,7 @@ export const hitContest: Contest = {
     if (carrier === null && released === null) return null;
     const t = inReach(state, h, carrier) ? carrier : inReach(state, h, released) ? released : null;
     if (t === null) return null;
-    setCooldown(state, h.id, KIND, DECIDE_SECONDS);
+    setCooldown(state, h.id, KIND, T.decideSeconds);
     return ctx.rng.next() < hitAttemptChance(ctx.defs.get(h.id)!) ? [h.id, t.id] : null;
   },
 
@@ -211,7 +199,7 @@ function resolveImpact(c: ContestState, ctx: ContestCtx, h: SkaterState, t: Skat
     }
   } else {
     knock(t, ux * push * 0.3, uy * push * 0.3);
-    if (u < BOUNCE_ROLL) {
+    if (u < T.bounceChance) {
       h.downT = BOUNCE_DOWN_SECONDS;
       h.vel.x = -ux;
       h.vel.y = -uy;
