@@ -25,7 +25,7 @@ export const TUNING = {
     /** Speed cap while carrying: base + perPoint * puckHandling. */
     carrySpeed: { base: 0.86, perPoint: 0.001 },
     /** Base weight of each kind of option, before situation, skill and tendency. */
-    weight: { shoot: 0.45, pass: 1, carry: 3, dump: 0.15, protect: 0.25 },
+    weight: { shoot: 0.55, pass: 1, carry: 3, dump: 0.15, protect: 0.25 },
     /** Shoot weight is scaled by openNetWeight[0] with the goalie square, up to the sum of both with him shaded openNetShade m off. */
     openNetWeight: [0.85, 0.5] as [number, number],
     openNetShade: 0.6,
@@ -95,9 +95,9 @@ export const TUNING = {
     graceSeconds: 1,
     /** An opponent this close (m) to a pass's path gets his one chance to intercept it. */
     interceptRange: 0.9,
-    /** Interception chance: base + perStick * stickChecking + perPositioning * defensivePositioning, clamped to [0.03, 0.97]... */
+    /** Interception chance: base + perStick * stickChecking + perPositioning * defensivePositioning... */
     intercept: { base: 0.206, perStick: 0.002, perPositioning: 0.0012 },
-    /** ...falling linearly from full at interceptSpeed[0] m/s to half at interceptSpeed[1] and above. */
+    /** ...falling linearly from full at interceptSpeed[0] m/s to half at interceptSpeed[1] and above, then clamped to [0.03, 0.97]. */
     interceptSpeed: [12, 22] as [number, number],
     /** Share of interceptions that are clean takes; the rest are deflections that leave the puck loose. */
     interceptTake: 0.6,
@@ -111,9 +111,15 @@ export const TUNING = {
     /** Speed (m/s): base plus per point of shootingPower. */
     speed: { base: 29, perPoint: 0.1 },
     /** Spread at the net (m, one standard deviation): a floor, per point of accuracy below 100, per metre out, at full pressure. */
-    spread: { base: 0.19, perPoint: 0.003, perMetre: 0.008, pressure: 0.25 },
+    spread: { base: 0.15, perPoint: 0.0025, perMetre: 0.006, pressure: 0.2 },
+    /**
+     * A wild shot (mishit or rushed) misses the net outright: chance base + perPoint per point of accuracy below 100 +
+     * pressure at full pressure + perMetre per metre out, clamped to [0.03, 0.97]. It goes `clear` m plus a half-normal
+     * `spread` m wide of the post on his aiming side, or (highShare of them) that far over the bar.
+     */
+    wild: { base: 0.06, perPoint: 0.002, pressure: 0.15, perMetre: 0.004, clear: 0.12, spread: 0.6, highShare: 0.3 },
     /** Shooters aim this far (m) from the centre of the net, either side, and this high. */
-    aimY: [0.35, 0.75] as [number, number],
+    aimY: [0.3, 0.65] as [number, number],
     aimZ: [0.1, 0.8] as [number, number],
     /** The aim's distance from the middle is scaled by base + perPoint * shootingAccuracy. */
     aimReach: { base: 0.4, perPoint: 0.006 },
@@ -140,7 +146,7 @@ export const TUNING = {
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.05,
+      base: 2.0,
       perReactionSecond: 2.5,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
@@ -252,7 +258,7 @@ export const TUNING = {
     cleanShare: 0.6,
     squirtSpeed: [2, 4] as [number, number],
     /** Afterwards nobody in it starts another board battle for this long (s), and the loser does not poke at once. */
-    cooldownSeconds: 1.5,
+    cooldownSeconds: 2.5,
     loserPokeCooldown: 1,
     /** A carrier pulled into a battle shields the puck: his rating (protect) against the other man's (strip), plus this edge. */
     protectEdge: -3,
@@ -283,7 +289,7 @@ export const TUNING = {
     raceHorizon: 1.5,
     /** Rating points per second of arrival-time difference. */
     edgePerSecond: 130,
-    /** A roll this close to the threshold is a 50/50 bounce: nobody gets it. */
+    /** Each man gives up this much of his winning chance to a bounce off both sticks, which nobody gets (see raceChances). */
     bounceBand: 0.08,
     /** The man who won the last net-front round has this edge for the rebound. */
     reboundEdge: 10,

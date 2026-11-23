@@ -23,6 +23,8 @@ const RACE_MAX_SECONDS = 2;
 const BOUNCE_SPEED: [number, number] = [1, 3];
 /** Racers lead a moving puck by at most this long (s). */
 const MAX_LEAD_SECONDS = 1;
+/** Parity floor of each man's chance in a race. */
+const MIN_RACE_CHANCE = 0.03;
 /** `data.outcome` codes. */
 const OUTCOME = { undecided: 0, a: 1, b: 2, bounce: 3 } as const;
 
@@ -119,8 +121,8 @@ function firstMen(ctx: ContestCtx): FirstMen {
  * Loose-puck race. Participants: one man of each team, both steered at the puck. `race` until one is within reach of
  * it (`leader`: the one who would get there first), then `resolve` (0.1 s; `leader`: the winner, null for a bounce).
  * The draw: winProb of the arrival-time difference times 130 per second, plus compete .4, agility .3,
- * balance .3, plus 10 for the man who just won the net-front battle. The winner takes it; a roll within 0.08 of the
- * threshold is a bounce that stays loose. Someone else getting to it, a pass, or the puck speeding up or reaching the
+ * balance .3, plus 10 for the man who just won the net-front battle. The winner takes it; with chance 0.16
+ * (twice T.bounceBand; see raceChances) it is a bounce that stays loose. Someone else getting to it, a pass, or the puck speeding up or reaching the
  * boards ends it with no result.
  */
 export const looseRaceContest: Contest = {
@@ -189,16 +191,27 @@ function end(c: ContestState, ctx: ContestCtx, winnerId: string | null): { winne
   return { winnerId, puck: 'unchanged' };
 }
 
+/**
+ * Chances of a race's outcomes when the first man (a) has `edge` rating points over the other (b), from w = winProb:
+ * each man loses T.bounceBand of his chance to a bounce off both sticks (nobody gets it), but never so much that his
+ * chance falls below 0.03 (the band narrows for a big underdog). Never certain, never below 0.03.
+ */
+export function raceChances(edge: number): { a: number; b: number; bounce: number } {
+  const w = winProb(edge);
+  const band = Math.min(T.bounceBand, Math.min(w, 1 - w) - MIN_RACE_CHANCE);
+  return { a: w - band, b: 1 - w - band, bounce: 2 * band };
+}
+
 /** The draw when the first man reaches the puck; `ta`, `tb` are each man's time to it now. */
 function decide(c: ContestState, ctx: ContestCtx, a: SkaterState, b: SkaterState, ta: number, tb: number): void {
   const state = ctx.state;
   const rb = state.reboundEdge !== null && state.tick < state.reboundEdge.untilTick ? state.reboundEdge.id : null;
   const edge = (tb - ta) * T.edgePerSecond + contestRating(ctx, c, a.id, T.race) - contestRating(ctx, c, b.id, T.race)
     + (rb === a.id ? T.reboundEdge : 0) - (rb === b.id ? T.reboundEdge : 0);
-  const threshold = 1 - winProb(edge);
   const u = ctx.rng.next();
   c.data.gap = tb - ta;
-  c.data.outcome = Math.abs(u - threshold) < T.bounceBand ? OUTCOME.bounce : u >= threshold ? OUTCOME.a : OUTCOME.b;
+  const p = raceChances(edge);
+  c.data.outcome = u < p.bounce ? OUTCOME.bounce : u < p.bounce + p.a ? OUTCOME.a : OUTCOME.b;
   c.leader = c.data.outcome === OUTCOME.a ? a.id : c.data.outcome === OUTCOME.b ? b.id : null;
 }
 

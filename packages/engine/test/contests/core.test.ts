@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { chemistryWith, contestTick, effective, winProb } from '../../src/contests/core';
 import { DT } from '../../src/constants';
+import { interceptChance } from '../../src/actions';
 import { stopPlay } from '../../src/faceoff';
 import { d, def, interceptedPasses, interceptShare, st, startPoke, stateOf } from '../helpers';
 
@@ -39,6 +40,10 @@ describe('interceptions', () => {
     const good = interceptShare(def({ stickChecking: 92, defensivePositioning: 90 }), 2000);
     const poor = interceptShare(def({ stickChecking: 40, defensivePositioning: 40 }), 2000);
     expect(good).toBeGreaterThan(poor + 0.08); expect(good).toBeLessThan(0.97); expect(poor).toBeGreaterThan(0.03);
+  });
+  it('parity: the interception chance stays within [0.03, 0.97], even for a weak defender against a hard pass', () => {
+    expect(interceptChance(def({ stickChecking: 1, defensivePositioning: 1 }), 40)).toBeGreaterThanOrEqual(0.03);
+    expect(interceptChance(def({ stickChecking: 100, defensivePositioning: 100 }), 5)).toBeLessThanOrEqual(0.97);
   });
   it('an intercepted or deflected pass is a turnover won by the interceptor off the passer', () => {
     const evs = interceptedPasses(def({ stickChecking: 92, defensivePositioning: 90 }), 300);

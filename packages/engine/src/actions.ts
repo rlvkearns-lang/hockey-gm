@@ -11,6 +11,8 @@ import { datan2, dcos, dsin } from './dmath';
 /** After a release (draw, pass, shot, dump), the releasing players cannot pick the puck up again for this long. */
 export const RELEASE_NO_PICKUP_SECONDS = 0.3;
 const GRAVITY = 9.81;
+/** Upward speed (m/s) a shot can be lifted with, at most: about 5 m high at the top of its flight. */
+const MAX_SHOT_LIFT = 10;
 const PASS = TUNING.pass;
 const SHOT = TUNING.shot;
 const DUMP = TUNING.dump;
@@ -112,8 +114,8 @@ export function goalieShade(state: GameState, attackingSide: Side): number {
 
 /**
  * Shoot at the attacked net: aim at a spot inside it (more often on the side the goalie leaves open), missed by a
- * normal spread from shootingAccuracy, distance and pressure. Speed TUNING.shot.speed (base + per point of power), lifted so it
- * arrives at the aimed height. No event yet: the release is recorded in `state.shotInFlight`, and what happens to the
+ * normal spread from shootingAccuracy, distance and pressure, or now and then mishit wide or high (TUNING.shot.wild).
+ * Speed TUNING.shot.speed (base + per point of power), lifted so it arrives at the aimed height. No event yet: the release is recorded in `state.shotInFlight`, and what happens to the
  * puck decides whether it is a shot on goal, a miss, a post or a block.
  */
 export function executeShot(state: GameState, shooterId: string, defs: Map<string, PlayerDef>, rng: Rng): void {
@@ -123,22 +125,32 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
   const p = state.puck.pos;
   const netX = dir * RINK.goalLineX;
   const d = hypot2(netX - p.x, p.y);
+  const pressure = pressureOn(state, s);
   const sigma = SHOT.spread.base + (100 - a.shootingAccuracy) * SHOT.spread.perPoint + d * SHOT.spread.perMetre
-    + pressureOn(state, s) * SHOT.spread.pressure;
+    + pressure * SHOT.spread.pressure;
   const shade = goalieShade(state, s.side);
   const openSide = shade > 0 ? -1 : 1;
   const aimSide = rng.chance(clamp(0.5 + Math.abs(shade) * SHOT.openSidePull, 0.5, SHOT.openSideMax)) ? openSide : -openSide;
   // A weaker shooter aims nearer the middle: he just wants it on net.
   const aimY = aimSide * rng.range(SHOT.aimY[0], SHOT.aimY[1]) * (SHOT.aimReach.base + SHOT.aimReach.perPoint * a.shootingAccuracy);
   const aimZ = rng.range(SHOT.aimZ[0], SHOT.aimZ[1]);
-  const y = aimY + rng.gauss() * sigma;
-  const z = Math.max(0.02, aimZ + rng.gauss() * sigma * 0.7);
+  let y = aimY + rng.gauss() * sigma;
+  let z = Math.max(0.02, aimZ + rng.gauss() * sigma * 0.7);
+  // Besides that spread, some shots are mishit or rushed and miss the net outright, wide of the post he aimed beside
+  // or over the bar (more often for a poor shooter under pressure, from far out): most missed shots come from here.
+  const W = SHOT.wild;
+  if (rng.chance(clamp(W.base + (100 - a.shootingAccuracy) * W.perPoint + pressure * W.pressure + d * W.perMetre, 0.03, 0.97))) {
+    const by = W.clear + Math.abs(rng.gauss()) * W.spread;
+    if (rng.chance(W.highShare)) z = RINK.netHeight + by;
+    else y = aimSide * (RINK.netHalfWidth + by);
+  }
   const speed = SHOT.speed.base + a.shootingPower * SHOT.speed.perPoint;
   const dx = netX - p.x, dy = y - p.y;
   const l = hypot2(dx, dy) || 1;
   const t = l / speed;
   const from = { x: p.x, y: p.y };
-  release(state, s, (dx / l) * speed, (dy / l) * speed, (z + 0.5 * GRAVITY * t * t) / t);
+  // Lifted to arrive at height z, but never harder than MAX_SHOT_LIFT (from beside the net that would launch it skyward).
+  release(state, s, (dx / l) * speed, (dy / l) * speed, Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * t * t) / t));
   state.shotInFlight = { shooterId, side: s.side, from, fromDist: d, tick: state.tick, blockTried: [] };
 }
 
@@ -161,13 +173,13 @@ export function executeDump(state: GameState, fromId: string, defs: Map<string, 
 
 /**
  * Chance that `d` intercepts a pass going `speed` m/s that comes within reach:
- * clamp(base + stickChecking * perStick + defensivePositioning * perPositioning, 0.03, 0.97) (TUNING.pass.intercept),
- * scaled down for fast passes.
+ * base + stickChecking * perStick + defensivePositioning * perPositioning (TUNING.pass.intercept), scaled down for fast
+ * passes, then clamped to [0.03, 0.97].
  */
 export function interceptChance(d: PlayerDef, speed: number): number {
-  const base = clamp(PASS.intercept.base + d.attrs.stickChecking * PASS.intercept.perStick + d.attrs.defensivePositioning * PASS.intercept.perPositioning, 0.03, 0.97);
+  const base = PASS.intercept.base + d.attrs.stickChecking * PASS.intercept.perStick + d.attrs.defensivePositioning * PASS.intercept.perPositioning;
   const [lo, hi] = PASS.interceptSpeed;
-  return base * (1 - 0.5 * clamp((speed - lo) / (hi - lo), 0, 1));
+  return clamp(base * (1 - 0.5 * clamp((speed - lo) / (hi - lo), 0, 1)), 0.03, 0.97);
 }
 
 /**

@@ -2,12 +2,41 @@ import { describe, it, expect } from 'vitest';
 import { saveChance } from '../src/goalie';
 import { createGame, simulateGame } from '../src/game';
 import type { GameResult } from '../src/types';
-import { assistsWhenTouched, blockAttempt, count, def, g, setup, share, simulateUntilFirstGoal, sum } from './helpers';
+import { executeShot } from '../src/actions';
+import { RINK } from '../src/rink';
+import { createRng } from '../src/rng';
+import type { PlayerDef } from '../src/types';
+import { assistsWhenTouched, blockAttempt, count, def, defs, g, setup, share, shareOf, simulateUntilFirstGoal, stateWith, sum } from './helpers';
 
 /** Whole-game tests take about 1 s; this leaves room for a loaded machine. */
 const GAME_TIMEOUT = 20_000;
 
 const base = { goalie: g(70), lateralMiss: 0.2, shotSpeed: 32, distance: 12, screened: false, goalieMovingSpeed: 0, height: 0.4 };
+
+/** Where `n` shots by home C (`d`) from (x, y) cross the attacked goal line (y), and how hard each was lifted (vz). */
+function shotsFrom(d: PlayerDef, x: number, y: number, n: number): { y: number; vz: number }[] {
+  const out: { y: number; vz: number }[] = [];
+  for (let seed = 1; seed <= n; seed++) {
+    const st = stateWith({ carrier: 'home', puckX: x, puckY: y, carrierSlot: 'C' });
+    for (const s of st.skaters) if (s.side === 'away') s.pos = { x: -20, y: s.pos.y };
+    const ds = new Map(defs); ds.set('home-C', { ...d, id: 'home-C', position: 'C' });
+    executeShot(st, 'home-C', ds, createRng(seed));
+    const p = st.puck, t = (RINK.goalLineX - p.pos.x) / p.vel.x;
+    out.push({ y: p.pos.y + p.vel.y * t, vz: p.vz });
+  }
+  return out;
+}
+
+describe('shots', () => {
+  it('a few shots miss the net outright, more for a poor shooter; neither always nor never', () => {
+    const wide = (d: PlayerDef) => shareOf(shotsFrom(d, 15, 0, 1500), (s) => Math.abs(s.y) > RINK.netHalfWidth + 0.1);
+    const good = wide(def({ shootingAccuracy: 92 })), poor = wide(def({ shootingAccuracy: 40 }));
+    expect(poor).toBeGreaterThan(good + 0.05); expect(good).toBeGreaterThan(0.03); expect(poor).toBeLessThan(0.6);
+  });
+  it('a shot from right beside the net is not launched skyward', () => {
+    for (const s of shotsFrom(def({}), RINK.goalLineX - 0.4, 1.1, 300)) expect(s.vz).toBeLessThanOrEqual(10);
+  });
+});
 
 describe('goalies, saves, goals', () => {
   it('better goalies save more, never everything', () => { expect(saveChance({ ...base, goalie: g(95) })).toBeGreaterThan(saveChance({ ...base, goalie: g(50) }) + 0.03); expect(saveChance({ ...base, goalie: g(100), distance: 50 })).toBeLessThanOrEqual(0.97); });

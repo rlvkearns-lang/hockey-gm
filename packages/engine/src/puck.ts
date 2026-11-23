@@ -18,6 +18,8 @@ const NET_RESTITUTION = 0.3;
 const POST_RESTITUTION = 0.6;
 const PUCK_RADIUS = 0.05;
 const POST_RADIUS = 0.03;
+/** A post contact is a `post` (it rings) when the puck's speed into the post is at least this share of its speed. */
+const POST_RING = 0.25;
 /** Maximum travel per sub-step; below the puck+post contact distance so nothing tunnels. */
 const MAX_SUBSTEP = 0.04;
 const ENDS: readonly (1 | -1)[] = [1, -1];
@@ -81,7 +83,9 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
         if (puck.pos.x * end < NET_NEAR_X || puck.pos.x * end > NET_FAR_X || Math.abs(puck.pos.y) > NET_HALF_REACH) continue;
         const gx = end * RINK.goalLineX, bx = end * backX;
         for (const sy of SIGNS) {
-          if (collideSegment(puck, gx, sy * RINK.netHalfWidth, gx, sy * RINK.netHalfWidth, PUCK_RADIUS + POST_RADIUS, POST_RESTITUTION) > 0) {
+          const sp = hypot2(puck.vel.x, puck.vel.y);
+          // A clean ring off the post is a `post`; a graze only nudges the puck on its way (in, or wide).
+          if (collideSegment(puck, gx, sy * RINK.netHalfWidth, gx, sy * RINK.netHalfWidth, PUCK_RADIUS + POST_RADIUS, POST_RESTITUTION) > POST_RING * sp) {
             events.push({ kind: 'post', end });
           }
           collideSegment(puck, gx, sy * RINK.netHalfWidth, bx, sy * RINK.netHalfWidth, PUCK_RADIUS, NET_RESTITUTION);
