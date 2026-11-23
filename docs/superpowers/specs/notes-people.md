@@ -39,3 +39,14 @@ Proposed shape **[my call, not yet agreed]**:
 - It spreads along friendships first (close friends, linemates, then the room, then players on other teams through former teammates and shared agents), weaker and later at each step.
 - Listeners weigh it by who is telling it: a respected veteran is believed, a known complainer is not.
 - It works both ways: kept promises and fair treatment get around too, and build a reputation that helps with free agents.
+
+## Rival GMs (owner, 2026-11-23)
+
+- Each rival GM has a lasting personality and remembers his dealings with the owner's GM.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Personality: how he values things (his own prospects, picks, veterans, size, skill), how much risk he takes, habits (never trades in his division, always wants the last word), and how patient his owner lets him be.
+- Memory: fair deals build trust and get calls returned; being fleeced, or having an offer leaked, makes him wary or shuts the door for a while. Memories fade.
+- Word gets around between GMs the same way it does between players.
+- GMs can be fired and hired, taking their personality and their memory of the owner to a new team.
