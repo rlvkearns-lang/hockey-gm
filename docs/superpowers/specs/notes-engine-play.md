@@ -67,3 +67,16 @@ Proposed shape **[my call]**:
 - Agitator: any type can have it. He provokes: opponents near him are more likely to take a retaliation penalty or lose focus, by their own discipline and poise; he draws penalties and sometimes takes one himself. Opposing players and fans dislike him, his own room and fans tend to love him (people layer). Needs penalties, so it arrives with engine round 2.
 - Badges can be gained and lost over a career (a Burner slows down; a young player earns Shot Blocker), and a scout may see a badge coming in a prospect.
 - Owner agreed to the Shutdown Forward, the badge list and the agitator shape above (2026-11-23).
+
+## Moments, standing up for teammates, and games that heat up (owner, 2026-11-23)
+
+- Special moments shown on the ice: a rookie's solo lap in warm-up before his first game; a rookie's first goal getting a big celebration with the whole team rushing to him.
+- A rookie (or star) takes a hit, his team does not like it, and someone immediately drops the gloves.
+- A game gets scrappier as it goes on.
+
+Proposed shape **[my call]**:
+
+- Moments: the engine marks milestones on its events (first game, first goal, hat trick, a milestone goal or point, a goalie's first win or a shutout, a last game). The viewer plays a matching celebration and the director gives it a replay; the result carries it to the league and people layers (a first goal is remembered by the player and fans).
+- Game temperature: a number each game carries, starting from the rivalry and recent history between the teams, rising with big hits, hits on stars or rookies, scrums, a lopsided score late, agitators, and cheap shots, and cooling with time and with whistles going one team's way. Higher temperature means more hitting, more scrums after whistles, more retaliation penalties and more fights.
+- Standing up for a teammate: after a heavy or questionable hit, teammates on the ice may respond, by their own personality (aggression, fighting, leadership, friendship with the man who was hit) and by who was hit (a rookie, a star, the goalie). The response ranges from a shove and a scrum to a fight. A team that never responds, or a player who does, is noticed by the room (people layer).
+- All of this belongs with engine round 3 (scrums and fights), and uses penalties from round 2.

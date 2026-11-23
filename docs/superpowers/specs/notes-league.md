@@ -142,3 +142,13 @@ Proposed shape **[my call]**:
 - Mixed and immigrant backgrounds stay possible and are handled deliberately (for example a Canadian-born player with a Nigerian surname), rather than by random mismatch.
 - Height and weight are drawn together and fit position; birthplace fits the leagues he came through (a Swedish junior from a Swedish town).
 - Owner agreed (2026-11-23), and stressed: players born in a country should reflect that country's real mix of backgrounds (Canadian-born players should not all be white).
+
+## Draft lottery and rivalries (owner, 2026-11-23)
+
+- A draft lottery like the NHL's.
+- Rivalries between teams that grow over time.
+
+Proposed shape **[my call]**:
+
+- Lottery: non-playoff teams weighted by finish, shown as an event with the reveal, and the real limits on how far a team can jump. Rules as a setting so they can follow the current NHL format.
+- Rivalry is a number between each pair of teams that rises with playoff series, close and nasty games, big hits and fights, lopsided trades and offer sheets between them, and geography; it fades slowly without fuel. A rivalry game starts hotter (see game temperature in `notes-engine-play.md`), draws more fan and media attention, and matters more to players' and fans' feelings. Rivalries also form between individual players.
