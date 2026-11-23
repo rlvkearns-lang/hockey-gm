@@ -60,3 +60,16 @@ Proposed shape **[my call, not yet agreed]**:
 - Team owners have personalities too (patient or impatient, spender or tight, meddler or hands-off) and can sell the team, bringing in a new owner with new expectations.
 - Expectations are stated up front each season and reviewed at set points; job security is visible as a rough reading, not a number.
 - Being fired is not the end: other teams can offer the GM a job, depending on his reputation.
+
+## Social feed and rumours (owner, 2026-11-23; not the highest priority)
+
+- A social-media style feed (like Twitter). Media personalities post rumours that may or may not be true, for example an insider saying a player wants out of his team.
+- The GM can follow a rumour up: go to the player or his agent and find out whether it is true.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- Insiders are people with a track record: some are well sourced and usually right, some guess, some are fed stories by agents or rival GMs who want something (an agent floating a trade rumour to push a contract).
+- True rumours come from the same place as everything else in the people layer: a real feeling leaking out along the "word gets around" paths. False ones are invented or planted.
+- What the GM learns from following up goes on the player's "what we know" card, and the insider's hit rate becomes visible over time.
+- The GM's own dealings can leak too, and rumours about his players affect them (a player reading that he is on the block).
+- The feed also carries fan reaction and ordinary news, and uses the same text approach as the rest (templates always, optional AI key).
