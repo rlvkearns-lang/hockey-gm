@@ -43,7 +43,7 @@ export function restPuck(state: GameState): void {
 
 /**
  * Whistle: phase `stopped`, puck at rest where it is, nobody in possession, no pass or shot pending, the touch chain
- * cleared, every contest over (its players free), and every on-ice skater heads for his line-up spot for the faceoff
+ * cleared, every contest over (its players free) and every net-front tie-up and rebound edge gone, and every on-ice skater heads for his line-up spot for the faceoff
  * at `spot`.
  */
 export function stopPlay(state: GameState, spot: Vec2): void {
@@ -59,6 +59,8 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.delayedOffside = null;
   state.icingWatch = null;
   state.lastRelease = null;
+  state.tiedUpUntil = [];
+  state.reboundEdge = null;
   clearContests(state);
   restPuck(state);
   state.faceoffSpot = { x: spot.x, y: spot.y };

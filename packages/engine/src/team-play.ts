@@ -1,7 +1,7 @@
 import { composite } from './attributes';
 import { DT } from './constants';
-import { clipToNets, RINK, resolveBoards, resolveNets, zoneOf } from './rink';
-import type { GameState, PlayerDef, Position, Side, SkaterState, Tactics } from './types';
+import { boardsNormal, clipToNets, RINK, resolveBoards, resolveNets, zoneOf } from './rink';
+import type { ContestState, GameState, PlayerDef, Position, Side, SkaterState, Tactics } from './types';
 import { dist, hypot2, type Vec2 } from './vec';
 
 export type TeamPhase = 'breakout' | 'rush' | 'ozone' | 'forecheck' | 'neutralDefence' | 'dzone' | 'looseChase';
@@ -68,6 +68,43 @@ export function steeredByContest(state: GameState, s: SkaterState): boolean {
   if (s.contestId === null) return false;
   for (const c of state.contests) if (c.id === s.contestId) return !c.freeIds.includes(s.id);
   return true;
+}
+
+/** True while `id`'s stick is tied up by a net-front defender: no pass to him, no loose puck for him. */
+export function isTiedUp(state: GameState, id: string): boolean {
+  for (const t of state.tiedUpUntil) if (t.id === id && state.tick < t.tick) return true;
+  return false;
+}
+
+/** A supporting player waits this far (m) off the boards, on the ice side of a board battle. */
+const SUPPORT_OFF_BOARDS = 2;
+const normalScratch: Vec2 = { x: 0, y: 0 };
+
+/**
+ * The board battle running now (contest kind `boardBattle`, before its `resolve`), or null. Its `data.supportA` and
+ * `data.supportB` are the participant indexes of each side's supporting player (-1 for none yet).
+ */
+function boardBattle(state: GameState): ContestState | null {
+  for (const c of state.contests) if (c.kind === 'boardBattle' && c.stage !== 'resolve') return c;
+  return null;
+}
+
+/**
+ * Where `side`'s nearest free skater should go to support the board battle running now: SUPPORT_OFF_BOARDS m off the
+ * boards on the ice side of it, from where he joins it. Null when no battle runs, `side` has nobody in it, or it
+ * already has its supporting player.
+ */
+export function supportTarget(state: GameState, side: Side): Vec2 | null {
+  const c = boardBattle(state);
+  if (c === null) return null;
+  let slot = -1;
+  for (let i = 0; i < 2; i++) {
+    const id = c.participants[i];
+    for (const s of state.skaters) if (s.id === id && s.side === side) slot = i;
+  }
+  if (slot < 0 || (slot === 0 ? c.data.supportA : c.data.supportB) !== -1) return null;
+  const n = boardsNormal(c.spot, normalScratch);
+  return { x: c.spot.x - n.x * SUPPORT_OFF_BOARDS, y: c.spot.y - n.y * SUPPORT_OFF_BOARDS };
 }
 
 /** Distance (m) from `s` to the nearest on-ice opponent who is not down; Infinity if none. */
@@ -248,8 +285,9 @@ function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boole
  * speedCap belong to the brain (brainTick); here he only stops facing anything but his own way. Skaters steered by
  * a contest are left alone (its `freeIds` still get jobs). With the puck carried, the nearest defender pressures the carrier; with it loose, the
  * nearest skater of each side chases it (a pass's intended receiver chases for his side) and the rest keep the shape
- * of the side that last had the puck. Under a delayed offside the offending team neither presses nor chases: all of
- * it skates out of the zone.
+ * of the side that last had the puck. While a board battle holds the puck, each side's would-be chaser goes to support
+ * it (supportTarget) instead, or keeps his shape once his side has its supporting player. Under a delayed offside the
+ * offending team neither presses nor chases: all of it skates out of the zone.
  */
 export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tactics: Record<Side, Tactics>): void {
   const puck = state.puck.pos;
@@ -279,6 +317,9 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
       break;
     }
   }
+  const battle = carrier ? null : boardBattle(state);
+  const homeSupport = battle ? supportTarget(state, 'home') : null;
+  const awaySupport = battle ? supportTarget(state, 'away') : null;
   const homePhase = phaseOf(shapeSide, puck.x, 'home', state.attackDir.home);
   const awayPhase = phaseOf(shapeSide, puck.x, 'away', state.attackDir.away);
 
@@ -289,8 +330,14 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
     const dir = state.attackDir[s.side];
     const phase = s.side === 'home' ? homePhase : awayPhase;
     const chasing = s === homeChaser || s === awayChaser;
+    const support = chasing && battle ? (s.side === 'home' ? homeSupport : awaySupport) : null;
     if (s === presser) press(state, s, d, carrier!, phase, tactics[s.side]);
-    else if (chasing) chase(state, s);
+    else if (support) {
+      s.target.x = support.x;
+      s.target.y = support.y;
+      facePuck(s, puck);
+      s.speedCap = 1;
+    } else if (chasing && !battle) chase(state, s);
     else shape(state, s, d, phase, tactics[s.side], dir);
     keepLegal(state, s, dir, chasing, s.side === tagUp);
   }

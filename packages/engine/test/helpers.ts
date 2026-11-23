@@ -8,12 +8,15 @@ import type { ContestState, GameEvent, GameEventType, GameResult, GameSetup, Gam
 import { PLAYER_TYPES } from '../src/player-types';
 import { RINK, resolveBoards } from '../src/rink';
 import { createRng, type Rng } from '../src/rng';
-import { OZONE_SPOTS, ozoneSpotPos } from '../src/team-play';
-import { decideCarrier, type Decision } from '../src/brain';
+import { OZONE_SPOTS, ozoneSpotPos, supportTarget } from '../src/team-play';
+import { canReceivePass, decideCarrier, type Decision } from '../src/brain';
 import { executeDump, executePass, releasePuck, tryIntercept } from '../src/actions';
 import { resolveBodies } from '../src/bodies';
 import { contestTick, startContest } from '../src/contests/core';
 import { hitContest } from '../src/contests/hit';
+import { boardBattleContest } from '../src/contests/board-battle';
+import { netFrontContest } from '../src/contests/net-front';
+import { looseRaceContest, timeToReach } from '../src/contests/loose-race';
 import { assignJobs } from '../src/team-play';
 import { createGame, type Game } from '../src/game';
 import { tryBlock } from '../src/goalie';
@@ -205,6 +208,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     pickupBlock: null, pendingPass: null, shotInFlight: null, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [] }, lastAttackTouch: { home: null, away: null },
     noChange: null, delayedOffside: null, icingWatch: null, lastRelease: null, contestCooldowns: [],
+    tiedUpUntil: [], reboundEdge: null,
     bench: {
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
@@ -757,3 +761,297 @@ export function targetsDuringHitClose(): { targets: { x: number; y: number }[]; 
   }
   return out;
 }
+
+// ---- board battle, net-front and loose-race helpers ----
+//
+// The same kind of harness: a stateWith() state with only the skaters a contest needs on the ice, stepped tick by tick
+// with the real contestTick, skating and body contact; a carrier carries the puck in front of him, a loose puck slides
+// (a board battle holds it still). Nobody runs a brain or team play unless a helper says so, and nobody picks a loose
+// puck up. Each call gets a new seed.
+
+/** Every attribute 70. */
+export const even: PlayerDef = def();
+
+/** Fraction of `xs` for which `pred` holds (0 for an empty list). */
+export function shareOf<T>(xs: T[], pred: (x: T) => boolean): number {
+  return xs.length === 0 ? 0 : xs.filter(pred).length / xs.length;
+}
+
+type Harness = { st: GameState; ds: Map<string, PlayerDef>; rng: Rng; events: GameEvent[]; moves: Map<string, Movement> };
+let harnessSeed = 0;
+
+/** A live state with only `on` (ids like 'home-C') on the ice; `with` gives the defs of some of them. */
+function harness(on: string[], withDefs: Record<string, PlayerDef>, o: { carrier?: Side | null; puckX?: number; puckY?: number; carrierSlot?: SkaterSlot } = {}): Harness {
+  const state = stateWith({ carrier: o.carrier ?? null, puckX: o.puckX ?? 0, puckY: o.puckY ?? 0, carrierSlot: o.carrierSlot });
+  for (const s of state.skaters) if (!on.includes(s.id)) s.onIce = false;
+  state.onIce = { home: on.filter((id) => id.startsWith('home')), away: on.filter((id) => id.startsWith('away')) };
+  const ds = new Map(defs);
+  for (const [id, p] of Object.entries(withDefs)) ds.set(id, { ...p, id, position: ds.get(id)!.position });
+  const moves = new Map([...ds].map(([id, p]) => [id, movementOf(p, 1)]));
+  return { st: state, ds, rng: createRng(++harnessSeed), events: [], moves };
+}
+
+function harnessStep(h: Harness, beforeContests?: () => void): void {
+  const s = h.st;
+  s.tick++;
+  beforeContests?.();
+  contestTick(s, h.ds, h.rng, DT, h.events);
+  const on = s.skaters.filter((k) => k.onIce);
+  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT); }
+  resolveBodies(on, (id) => h.moves.get(id)!);
+  const c = on.find((k) => k.id === s.carrierId);
+  if (c) {
+    s.puck.pos = { x: c.pos.x + Math.cos(c.facing) * 0.6, y: c.pos.y + Math.sin(c.facing) * 0.6 };
+    s.puck.vel = { x: c.vel.x, y: c.vel.y };
+  } else if (s.phase === 'live') stepPuck(s.puck, DT);
+}
+
+const place2 = (st: GameState, id: string, x: number, y: number, facing: number): void => {
+  const s = st.skaters.find((k) => k.id === id)!;
+  s.pos = { x, y }; s.target = { x, y }; s.vel = { x: 0, y: 0 }; s.facing = facing;
+};
+
+/** Where the harness board battles happen: 0.95 m off the +y side boards, inside home's attacking blue line. */
+const BATTLE_SPOT = { x: 12, y: 12 };
+
+export type BattleOpts = { supportFor?: 'a' | 'b'; firstIn?: 'a' | 'b' };
+export type BattleTick = { stage: string; stageT: number; leader: string | null; pinned: number };
+export type BattleOutcome = {
+  /** 'a' (home C, the first def), 'b' (away C), or null when the puck was trapped. */
+  winner: 'a' | 'b' | null;
+  /** The battle event's detail, or 'trapped'. */
+  detail: string;
+  /** Where the puck went: the winner's stick, his supporting teammate's, or loose. */
+  puckTo: 'winner' | 'support' | 'loose' | null;
+  log: BattleTick[];
+  h: Harness;
+};
+
+/**
+ * A board battle at BATTLE_SPOT between `a` (home C) and `b` (away C), started with startContest and played out.
+ * By default both stand 0.78 m from the puck, level, so neither is first in; `firstIn` puts that one 0.5 m from it and
+ * the other 1.9 m away. `supportFor` puts a free teammate (that side's LW) 2.3 m from it, who joins after the arrival.
+ */
+function battle(a: PlayerDef, b: PlayerDef, o: BattleOpts = {}): BattleOutcome {
+  const on = ['home-C', 'away-C'];
+  if (o.supportFor === 'a') on.push('home-LW');
+  if (o.supportFor === 'b') on.push('away-LW');
+  const h = harness(on, { 'home-C': a, 'away-C': b });
+  const st = h.st, S = BATTLE_SPOT;
+  st.puck = { pos: { x: S.x, y: S.y }, z: 0, vel: { x: 0, y: 0 }, vz: 0 };
+  if (o.firstIn === 'a') { place2(st, 'home-C', S.x - 0.5, S.y - 0.1, 0); place2(st, 'away-C', S.x + 1.6, S.y - 1, Math.PI); }
+  else if (o.firstIn === 'b') { place2(st, 'home-C', S.x - 1.6, S.y - 1, 0); place2(st, 'away-C', S.x + 0.5, S.y - 0.1, Math.PI); }
+  else { place2(st, 'home-C', S.x - 0.6, S.y - 0.5, 0); place2(st, 'away-C', S.x + 0.6, S.y - 0.5, Math.PI); }
+  if (o.supportFor === 'a') place2(st, 'home-LW', S.x - 1.5, S.y - 1.75, 0);
+  if (o.supportFor === 'b') place2(st, 'away-LW', S.x + 1.5, S.y - 1.75, Math.PI);
+  const c = startContest(st, h.ds, h.rng, boardBattleContest, ['home-C', 'away-C'], h.events);
+  const log: BattleTick[] = [];
+  const snap = (): void => { log.push({ stage: c.stage, stageT: c.stageT, leader: c.leader, pinned: c.data.pinned! }); };
+  snap();
+  for (let i = 0; i < 300 && st.contests.includes(c); i++) {
+    harnessStep(h);
+    if (st.contests.includes(c)) snap();
+  }
+  if (st.contests.includes(c)) throw new Error('board battle still running after 10 s');
+  const e = h.events.find((x) => x.type === 'battle' || (x.type === 'freeze' && x.detail === 'trapped'));
+  if (!e) throw new Error('board battle ended without a result');
+  if (e.type === 'freeze') return { winner: null, detail: 'trapped', puckTo: null, log, h };
+  const supporter = e.side === 'home' ? 'home-LW' : 'away-LW';
+  const puckTo = st.carrierId === null ? 'loose' : st.carrierId === e.playerId ? 'winner' : st.carrierId === supporter ? 'support' : null;
+  return { winner: e.side === 'home' ? 'a' : 'b', detail: e.detail, puckTo, log, h };
+}
+
+/** One board battle (see battle()): its winner, the event's detail and where the puck went. */
+export const runBattle = (a: PlayerDef, b: PlayerDef, o: BattleOpts = {}): BattleOutcome => battle(a, b, o);
+
+/** The first of up to 200 board battles that `a` wins. */
+export function runBattleWon(a: PlayerDef, b: PlayerDef, o: BattleOpts = {}): BattleOutcome {
+  for (let i = 0; i < 200; i++) { const r = battle(a, b, o); if (r.winner === 'a') return r; }
+  throw new Error('a never won in 200 battles');
+}
+
+/** One board battle's contest state on every tick it ran: stage, stageT, leader and who is pinned. */
+export const runBattleLogged = (a: PlayerDef, b: PlayerDef, o: BattleOpts = {}): BattleTick[] => battle(a, b, o).log;
+
+/** The stages of a logged battle in order, each with how long it lasted (s). */
+export function stagesOf(log: BattleTick[]): { stage: string; seconds: number }[] {
+  const out: { stage: string; seconds: number }[] = [];
+  for (const l of log) {
+    const last = out[out.length - 1];
+    if (last && last.stage === l.stage) last.seconds += DT;
+    else out.push({ stage: l.stage, seconds: DT });
+  }
+  return out;
+}
+
+export const totalSeconds = (stages: { seconds: number }[]): number => sum(stages.map((s) => s.seconds));
+
+/** Even battles played out until one is trapped; the state just after the whistle. */
+export function trappedBattle(): { phase: string; freeze: GameEvent | undefined; faceoffSpot: { x: number; y: number }; contests: number } {
+  for (let i = 0; i < 3000; i++) {
+    const r = battle(even, even);
+    if (r.winner !== null) continue;
+    const st = r.h.st;
+    return { phase: st.phase, freeze: r.h.events.find((e) => e.type === 'freeze'), faceoffSpot: st.faceoffSpot, contests: st.contests.length };
+  }
+  throw new Error('no trapped puck in 3000 battles');
+}
+
+/**
+ * A board battle at BATTLE_SPOT between home C and away C, with away LW free 7 m away and team play (the real
+ * assignJobs) run every tick. Where supportTarget sent him at the start, how far his target was from it, and whether he
+ * joined the battle.
+ */
+export function battleWithThirdMan(): { supportSpot: { x: number; y: number } | null; distToSupportSpot: number; joined: boolean } {
+  const h = harness(['home-C', 'away-C', 'away-LW'], {});
+  const st = h.st, S = BATTLE_SPOT;
+  st.puck = { pos: { x: S.x, y: S.y }, z: 0, vel: { x: 0, y: 0 }, vz: 0 };
+  place2(st, 'home-C', S.x - 0.6, S.y - 0.5, 0); place2(st, 'away-C', S.x + 0.6, S.y - 0.5, Math.PI);
+  place2(st, 'away-LW', S.x + 5, S.y - 5, Math.PI);
+  const c = startContest(st, h.ds, h.rng, boardBattleContest, ['home-C', 'away-C'], h.events);
+  const lw = st.skaters.find((k) => k.id === 'away-LW')!;
+  const supportSpot = supportTarget(st, 'away');
+  assignJobs(st, h.ds, tactics);
+  const distToSupportSpot = supportSpot ? Math.hypot(lw.target.x - supportSpot.x, lw.target.y - supportSpot.y) : Infinity;
+  let joined = false;
+  for (let i = 0; i < 150 && st.contests.includes(c); i++) {
+    harnessStep(h, () => assignJobs(st, h.ds, tactics));
+    if (c.participants.includes('away-LW')) joined = true;
+  }
+  return { supportSpot, distToSupportSpot, joined };
+}
+
+/**
+ * A real game stepped tick by tick: over every tick a board battle holds the puck (before its resolve), how many such
+ * ticks, on how many someone was carrying the puck, the largest move of the puck in one of them (m), and how many
+ * battles had a supporting player join.
+ */
+export function heldPuckInGame(s: GameSetup): { ticks: number; carried: number; maxStep: number; supported: number } {
+  const g = createGame(s);
+  let ticks = 0, carried = 0, maxStep = 0;
+  const supported = new Set<number>();
+  let prev: { x: number; y: number } | null = null;
+  while (!g.done) {
+    g.step();
+    const b = g.state.contests.find((c) => c.kind === 'boardBattle' && c.stage !== 'resolve' && c.stage !== 'arrive');
+    if (!b || g.state.phase !== 'live') { prev = null; continue; }
+    ticks++;
+    if (g.state.carrierId !== null) carried++;
+    const p = g.state.puck.pos;
+    if (prev) maxStep = Math.max(maxStep, Math.hypot(p.x - prev.x, p.y - prev.y));
+    prev = { x: p.x, y: p.y };
+    if (b.participants.length > 2) supported.add(b.id);
+  }
+  return { ticks, carried, maxStep, supported: supported.size };
+}
+
+// Net-front: home attacks +x with home LD carrying the puck at the left point; home C (the attacker) on his net-front
+// spot; away LD (the defender) right on him, goal-side.
+
+/** The net-front attacker in the net-front helpers. */
+export const attackerId = 'home-C';
+
+type NetFront = { h: Harness; c: ContestState };
+function netFrontStart(att: PlayerDef = even, dfn: PlayerDef = even): NetFront {
+  const h = harness(['home-LD', 'home-C', 'away-LD'], { 'home-C': att, 'away-LD': dfn }, { carrier: 'home', puckX: 9.8, puckY: 8.5, carrierSlot: 'LD' });
+  const st = h.st;
+  place2(st, 'home-LD', 9.2, 8.5, 0);
+  const spot = ozoneSpotPos(st, 'home', 'netFront', { x: 0, y: 0 });
+  place2(st, 'home-C', spot.x, spot.y, Math.PI);
+  place2(st, 'away-LD', spot.x + 0.8, spot.y, Math.PI);
+  const c = startContest(st, h.ds, h.rng, netFrontContest, ['home-C', 'away-LD'], h.events);
+  return { h, c };
+}
+
+/** A net-front battle played until a round goes the `want` stage's way ('free': the attacker's, 'tied': the defender's). */
+function netFrontUntil(want: 'free' | 'tied'): GameState {
+  for (let tries = 0; tries < 50; tries++) {
+    const { h, c } = netFrontStart();
+    for (let i = 0; i < 300 && h.st.contests.includes(c); i++) {
+      harnessStep(h);
+      if (c.stage === want && c.stageT === 0) return h.st;
+    }
+  }
+  throw new Error(`no net-front round went ${want}`);
+}
+
+export const netFrontWonByAttacker = (): GameState => netFrontUntil('free');
+export const netFrontWonByDefender = (): GameState => netFrontUntil('tied');
+
+/** The defending (away) goalie is screened now: what resolveOnNet reads. */
+export const isScreened = (st: GameState): boolean => st.screenedUntilTick.away > st.tick;
+
+/** The brain would consider `id` as a pass target now. */
+export const canReceive = (st: GameState, id: string): boolean => canReceivePass(st, st.skaters.find((k) => k.id === id)!);
+
+/**
+ * An even net-front battle run for `seconds`: its first stage, the time (s) of each round, and at each round the stage
+ * and leader it set and how far (m) the attacker's target then is from where he stood.
+ */
+export function netFrontRounds(seconds: number): {
+  stages: string[]; roundTimes: number[]; rounds: { stage: string; leader: string | null; attackerTarget: number }[];
+} {
+  const { h, c } = netFrontStart();
+  const st = h.st;
+  const att = st.skaters.find((k) => k.id === attackerId)!;
+  const out = { stages: [c.stage], roundTimes: [] as number[], rounds: [] as { stage: string; leader: string | null; attackerTarget: number }[] };
+  let rounds = 0;
+  for (let i = 0; i < Math.round(seconds / DT) && st.contests.includes(c); i++) {
+    const before = { x: att.pos.x, y: att.pos.y };
+    harnessStep(h);
+    if (c.data.rounds! > rounds) {
+      rounds = c.data.rounds!;
+      out.roundTimes.push(st.tick * DT);
+      out.rounds.push({ stage: c.stage, leader: c.leader, attackerTarget: Math.hypot(att.target.x - before.x, att.target.y - before.y) });
+    }
+  }
+  return out;
+}
+
+// Loose-puck races: the puck still at centre ice, home C coming from -x and away C from +x, both from rest.
+
+export type RaceOpts = { aLead: number; a?: PlayerDef; b?: PlayerDef; reboundFor?: 'a' };
+export type RaceOutcome = { winner: 'a' | 'b' | null; stages: string[]; seconds: number; raceLeaders: (string | null)[] };
+
+/** Distance (m) from which a still skater `d` needs `t` s to reach a still puck (timeToReach inverted by bisection). */
+function distanceFor(d: PlayerDef, t: number): number {
+  const m = movementOf(d, 1);
+  let lo = 0.9, hi = 40;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (timeToReach(at(-mid, 0), m, { x: 0, y: 0 }) < t) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * A loose-puck race started with startContest and played out: `a` (home C) 3 m from the puck, `b` (away C) where he
+ * needs `aLead` s longer to get there. With `reboundFor: 'a'`, home C has just won a net-front round (the rebound edge).
+ * Winner: whoever has the puck at the end (null: it bounced loose).
+ */
+export function runRace(o: RaceOpts): RaceOutcome {
+  const a = o.a ?? even, b = o.b ?? even;
+  const h = harness(['home-C', 'away-C'], { 'home-C': a, 'away-C': b });
+  const st = h.st;
+  st.puck = { pos: { x: 0, y: 0 }, z: 0, vel: { x: 0, y: 0 }, vz: 0 };
+  const da = 3, tb = timeToReach(at(-da, 0), movementOf(a, 1), { x: 0, y: 0 }) + o.aLead;
+  place2(st, 'home-C', -da, 0, 0);
+  place2(st, 'away-C', distanceFor(b, tb), 0, Math.PI);
+  if (o.reboundFor === 'a') st.reboundEdge = { id: 'home-C', untilTick: st.tick + 60 };
+  const c = startContest(st, h.ds, h.rng, looseRaceContest, ['home-C', 'away-C'], h.events);
+  const stages = [c.stage];
+  const raceLeaders: (string | null)[] = [];
+  let ticks = 0;
+  for (; ticks < 150 && st.contests.includes(c); ticks++) {
+    harnessStep(h);
+    if (!st.contests.includes(c)) break;
+    if (stages[stages.length - 1] !== c.stage) stages.push(c.stage);
+    if (c.stage === 'race') raceLeaders.push(c.leader);
+  }
+  if (st.contests.includes(c)) throw new Error('race still running after 5 s');
+  const winner = st.carrierId === 'home-C' ? 'a' : st.carrierId === 'away-C' ? 'b' : null;
+  return { winner, stages, seconds: (ticks + 1) * DT, raceLeaders };
+}
+
+/** A dead-heat race in which home C has just won the net-front battle. */
+export const raceWithRebound = (): RaceOutcome => runRace({ aLead: 0, reboundFor: 'a' });

@@ -4,7 +4,10 @@ import { DT } from '../constants';
 import type { Rng } from '../rng';
 import type { ContestState, GameEvent, GameSetup, GameState, PlayerDef, SkaterState } from '../types';
 import type { Vec2 } from '../vec';
+import { boardBattleContest } from './board-battle';
 import { hitContest } from './hit';
+import { looseRaceContest } from './loose-race';
+import { netFrontContest } from './net-front';
 import { pokeCheckContest } from './poke-check';
 
 export type Weights = Partial<Record<keyof SkaterAttrs, number>>;
@@ -121,6 +124,15 @@ export function setCooldown(state: GameState, id: string, kind: string, seconds:
   state.contestCooldowns.push({ id, kind, untilTick });
 }
 
+/**
+ * True while a contest holds the loose puck in place (a board battle: the puck is in the players' feet, `carrierId`
+ * null). Nobody may pick it up then; its `data.holdsPuck` is 1.
+ */
+export function puckHeldByContest(state: GameState): boolean {
+  for (const c of state.contests) if (c.data.holdsPuck === 1) return true;
+  return false;
+}
+
 /** Moves `c` to `stage` (stageT back to 0). */
 export function enterStage(c: ContestState, stage: string): void {
   c.stage = stage;
@@ -167,7 +179,7 @@ export function applyResult(ctx: ContestCtx, c: ContestState, r: ContestResult):
 let registry: readonly Contest[] | null = null;
 /** Every kind of contest, in the order their triggers are asked (built on first use: the kinds import this module). */
 export function contestKinds(): readonly Contest[] {
-  registry ??= [hitContest, pokeCheckContest];
+  registry ??= [hitContest, pokeCheckContest, boardBattleContest, netFrontContest, looseRaceContest];
   return registry;
 }
 
@@ -181,8 +193,9 @@ const ID_STRIDE = 16;
 
 /**
  * Once per live tick (after the brain, before skaters move): advances every running contest and applies the results
- * of those that end, then starts new ones where a trigger holds. A contest one of whose players has left the ice or
- * is heading off ends with no result. Events go to `out`; `chemistry` is the game's chemistry pairs.
+ * of those that end, then starts new ones where a trigger holds (unless a contest has stopped play). A contest one of
+ * whose players has left the ice or is heading off ends with no result. Expired cooldowns and net-front tie-ups are
+ * dropped. Events go to `out`; `chemistry` is the game's chemistry pairs.
  */
 export function contestTick(
   state: GameState, defs: Map<string, PlayerDef>, rng: Rng, dt: number, out: GameEvent[] = [], chemistry: Chemistry = [],
@@ -190,6 +203,7 @@ export function contestTick(
   if (state.phase !== 'live') return;
   const ctx: ContestCtx = { state, defs, rng, emit: (e) => { out.push(e); }, chemistry };
   if (state.contestCooldowns.some((c) => state.tick >= c.untilTick)) state.contestCooldowns = state.contestCooldowns.filter((c) => state.tick < c.untilTick);
+  if (state.tiedUpUntil.some((t) => state.tick >= t.tick)) state.tiedUpUntil = state.tiedUpUntil.filter((t) => state.tick < t.tick);
 
   for (let i = 0; i < state.contests.length;) {
     const c = state.contests[i]!;
@@ -204,6 +218,7 @@ export function contestTick(
     for (const id of c.participants) { const s = skaterById(state, id); if (s.contestId === c.id) s.contestId = null; }
     state.contests.splice(i, 1);
   }
+  if (state.phase !== 'live') return; // a trapped puck was whistled dead
 
   for (const s of state.skaters) {
     if (!isFree(s)) continue;

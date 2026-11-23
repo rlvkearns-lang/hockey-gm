@@ -163,6 +163,10 @@ export type GameState = {
   shotInFlight: ShotInFlight | null;
   /** The goalie of each side is screened while tick < this value (set by net-front battles). */
   screenedUntilTick: Record<Side, number>;
+  /** Skater `id` has his stick tied up (no pass reception, no loose-puck pickup or race) while tick < `tick` (net-front). */
+  tiedUpUntil: { id: string; tick: number }[];
+  /** Skater `id` won his last net-front round: +10 in a loose-puck race (a rebound) while tick < `untilTick`. */
+  reboundEdge: { id: string; untilTick: number } | null;
   /**
    * Skaters who had the puck since the last change of team or stoppage, oldest first, by `side`: the scorer's
    * assists come from here. Pickups, releases, faceoff wins and blocks count; a goalie's save does not.

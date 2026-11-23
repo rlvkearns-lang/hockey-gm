@@ -3,7 +3,7 @@ import { BENCH_DOORS, benchTick, finishChanges, initialBench } from './bench';
 import { resolveBodies } from './bodies';
 import { brainTick } from './brain';
 import { DT, PERIOD_SECONDS, PERIODS } from './constants';
-import { clearContests, contestTick } from './contests/core';
+import { clearContests, contestTick, puckHeldByContest } from './contests/core';
 import { dropPuck, FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, linedUp, restPuck, setupFaceoff, snapToLineup } from './faceoff';
 import { goalieTick, resolveOnNet, trackShot, tryBlock } from './goalie';
 import { stepPuck, type PuckEvent } from './puck';
@@ -12,7 +12,7 @@ import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './ri
 import { createRng } from './rng';
 import { movementOf, stepSkater, type Movement } from './skating';
 import { buildResult } from './stats';
-import { assignJobs, steeredByContest } from './team-play';
+import { assignJobs, isTiedUp, steeredByContest } from './team-play';
 import type {
   GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
 } from './types';
@@ -83,7 +83,7 @@ function initialState(setup: GameSetup): GameState {
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
-    lastRelease: null, contestCooldowns: [],
+    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null,
     bench: initialBench(setup),
   };
 }
@@ -182,10 +182,11 @@ export function createGame(setup: GameSetup): Game {
 
   /**
    * A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater (not down, not leaving, not steered
-   * by a contest, not blocked) within PICKUP_RADIUS. A pass's intended receiver takes it at any speed if it came within
-   * PICKUP_RADIUS of him this tick (from `prev` to now).
+   * by a contest, not blocked, his stick not tied up) within PICKUP_RADIUS. A pass's intended receiver takes it at any
+   * speed if it came within PICKUP_RADIUS of him this tick (from `prev` to now). Nobody takes a puck a board battle holds.
    */
   function tryPickup(skaters: SkaterState[], prev: { x: number; y: number }): void {
+    if (puckHeldByContest(state)) return;
     const p = state.puck;
     const block = state.pickupBlock;
     const blocked = block !== null && state.tick < block.untilTick ? block.ids : NO_IDS;
@@ -194,14 +195,14 @@ export function createGame(setup: GameSetup): Game {
     if (pass !== null) {
       for (const s of skaters) {
         if (s.id !== pass.toId) continue;
-        if (s.downT === 0 && !s.leaving && !steeredByContest(state, s) && !blocked.includes(s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
+        if (s.downT === 0 && !s.leaving && !steeredByContest(state, s) && !blocked.includes(s.id) && !isTiedUp(state, s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
         break;
       }
     }
     if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
       let bestD = PICKUP_RADIUS;
       for (const s of skaters) {
-        if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id)) continue;
+        if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id) || isTiedUp(state, s.id)) continue;
         const d = dist(s.pos, p.pos);
         if (d <= bestD) { bestD = d; best = s; }
       }
@@ -269,6 +270,8 @@ export function createGame(setup: GameSetup): Game {
       state.pendingPass = null;
       state.shotInFlight = null;
       state.lastRelease = null;
+      state.tiedUpUntil = [];
+      state.reboundEdge = null;
       clearContests(state);
       restPuck(state);
       state.phase = state.period >= PERIODS ? 'final' : 'intermission';

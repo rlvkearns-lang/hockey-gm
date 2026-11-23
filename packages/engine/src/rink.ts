@@ -128,3 +128,28 @@ export function clipToNets(from: Vec2, to: Vec2, margin: number): void {
     return;
   }
 }
+
+/** Distance (m) from a point inside the rink to the boards (to the corner arc in the corners). */
+export function distToBoards(p: Vec2): number {
+  const R = RINK.cornerRadius;
+  const cx = RINK.halfLength - R, cy = RINK.halfWidth - R;
+  const ax = Math.abs(p.x), ay = Math.abs(p.y);
+  if (ax > cx && ay > cy) return R - hypot2(ax - cx, ay - cy);
+  return Math.min(RINK.halfLength - ax, RINK.halfWidth - ay);
+}
+
+/** Unit normal (pointing out of the rink) of the stretch of boards nearest `p`. Writes and returns `out`. */
+export function boardsNormal(p: Vec2, out: Vec2): Vec2 {
+  const R = RINK.cornerRadius;
+  const cx = RINK.halfLength - R, cy = RINK.halfWidth - R;
+  const ax = Math.abs(p.x), ay = Math.abs(p.y);
+  const sx = p.x >= 0 ? 1 : -1, sy = p.y >= 0 ? 1 : -1;
+  if (ax > cx && ay > cy) {
+    const dx = ax - cx, dy = ay - cy;
+    const d = hypot2(dx, dy) || 1;
+    out.x = (sx * dx) / d;
+    out.y = (sy * dy) / d;
+  } else if (RINK.halfLength - ax < RINK.halfWidth - ay) { out.x = sx; out.y = 0; }
+  else { out.x = 0; out.y = sy; }
+  return out;
+}

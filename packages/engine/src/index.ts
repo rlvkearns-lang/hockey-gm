@@ -20,5 +20,8 @@ export * from './bench';
 export * from './contests/core';
 export * from './contests/poke-check';
 export * from './contests/hit';
+export * from './contests/board-battle';
+export * from './contests/net-front';
+export * from './contests/loose-race';
 export * from './stats';
 export * from './game';

@@ -2,7 +2,7 @@ import { executeDump, executePass, executeShot, goalieShade, pressureOn } from '
 import { composite } from './attributes';
 import { BRAIN_INTERVAL_TICKS } from './constants';
 import { RINK, zoneOf } from './rink';
-import { steeredByContest } from './team-play';
+import { isTiedUp, steeredByContest } from './team-play';
 import { bodyRadius } from './skating';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, SkaterState } from './types';
@@ -57,6 +57,14 @@ function skaterById(state: GameState, id: string): SkaterState | null {
   return null;
 }
 
+/**
+ * `t` can be passed to: on the ice, not heading off, not down, not steered by a contest, and his stick not tied up by
+ * a net-front defender.
+ */
+export function canReceivePass(state: GameState, t: SkaterState): boolean {
+  return t.onIce && !t.leaving && t.downT === 0 && !steeredByContest(state, t) && !isTiedUp(state, t.id);
+}
+
 // Scratch for the passing lanes he sees, best first (refilled on every call).
 const laneIds: string[] = [];
 const laneValues: number[] = [];
@@ -101,7 +109,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   for (const t of state.skaters) {
     if (!t.onIce || t.side !== s.side || t === s || t.downT > 0) continue;
     if (outside && t.pos.x * dir > RINK.blueLineX + bodyRadius(defs.get(t.id)!.weightKg)) { mateOffside = true; continue; }
-    if (t.leaving || steeredByContest(state, t)) continue; // still counts for offside, but is no pass target
+    if (!canReceivePass(state, t)) continue; // still counts for offside, but is no pass target
     const l = dist(p, t.pos);
     if (l < PASS_RANGE[0] || l > PASS_RANGE[1]) continue;
     let laneMin = Infinity, recvMin = Infinity;
