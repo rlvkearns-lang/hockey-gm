@@ -1,4 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { DT, RINK, type GameEvent, type GameEventOf } from '@hockey/engine';
+import { initialGoalieAnim, poseGoalie, stepGoalieAnim, type AnimContext, type GoalieSample } from '../animator';
+import { isCut, probeOf } from '../cuts';
+import type { GoalieFigurePose } from '../goalie-pose';
+import { createCursor, lerpAngle } from '../playback';
+import { recorded, testSetup } from '../test/game';
+import { buildTimeline, type Timeline } from '../timeline';
+import { reachSlotOf } from './goalie';
 import { fitGoalie, goalieKeyRaw } from '../goalie-pose';
 import { seekScene } from '../scene';
 import { d3, game, goalieDims, nearestPart, pathAt, play, pocketFace, PUCK_HALF, releaseOf, saves, stanceHands, world, type View } from '../test/goalie-saves';
@@ -152,5 +160,69 @@ describe('goalie saves', () => {
     expect(turned).toBeGreaterThan(2);
   });
 
+
+  it('no tell on a goal: his reach is the one he would make for a save at the same place until a tick before the puck gets there', () => {
+    // Every goal with a release, both seeds: the goalie animated through the overlays at 60 Hz from 1.5 s before the
+    // release, with the game's timeline and with that goal replaced by a save at the same place with the part his reach
+    // went for; from the start of the reach to one tick before the contact (the save's arrival) the two poses are the same.
+    let goals = 0, frames = 0;
+    for (const seed of [5, 42]) {
+      const rec = recorded(seed), tl = buildTimeline(rec.events);
+      for (const goal of tl.goals) {
+        const rel = releaseOf(tl, goal.detail.releaseTick, goal.playerId!);
+        if (!rel) continue;
+        const id = goal.otherId!, from = rel.tick - 46, to = goal.tick;
+        const a = goalieRun(seed, tl, id, from, to);
+        const part = a.find((f) => f.end === goal.tick && f.locked)?.part;
+        expect(part, `seed ${seed} goal ${goal.tick}: the reach locked a part`).toBeDefined();
+        const save = { ...goal, type: 'save', playerId: id, otherId: goal.playerId, detail: { pose: part } } as unknown as GameEvent;
+        const b = goalieRun(seed, buildTimeline(rec.events.map((e) => (e === goal ? save : e))), id, from, to);
+        const arrival = b.find((f) => f.end === goal.tick && f.locked)!.tc;
+        let reaching = false;
+        for (let i = 0; i < a.length && a[i]!.t <= arrival - 1; i++) {
+          if (a[i]!.reach > 0) reaching = true;
+          expect(a[i]!.pose, `seed ${seed} goal ${goal.tick} at ${a[i]!.t} (contact ${arrival.toFixed(2)})`).toEqual(b[i]!.pose);
+          frames++;
+        }
+        expect(reaching, `seed ${seed} goal ${goal.tick}: compared into the reach`).toBe(true);
+        goals++;
+      }
+    }
+    expect(goals).toBeGreaterThan(6);
+    expect(frames).toBeGreaterThan(goals * 60);
+  });
 });
 
+
+/**
+ * Goalie `id` animated through the goalie overlays at 60 Hz from display time `from` (afresh) to `to` (sampled as the
+ * scene samples him), with timeline `tl`: each frame his pose and what his reach is reacting to.
+ */
+function goalieRun(seed: number, tl: Timeline, id: string, from: number, to: number): { t: number; pose: GoalieFigurePose; end: number; part: string; tc: number; locked: boolean; reach: number }[] {
+  const setup = testSetup(seed), pb = createCursor(setup, recorded(seed));
+  const def = [...setup.home.players, ...setup.away.players].find((p) => p.id === id)!;
+  pb.seek(from);
+  const st0 = pb.frame().prev, side = st0.goalies.home.id === id ? 'home' : 'away';
+  const s: GoalieSample = { id, side, dims: goalieDims(setup, def.id), pos: { x: 0, y: 0 }, facing: 0, state: st0.goalies[side] };
+  const ctx: AnimContext = {
+    tick: 0, alpha: 0, time: 0, state: st0, skaters: new Map(), goalies: new Map([[id, s]]),
+    puck: { engine: { x: 0, y: 0, z: 0 }, drawn: { x: 0, y: 0, z: 0 }, carrierId: null }, contests: [], timeline: tl, rink: RINK, defends: { home: -1, away: 1 },
+  };
+  let anim = initialGoalieAnim();
+  const out: { t: number; pose: GoalieFigurePose; end: number; part: string; tc: number; locked: boolean; reach: number }[] = [];
+  for (let t = from; t <= to + 1e-9; t += 0.5) {
+    pb.seek(t);
+    const f = pb.frame(), prev = f.prev, next = isCut(probeOf(prev), f.next) ? prev : f.next, a = f.alpha;
+    ctx.tick = f.tick; ctx.alpha = a; ctx.time = (f.tick + a) * DT; ctx.state = next; ctx.contests = next.contests;
+    ctx.puck.engine.x = prev.puck.pos.x + (next.puck.pos.x - prev.puck.pos.x) * a; ctx.puck.engine.z = prev.puck.pos.y + (next.puck.pos.y - prev.puck.pos.y) * a;
+    ctx.puck.engine.y = Math.max(0, prev.puck.z + (next.puck.z - prev.puck.z) * a);
+    ctx.puck.drawn = { ...ctx.puck.engine }; ctx.puck.carrierId = next.carrierId;
+    const p = prev.goalies[side], n = next.goalies[side];
+    s.pos.x = p.pos.x + (n.pos.x - p.pos.x) * a; s.pos.y = p.pos.y + (n.pos.y - p.pos.y) * a; s.facing = lerpAngle(p.facing, n.facing, a); s.state = n;
+    anim = stepGoalieAnim(anim, s, ctx, t === from ? 0 : 1 / 60);
+    const pose = structuredClone(poseGoalie(anim, s, ctx, s.dims));
+    const cur = reachSlotOf(anim)?.cur;
+    out.push({ t, pose, end: cur?.end ?? -1, part: cur?.part ?? '', tc: cur?.tc ?? 0, locked: !!cur && t >= cur.tc, reach: cur?.reach ?? 0 });
+  }
+  return out;
+}

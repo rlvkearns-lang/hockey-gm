@@ -9,8 +9,8 @@ import { lastSinceDrop } from '../timeline';
  * Saves that reach the puck (pure: no three.js, no DOM). For a shot on its way to his net (a `release` of kind `shot`
  * whose shot ends in a `save`, `goal`, `miss` or `post` against him, from the timeline), the goalie gets set as the
  * shooter lets it go, then moves the part the engine's save names (glove, blocker, pad, or his body in the butterfly)
- * to where the puck crosses the plane just in front of him, arriving as the puck does. On a goal he reaches late and
- * short, and is beaten. Holding the puck after a frozen save or a cover, the puck is drawn in his glove or under it
+ * to where the puck crosses the plane just in front of him, arriving as the puck does. On a goal he reaches exactly as
+ * for a save until a tick before the puck gets there, then comes up short of it, and is beaten. Holding the puck after a frozen save or a cover, the puck is drawn in his glove or under it
  * (goalieHeldPuck, which the scene gives the puck machine).
  *
  * The puck's path is the engine's own: from where the release event let it go, at display time R - 1 (the last moment
@@ -56,6 +56,8 @@ const REB_LEAVE = 4.5;
 export const SAVE_HOLD_AFTER = 6, SAVE_HOLD_REACH = 1.6;
 /** A saving hand meets the puck this far (m) in front of its middle (the face of the blocker or the glove). */
 export const HAND_FACE = 0.1;
+/** On a goal the reach is a save's until this long (ticks) before the contact, and has given way to being beaten by it. */
+const BEATEN_FROM = 1;
 /** On a goal the part ends this far short (m) of where the puck crossed. */
 const BEATEN_SHORT = 0.42;
 /** On a low goal the pad kick is this much (m) short along the leg as the puck goes by. */
@@ -84,6 +86,8 @@ export type ReachPlan = {
   kind: Kind; end: number; part: SavePose; freeze: boolean;
   path: Path; release: number; tc: number; c: Vec3; rc: Vec3;
   w: number; set: number; reach: number; hold: boolean; since: number;
+  /** On a goal, how far he has given way from the save he reached for to being beaten (0 until a tick before the contact, 1 from it). */
+  beat: number;
 };
 /**
  * The reach's state for one goalie (plain data, made once per goalie and refilled every step from the timeline and the
@@ -109,7 +113,7 @@ const fin = (v: number): number => (Number.isFinite(v) ? v : 0);
 const newPath = (): Path => ({ t0: 0, px: 0, py: 0, pz: 0, vx: 0, vy: 0, vz: 0, grav: false });
 const newPlan = (): ReachPlan => ({
   active: false, kind: 'save', end: -1, part: 'butterfly', freeze: false, path: newPath(), release: -Infinity, tc: 0,
-  c: { x: 0, y: 0, z: 0 }, rc: { x: 0, y: 0, z: 0 }, w: 0, set: 0, reach: 0, hold: false, since: 0,
+  c: { x: 0, y: 0, z: 0 }, rc: { x: 0, y: 0, z: 0 }, w: 0, set: 0, reach: 0, hold: false, since: 0, beat: 0,
 });
 function newSlot(): ReachSlot {
   const lock = (): Lock => ({ end: -1, tc: 0, x: 0, y: 0, z: 0, part: 'butterfly', raw: { x: 0, y: 0, z: 0 } });
@@ -233,7 +237,7 @@ const scratch: Vec3 = { x: 0, y: 0, z: 0 };
 
 /** Work out one reaction for this frame into `plan`. */
 function fill(plan: ReachPlan, slot: ReachSlot, f: Found, s: GoalieSample, ctx: AnimContext, now: number): void {
-  plan.active = false; plan.w = 0; plan.set = 0; plan.reach = 0; plan.hold = false;
+  plan.active = false; plan.w = 0; plan.set = 0; plan.reach = 0; plan.hold = false; plan.beat = 0;
   const e = f.e;
   if (!e) return;
   const kind = f.kind, T = e.tick;
@@ -283,9 +287,12 @@ function fill(plan: ReachPlan, slot: ReachSlot, f: Found, s: GoalieSample, ctx: 
   let reach: number, after: number;
   const gloveHeld = plan.freeze && part === 'glove';
   if (kind === 'goal') {
-    // Beaten (see beatenRaw): there as the puck goes by, then he gives way to the slump (reactions.ts beatenGoalie).
+    // The same reach as a save's, to where the puck will cross (nothing gives the goal away before it gets there); from a
+    // tick before the contact he gives way to being beaten (see beatenRaw: short of it as it goes by, then after it),
+    // then to the slump (reactions.ts beatenGoalie).
     reach = lead > 0 ? (now < tc - lead ? 0 : easeOut((now - (tc - lead)) / lead)) : now >= tc ? 1 : 0;
     after = 1 - smooth((now - tc - 9) / 18);
+    plan.beat = smooth((now - (tc - BEATEN_FROM)) / BEATEN_FROM);
   } else {
     reach = lead > 0 ? (now < tc - lead ? 0 : easeOut((now - (tc - lead)) / lead)) : now >= tc ? 1 : 0;
     if (kind === 'miss' || kind === 'post') { reach *= kind === 'post' ? 1 : 0.7; after = 1 - smooth((now - tc) / 12); }
@@ -477,9 +484,12 @@ function applyPlan(p: ReachPlan, raw: GoalieRaw, sample: GoalieSample, dims: Bod
   if (p.kind === 'save' && p.freeze && p.part === 'glove' && p.since > 0) return mixGoalieRaw(raw, gloveHold(c, dims, p.since), p.reach);
   const base = p.set > 0 ? setRaw(raw, dims, p.set) : raw;
   if (p.reach <= 0) return base;
-  if (p.kind !== 'goal') return mixGoalieRaw(base, placed(p.part, c, dims, false, base), p.reach);
-  // Beaten: committed as it goes by, then too late after it (beatenRaw).
-  return mixGoalieRaw(base, beatenRaw(p.rc, dims, smooth((p.since - LATE_START) / LATE_TIME)), p.reach);
+  const save = p.beat < 1 ? placed(p.part, c, dims, false, base) : null;
+  if (p.kind !== 'goal' || p.beat <= 0) return mixGoalieRaw(base, save!, p.reach);
+  // Beaten: the save he reached for gives way, from a tick before the contact, to being short of it as it goes by and
+  // too late after it (beatenRaw).
+  const beaten = beatenRaw(p.rc, dims, smooth((p.since - LATE_START) / LATE_TIME));
+  return mixGoalieRaw(base, save ? mixGoalieRaw(save, beaten, p.beat) : beaten, p.reach);
 }
 
 export const goalieReach: GoalieOverlay<ReachSlot> = {
