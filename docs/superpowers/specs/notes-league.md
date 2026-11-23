@@ -32,3 +32,7 @@ Working notes from conversation with the owner on 2026-11-23, to be folded into 
 ## Written text: reports, agents, GMs, rumours (owner chose C, 2026-11-23)
 - Templates always work (offline, free). If the owner adds an AI key, an AI model writes the text from the same structured findings, and can carry real back-and-forth conversations with agents and rival GMs. Needs internet and has a small running cost. The game stays fully playable without it.
 - Each scout is a person with tendencies and blind spots; two scouts can disagree about the same player.
+
+## Moving through a season and delegation (2026-11-23)
+- Owner: some things should be passed to assistant GMs. Example: a fourth-line grinder picked up as a free agent who is upset about his ice time. The owner wants to be aware of it but hand it off.
+- [my call, proposed to owner] An inbox with three levels: must decide (stops the sim), yours if you want it (the assistant GM handles it after a short wait unless the owner steps in), and for information. Delegation rules the owner sets (for example: complaints from depth players, AHL lineups, waiver claims, contracts under a set value). The assistant acts and leaves a one-line note of what he did and how it went. Assistant GMs are hired staff with their own ability and personality, so a good one settles things and a poor one can make them worse. Sim controls: next day, next game, next event, to a date; always stops for must-decide items, and the owner can tune what counts.
