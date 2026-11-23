@@ -66,3 +66,26 @@ Proposed shape **[my call, not yet agreed]**:
 - Basic view by default; an "advanced" switch reveals the rest. Scouts and the assistant GM can cite these in reports.
 - Requires the engine to record a position on every event (being added in the current fix round) and the league stage to store per-game on-ice data.
 - Owner agreed (2026-11-23): rival GMs use these numbers to differing degrees as part of their personality ("analytics" types versus "old school"), so undervalued players can be found before others notice.
+
+## Saves (owner, 2026-11-23)
+
+- The owner is not sure where saves should live, and asked whether save files can be transferred and loaded. Yes.
+- Proposed **[my call]**: solo play uses a save file the player can keep, copy between machines and load; the game also autosaves in the browser between explicit saves. The online, log-in-anywhere version arrives with the friends league (it needs a server anyway), and a solo save can be uploaded to it.
+
+## Predicted stats (owner, 2026-11-23)
+
+- The owner wants predicted stats, and thinks it would be too annoying if they depended on having a good scout.
+- Proposed **[my call]**: a projected stat line is always available for every player, with no scout needed. For established players it rests on their record, so it is solid for everyone. For prospects and players with little track record it rests on what is known, so it comes with a range and a confidence mark rather than being hidden.
+
+## Prospect summaries and confidence (owner, 2026-11-23)
+
+- Each prospect gets a short headline summary from scouting, for example "High ceiling, flashy player" or "projects as a top-line centre", with more detail available when he has been scouted a lot.
+- A confidence mark, as stars or colours, for how sure the scouts are: full stars / blue means he has been scouted heavily and "we know what and who he is"; two stars / red means "we think he could be this good, but we don't know".
+- The owner wants confidence shown for the pick overall, for his ceiling, and for his play style.
+
+Proposed shape **[my call]**:
+
+- Prospect card, top to bottom: headline (projected role + a few words on style), projected ceiling and likely outcome each with its own confidence, play style with its own confidence, projected stat line with a range, then the full written report(s) if any.
+- Confidence comes from how much he has been watched (games seen, by how many scouts, how recently), how good those scouts are, and how settled he is (an 18-year-old is less certain than a 22-year-old however much he is watched).
+- Both stars and colour together, so it reads at a glance and works for colour-blind players; more scouting visibly fills stars in.
+- Scouts can be confidently wrong: a weaker scout shows high confidence too easily. Over time the player sees each scout's hit rate.
