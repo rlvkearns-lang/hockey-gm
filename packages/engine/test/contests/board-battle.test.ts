@@ -3,7 +3,7 @@ import { simulateGame } from '../../src/game';
 import { FACEOFF_DOTS } from '../../src/rink';
 import {
   battleWithThirdMan, count, def, even, heldPuckInGame, runBattle, runBattleLogged, runBattleWon, setup, share, shareOf, stagesOf, totalSeconds,
-  trappedBattle, shieldAlongBoards, puckIntoFeet,
+  trappedBattle, shieldAlongBoards, puckIntoFeet, battleWonOffCarrier,
 } from '../helpers';
 
 /** Whole-game tests take about 1.5 s; this leaves room for a loaded machine. */
@@ -37,6 +37,10 @@ describe('board battles', () => {
     const kept = (r: string[]) => shareOf(r, (x) => x === 'kept');
     expect(kept(s)).toBeGreaterThan(kept(w) + 0.15); expect(kept(s)).toBeLessThan(0.95); expect(kept(w)).toBeGreaterThan(0.05);
     expect(shareOf(w, (x) => x === 'lost')).toBeGreaterThan(0.3);
+  });
+  it('a battle won off the man who was carrying the puck is a takeaway', () => {
+    const e = battleWonOffCarrier(def({ strength: 55, puckHandling: 55, balance: 55 }), def({ strength: 85, stickChecking: 85, compete: 85 }));
+    expect(e.find((x) => x.type === 'takeaway')).toMatchObject({ playerId: 'away-C', otherId: 'home-C', detail: 'battle' });
   });
   it('a moving puck slides into their feet over a few ticks rather than stopping dead', () => {
     const r = puckIntoFeet();

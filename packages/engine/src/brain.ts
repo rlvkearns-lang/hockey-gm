@@ -3,7 +3,7 @@ import { composite } from './attributes';
 import { BRAIN_INTERVAL_TICKS, DT, PERIOD_SECONDS, PERIODS } from './constants';
 import { RINK, zoneOf } from './rink';
 import { TUNING } from './tuning';
-import { isTiedUp, steeredByContest } from './team-play';
+import { isTiedUp, scoreMargin, steeredByContest } from './team-play';
 import { bodyRadius } from './skating';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, SkaterState } from './types';
@@ -13,7 +13,7 @@ export type Decision =
   | { kind: 'carry'; to: Vec2 }
   | { kind: 'pass'; toId: string }
   | { kind: 'shoot' }
-  | { kind: 'dump'; onNet?: boolean }
+  | { kind: 'dump' }
   | { kind: 'protect' };
 
 const GOAL = RINK.goalLineX;
@@ -69,19 +69,13 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   const rx = p.x * dir, ly = p.y * dir;
   const pressure = pressureOn(state, s);
   const calm = 1 - pressure * (T.calm.base - a.poise * T.calm.perPoise);
-  // Score effects: a team well ahead sits on its lead and shoots less; a team behind presses and shoots more.
+  // Score effects (modest, as in real hockey): a team comfortably ahead shoots a little less, one comfortably behind
+  // a little more, and late in the third a team down by one pushes as the clock runs out.
+  const se = TUNING.scoreEffects;
+  const margin = scoreMargin(state, s.side);
   const lead = state.score[s.side] - state.score[s.side === 'home' ? 'away' : 'home'];
-  const se = T.scoreEffects;
-  // A close game is played straight; from se.trailFrom goals behind he presses more with each goal, up to trailMaxGoals.
-  const behind = -lead >= se.trailFrom ? (Math.min(-lead, se.trailMaxGoals) - se.trailFrom + 1) / (se.trailMaxGoals - se.trailFrom + 1) : 0;
-  // Late in the third period a one- or two-goal game changes too: the team behind pushes, the team ahead holds on.
-  const late = state.period >= PERIODS && Math.abs(lead) >= 1 && Math.abs(lead) <= 2 ? 1 - state.clock / PERIOD_SECONDS : 0;
-  const lateShoot = lead < 0 ? 1 + se.latePush * late : 1 - se.lateSit * late;
-  const scoreShoot = (lead >= se.leadFrom ? Math.max(se.leadMin, 1 - se.leadPerGoal * (lead - se.leadFrom + 1))
-    : 1 + se.trailPerGoal * behind * (se.trailMaxGoals - se.trailFrom + 1)) * lateShoot;
-  // Behind, he shoots through traffic: pressure counts for less.
-  const pushing = Math.max(behind, lead < 0 ? late : 0);
-  const shootPressure = T.shootPressure - (T.shootPressure - se.trailPressure) * pushing;
+  const late = state.period >= PERIODS && lead === -1 ? 1 - state.clock / PERIOD_SECONDS : 0;
+  const scoreShoot = margin === 'ahead' ? se.leaderShoot : Math.min(se.maxShoot, (margin === 'behind' ? se.trailerShoot : 1) * (1 + se.latePush * late));
 
   // Space ahead, and which way to swerve from the nearest opponent in front.
   let aheadD = Infinity, aheadLat = 0;
@@ -143,7 +137,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
   const since = t.side === s.side && t.ids[t.ids.length - 1] === s.id ? t.ticks[t.ticks.length - 1]! : state.tick;
   const keep = Math.max(T.holdMin, Math.exp(-((state.tick - since) * DT) / T.holdSeconds));
   const shootOn = 1 + T.holdBoost.shoot * (1 - keep), passOn = 1 + T.holdBoost.pass * (1 - keep);
-  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * (T.shootSkill.base + composite(a, SHOOTING) * T.shootSkill.perPoint) * tend.shoot * calm ** shootPressure * scoreShoot * shootOn;
+  const shootW = T.weight.shoot * shotQuality(rx, ly) * (T.openNetWeight[0] + T.openNetWeight[1] * open) * (T.shootSkill.base + composite(a, SHOOTING) * T.shootSkill.perPoint) * tend.shoot * calm ** T.shootPressure * scoreShoot * shootOn;
   const passSkill = T.weight.pass * skill(a.passing) * tend.pass * calm * passOn;
   const carryW = T.weight.carry * (T.carrySpace[0] + T.carrySpace[1] * spaceAhead) * skill(a.puckHandling) * tend.carry * calm * keep;
   const zone = zoneOf(p.x, dir);
@@ -172,11 +166,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
     for (let i = 0; i < laneValues.length; i++) if ((u -= laneValues[i]!) < 0 || i === laneValues.length - 1) return { kind: 'pass', toId: laneIds[i]! };
   }
   r -= pw;
-  if ((r -= w(dumpW)) < 0) {
-    // Well behind, from the neutral zone he may throw it at the net rather than into a corner.
-    const shootIn = zone === 'N' && behind > 0 && rng.chance(se.shootIn * behind);
-    return shootIn ? { kind: 'dump', onNet: true } : { kind: 'dump' };
-  }
+  if ((r -= w(dumpW)) < 0) return { kind: 'dump' };
   if ((r -= w(protectW)) < 0) return { kind: 'protect' };
   const to = carryTarget(rx, ly, zone, aheadLat, aheadD, dir);
   if (mateOffside && to.x * dir > RINK.blueLineX - T.holdUpGap) to.x = (RINK.blueLineX - T.holdUpGap) * dir;
@@ -212,7 +202,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   switch (d.kind) {
     case 'shoot': executeShot(state, s.id, defs, rng); return null;
     case 'pass': return executePass(state, s.id, d.toId, defs, rng);
-    case 'dump': return executeDump(state, s.id, defs, rng, d.onNet === true);
+    case 'dump': return executeDump(state, s.id, defs, rng);
     case 'carry':
       if (busy) return null;
       s.target.x = d.to.x;

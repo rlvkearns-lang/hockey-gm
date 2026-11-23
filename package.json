@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "test": "npm -w packages/engine run test",
+    "test:calibration": "npm -w packages/engine run test:calibration",
     "bench": "tsx packages/engine/scripts/bench.ts",
     "typecheck": "tsc --noEmit -p packages/engine/tsconfig.json && tsc --noEmit -p packages/engine/tsconfig.test.json",
     "calibrate": "tsx packages/engine/scripts/calibrate.ts"

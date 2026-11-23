@@ -272,24 +272,6 @@ export function rate(kind: Decision['kind'], d: PlayerDef, state: GameState): nu
   return n / 2000;
 }
 
-/** Of 2,000 decideCarrier draws (seeds 1..2000) with `d` as the carrier in `state` that are dumps, the share aimed at the net. */
-export function shootIns(d: PlayerDef, state: GameState): number {
-  const id = state.carrierId!;
-  const carrier = state.skaters.find((s) => s.id === id)!;
-  const me = { ...d, id, position: carrier.slot ?? d.position };
-  const ds = new Map(defs);
-  ds.set(id, me);
-  let dumps = 0, onNet = 0;
-  for (let seed = 1; seed <= 2000; seed++) {
-    const x = decideCarrier(state, me, ds, createRng(seed));
-    if (x.kind !== 'dump') continue;
-    dumps++;
-    if (x.onNet === true) onNet++;
-  }
-  if (dumps === 0) throw new Error('no dumps drawn');
-  return onNet / dumps;
-}
-
 /**
  * Mean lateral miss (m) at the receiver of 400 passes (seeds 1..400) by `d` to a still teammate 15 m away,
  * with no opponent near either of them.
@@ -732,7 +714,12 @@ let interceptSeed = 0;
  * and tryIntercept until it is intercepted or passes him.
  */
 export function interceptShare(defender: PlayerDef, n: number): number {
-  let k = 0;
+  return interceptedPasses(defender, n).length / n;
+}
+
+/** The events of the interceptions among `n` passes set up as in interceptShare. */
+export function interceptedPasses(defender: PlayerDef, n: number): GameEvent[] {
+  const out: GameEvent[] = [];
   for (let i = 0; i < n; i++) {
     const state = stateWith({ carrier: 'home', puckX: -5, carrierSlot: 'C' });
     for (const s of state.skaters) if (!(s.side === 'home' && (s.slot === 'C' || s.slot === 'LW')) && !(s.side === 'away' && s.slot === 'LD')) s.onIce = false;
@@ -748,11 +735,12 @@ export function interceptShare(defender: PlayerDef, n: number): number {
       state.tick++;
       const prev = { x: state.puck.pos.x, y: state.puck.pos.y };
       stepPuck(state.puck, DT);
-      if (tryIntercept(state, ds, rng, prev)) { k++; break; }
+      const caught = tryIntercept(state, ds, rng, prev);
+      if (caught) { out.push(caught.event); break; }
       if (state.puck.pos.x > 5) break;
     }
   }
-  return k / n;
+  return out;
 }
 
 /** A poke check whose checker is moved out of stick reach (3.4 m away) just before the reach ends, played out. */
@@ -1131,6 +1119,33 @@ export function shieldAlongBoards(carrier: PlayerDef, opp: PlayerDef): 'kept' | 
   return h.events.some((e) => e.type === 'battle' && e.detail === 'protect') ? 'kept' : 'none';
 }
 
+/** The events of the first hit (of up to 50, as in hitThatLands) that lands on the carrier. */
+export function landedHitEvents(): GameEvent[] {
+  for (let i = 0; i < 50; i++) {
+    const h = hitDuel(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), def({ balance: 62, strength: 60, weightKg: 80 }), 6);
+    if (h.events.some((e) => e.type === 'hit' && e.detail === 'landed')) return h.events;
+  }
+  throw new Error('no hit landed in 50 tries');
+}
+
+/**
+ * The events of the first board battle on a carrier along the boards (as in shieldAlongBoards, home C carrying, `opp`
+ * as away C) that away C wins after knocking the puck into their feet (up to 200 tries).
+ */
+export function battleWonOffCarrier(carrier: PlayerDef, opp: PlayerDef): GameEvent[] {
+  for (let i = 0; i < 200; i++) {
+    const h = harness(['home-C', 'away-C'], { 'home-C': carrier, 'away-C': opp }, { carrier: 'home', puckX: BATTLE_SPOT.x + 0.6, puckY: BATTLE_SPOT.y, carrierSlot: 'C' });
+    const st = h.st, S = BATTLE_SPOT;
+    place2(st, 'home-C', S.x, S.y - 0.1, 0);
+    place2(st, 'away-C', S.x + 0.3, S.y - 1, Math.PI / 2);
+    st.puck.pos = { x: S.x + 0.6, y: S.y - 0.1 };
+    const c = startContest(st, h.ds, h.rng, boardBattleContest, ['away-C', 'home-C'], h.events);
+    for (let k = 0; k < 300 && st.contests.includes(c); k++) harnessStep(h);
+    if (h.events.some((e) => e.type === 'battle' && e.playerId === 'away-C' && e.detail !== 'protect')) return h.events;
+  }
+  throw new Error('away C never won the puck off the carrier');
+}
+
 /**
  * A loose puck sliding along the +y boards at 4 m/s when a board battle starts on it (both men 0.8 m away): how far it
  * moves on each of the first 12 ticks, and how far from the battle's spot it is after them.
@@ -1260,7 +1275,7 @@ export type GameRecord = {
 export type CalibrationOpts = { homeOverall?: number; awayOverall?: number };
 
 /** Event types whose detail is counted too (e.g. `hit:landed`, `freeze:trapped`, `takeaway:poke`). */
-const DETAILED = new Set(['hit', 'freeze', 'takeaway', 'battle', 'save', 'pass', 'lineChange']);
+const DETAILED = new Set(['hit', 'freeze', 'takeaway', 'giveaway', 'battle', 'save', 'pass', 'lineChange']);
 
 /**
  * Calibration game `i`: two generated teams (home roster seed 2i + 1 at `homeOverall`, away 2i + 2 at `awayOverall`,

@@ -4,8 +4,8 @@ import { createGame, simulateGame } from '../src/game';
 import { generateTeam } from '../src/roster-gen';
 import { playersOf, setup, sum } from './helpers';
 
-/** 30 whole games each (about 1.1 s a game, more with an expect on every tick); room for a loaded machine. */
-const GAMES_TIMEOUT = 300_000;
+/** 30 whole games each (about 1.2 s a game, about 3 s with an expect on every tick): room for a slow single core. */
+const GAMES_TIMEOUT = 600_000;
 
 describe('robustness', () => {
   it('the puck is never left alone', () => {

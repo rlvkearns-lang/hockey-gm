@@ -141,20 +141,19 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
 
 /**
  * Chip the puck deep into the attacked end, toward one corner (picked at random), with a passing-based direction error.
- * Emits a `pass` event with detail `dump` and no receiver. With `onNet` he throws it at the net instead (a shoot-in:
- * detail `shootIn`); if it gets there the goalie has to play it like any puck on net.
+ * Emits a `pass` event with detail `dump` and no receiver.
  */
-export function executeDump(state: GameState, fromId: string, defs: Map<string, PlayerDef>, rng: Rng, onNet = false): GameEvent {
+export function executeDump(state: GameState, fromId: string, defs: Map<string, PlayerDef>, rng: Rng): GameEvent {
   const s = skaterById(state, fromId);
   const passing = defs.get(fromId)!.attrs.passing;
   const dir = state.attackDir[s.side];
   const p = state.puck.pos;
-  const tx = dir * (onNet ? RINK.goalLineX : DUMP.spot.x), ty = onNet ? 0 : (rng.chance(0.5) ? 1 : -1) * DUMP.spot.y;
+  const tx = dir * DUMP.spot.x, ty = (rng.chance(0.5) ? 1 : -1) * DUMP.spot.y;
   const speed = DUMP.speed.base + passing * DUMP.speed.perPoint;
   const sigma = DUMP.errorFactor * (PASS.error.base + (100 - passing) * PASS.error.perPoint);
   const angle = Math.atan2(ty - p.y, tx - p.x) + rng.gauss() * sigma;
   release(state, s, Math.cos(angle) * speed, Math.sin(angle) * speed, DUMP.vz);
-  return event(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, assistIds: [], detail: onNet ? 'shootIn' : 'dump' });
+  return event(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, assistIds: [], detail: 'dump' });
 }
 
 /**
@@ -171,7 +170,7 @@ export function interceptChance(d: PlayerDef, speed: number): number {
 /**
  * A pass still on its way (state.pendingPass) at PASS.interceptSpeed[0] m/s or faster: each opposing skater (on the ice,
  * not leaving, not down, not steered by a contest) whose body came within PASS.interceptRange of the puck's path this tick (from
- * `prev` to its position now) gets one try. On success the pass is over and a `takeaway` is returned: 60% he takes it
+ * `prev` to its position now) gets one try. On success the pass is over and the passer's `giveaway` is returned: 60% he takes it
  * (`taker`, now the carrier; the caller puts the puck on his stick), 40% he deflects it loose (`taker` null).
  */
 export function tryIntercept(
@@ -205,7 +204,8 @@ export function tryIntercept(
       blockPickup(state, [s.id]);
     }
     return {
-      event: event(state, { type: 'takeaway', side: s.side, playerId: s.id, otherId: pass.fromId, assistIds: [], detail: take ? 'intercept' : 'deflect' }),
+      // A pass that does not get through is the passer's giveaway (the interceptor is `otherId`).
+      event: event(state, { type: 'giveaway', side: from.side, playerId: pass.fromId, otherId: s.id, assistIds: [], detail: take ? 'intercepted' : 'deflected' }),
       taker: take ? s : null,
     };
   }

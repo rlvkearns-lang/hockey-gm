@@ -194,13 +194,15 @@ function resolveImpact(c: ContestState, ctx: ContestCtx, h: SkaterState, t: Skat
   const mh = movementOf(ctx.defs.get(h.id)!, 1).mass, mt = movementOf(ctx.defs.get(t.id)!, 1).mass;
   const push = Math.max(0, closingSpeed(h, t)) * (mh / (mh + mt));
   let detail: string;
+  let separated = false;
   if (won) {
     t.downT = DOWN_SECONDS[0] + (DOWN_SECONDS[1] - DOWN_SECONDS[0]) * (1 - u / p);
     knock(t, ux * push, uy * push);
     h.vel.x *= 0.4;
     h.vel.y *= 0.4;
     detail = 'landed';
-    if (state.carrierId === t.id) {
+    separated = state.carrierId === t.id;
+    if (separated) {
       const vx = t.vel.x * LOOSE_CARRY + ctx.rng.gauss() * LOOSE_PUSH, vy = t.vel.y * LOOSE_CARRY + ctx.rng.gauss() * LOOSE_PUSH;
       applyResult(ctx, c, { winnerId: h.id, puck: 'loose', looseVel: { x: vx, y: vy } });
     }
@@ -218,6 +220,8 @@ function resolveImpact(c: ContestState, ctx: ContestCtx, h: SkaterState, t: Skat
     }
   }
   ctx.emit(contestEvent(state, { type: 'hit', side: h.side, playerId: h.id, otherId: t.id, assistIds: [], detail }));
+  // A hit that knocks the puck off the carrier is a takeaway for the hitter.
+  if (separated) ctx.emit(contestEvent(state, { type: 'takeaway', side: h.side, playerId: h.id, otherId: t.id, assistIds: [], detail: 'hit' }));
   c.leader = won ? h.id : t.id;
   toRecover(state, c, t.id, RECOVER_SECONDS);
 }

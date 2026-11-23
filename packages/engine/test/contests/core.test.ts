@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { chemistryWith, contestTick, effective, winProb } from '../../src/contests/core';
 import { DT } from '../../src/constants';
 import { stopPlay } from '../../src/faceoff';
-import { d, def, interceptShare, st, startPoke, stateOf } from '../helpers';
+import { d, def, interceptedPasses, interceptShare, st, startPoke, stateOf } from '../helpers';
 
 describe('contest core', () => {
   it('parity curve', () => { expect(winProb(0)).toBeCloseTo(0.5, 5); expect(winProb(15)).toBeGreaterThan(0.62); expect(winProb(15)).toBeLessThan(0.68); expect(winProb(500)).toBe(0.9); expect(winProb(-500)).toBe(0.1); expect(winProb(10) + winProb(-10)).toBeCloseTo(1, 5); });
@@ -39,5 +39,10 @@ describe('interceptions', () => {
     const good = interceptShare(def({ stickChecking: 92, defensivePositioning: 90 }), 2000);
     const poor = interceptShare(def({ stickChecking: 40, defensivePositioning: 40 }), 2000);
     expect(good).toBeGreaterThan(poor + 0.08); expect(good).toBeLessThan(0.97); expect(poor).toBeGreaterThan(0.03);
+  });
+  it('an intercepted or deflected pass is the passer\'s giveaway, not a takeaway', () => {
+    const evs = interceptedPasses(def({ stickChecking: 92, defensivePositioning: 90 }), 300);
+    expect(evs.length).toBeGreaterThan(0);
+    for (const e of evs) expect(e).toMatchObject({ type: 'giveaway', side: 'home', playerId: 'home-C', otherId: 'away-LD' });
   });
 });

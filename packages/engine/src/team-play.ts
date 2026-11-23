@@ -1,5 +1,5 @@
 import { composite } from './attributes';
-import { DT } from './constants';
+import { DT, PERIODS } from './constants';
 import { boardsNormal, clipToNets, RINK, resolveBoards, resolveNets, zoneOf } from './rink';
 import { TUNING } from './tuning';
 import type { ContestState, GameState, PlayerDef, Position, Side, SkaterState, Tactics } from './types';
@@ -225,13 +225,19 @@ function shape(state: GameState, s: SkaterState, d: PlayerDef, phase: ShapePhase
 }
 
 /**
- * How hard `side` still pushes given the score: 1 unless it leads by TUNING.teamPlay.sitBackLead goals or more, then
- * 1 - sitBackPerGoal per goal of lead beyond one, at least sitBackMin.
+ * Where `side` stands on the scoreboard: `ahead` with a comfortable lead (TUNING.scoreEffects.lead goals, or lateLead
+ * in the third period), `behind` facing one, else `close`.
  */
-export function sitBack(state: GameState, side: Side): number {
+export function scoreMargin(state: GameState, side: Side): 'ahead' | 'behind' | 'close' {
   const lead = state.score[side] - state.score[side === 'home' ? 'away' : 'home'];
-  const t = TUNING.teamPlay;
-  return lead >= t.sitBackLead ? Math.max(t.sitBackMin, 1 - t.sitBackPerGoal * (lead - 1)) : 1;
+  const se = TUNING.scoreEffects;
+  const need = state.period >= PERIODS ? se.lateLead : se.lead;
+  return lead >= need ? 'ahead' : -lead >= need ? 'behind' : 'close';
+}
+
+/** How hard `side` still pushes (its presser's speed, its poke attempts): TUNING.scoreEffects.sitBack when comfortably ahead, else 1. */
+export function sitBack(state: GameState, side: Side): number {
+  return scoreMargin(state, side) === 'ahead' ? TUNING.scoreEffects.sitBack : 1;
 }
 
 /** Goal-side pressure on the carrier by the nearest defender. */
@@ -335,10 +341,8 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
   const battle = carrier ? null : boardBattle(state);
   const homeSupport = battle ? supportTarget(state, 'home') : null;
   const awaySupport = battle ? supportTarget(state, 'away') : null;
-  // Score effects: a team well ahead sits back (a passive forecheck, a slower presser).
+  // Score effects: a team comfortably ahead presses a little less hard.
   const homeBack = sitBack(state, 'home'), awayBack = sitBack(state, 'away');
-  const homeTactic: Tactics = homeBack < 1 ? { ...tactics.home, forecheck: 'passive' } : tactics.home;
-  const awayTactic: Tactics = awayBack < 1 ? { ...tactics.away, forecheck: 'passive' } : tactics.away;
   const homePhase = phaseOf(shapeSide, puck.x, 'home', state.attackDir.home);
   const awayPhase = phaseOf(shapeSide, puck.x, 'away', state.attackDir.away);
 
@@ -350,7 +354,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
     const phase = s.side === 'home' ? homePhase : awayPhase;
     const chasing = s === homeChaser || s === awayChaser;
     const support = chasing && battle ? (s.side === 'home' ? homeSupport : awaySupport) : null;
-    const tactic = s.side === 'home' ? homeTactic : awayTactic;
+    const tactic = tactics[s.side];
     if (s === presser) {
       press(state, s, d, carrier!, phase, tactic);
       s.speedCap *= s.side === 'home' ? homeBack : awayBack;

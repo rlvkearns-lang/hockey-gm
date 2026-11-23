@@ -51,6 +51,8 @@ type BattleData = {
   slide: number;
   /** The carrier's participant index while he shields a carried puck (`protect`), else NONE. */
   carrier: number;
+  /** The participant index of a carrier who lost the puck into their feet (a win by the other man is a takeaway), else NONE. */
+  stripped: number;
   /** The first man in (+6), and 1 once that is settled. */
   first: number;
   firstSet: number;
@@ -124,7 +126,7 @@ export const boardBattleContest: Contest = {
       id: -1, kind: KIND, stage: carrierIdx === NONE ? 'arrive' : 'protect', stageT: 0, participants: participants.slice(), leader: null,
       spot: { x: p.pos.x, y: p.pos.y }, freeIds: carrierIdx === NONE ? [] : [participants[carrierIdx]!],
       data: {
-        holdsPuck: 0, slide: 0, carrier: carrierIdx, first: NONE, firstSet: 0, balance: 0, pinned: NONE, nextAt: PIN_ROUND,
+        holdsPuck: 0, slide: 0, carrier: carrierIdx, stripped: NONE, first: NONE, firstSet: 0, balance: 0, pinned: NONE, nextAt: PIN_ROUND,
         digLast: NONE, digRounds: 0, winner: NONE, clean: 0, supportA: NONE, supportB: NONE,
       },
     };
@@ -275,6 +277,7 @@ function protect(c: ContestState, ctx: ContestCtx): ContestResult | null {
     setCooldown(state, opp.id, 'pokeCheck', T.loserPokeCooldown);
     return cooledOff(c, ctx, carrier.id);
   }
+  d.stripped = ci;
   d.carrier = NONE;
   c.freeIds.length = 0;
   c.leader = null;
@@ -378,6 +381,8 @@ function finish(c: ContestState, ctx: ContestCtx): ContestResult {
   const outnumbered = (l === 0 ? d.supportA : d.supportB) === NONE;
   const detail = supportIdx !== NONE && outnumbered ? 'support' : d.pinned === NONE ? 'scramble' : d.pinned === l ? 'pinned' : 'stick';
   ctx.emit(contestEvent(state, { type: 'battle', side: winner.side, playerId: winner.id, otherId: idOf(c, l), assistIds: [], detail }));
+  // Won off the man who was carrying it: a takeaway.
+  if (d.stripped === l) ctx.emit(contestEvent(state, { type: 'takeaway', side: winner.side, playerId: winner.id, otherId: idOf(c, l), assistIds: [], detail: 'battle' }));
   for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
   setCooldown(state, idOf(c, l), 'pokeCheck', T.loserPokeCooldown);
   if (d.clean === 1) return { winnerId: supportIdx !== NONE ? idOf(c, supportIdx) : winner.id, puck: 'toWinner' };

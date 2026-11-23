@@ -37,7 +37,9 @@ describe('team play', () => {
     const st = stateWith({ carrier: 'home', puckX: 0 });
     expect(sitBack(st, 'home')).toBe(1);
     st.score = { home: 5, away: 0 };
-    expect(sitBack(st, 'home')).toBeLessThan(1); expect(sitBack(st, 'home')).toBeGreaterThan(0); expect(sitBack(st, 'away')).toBe(1);
+    expect(sitBack(st, 'home')).toBeLessThan(1); expect(sitBack(st, 'home')).toBeGreaterThanOrEqual(0.8); expect(sitBack(st, 'away')).toBe(1);
+    st.score = { home: 2, away: 0 }; expect(sitBack(st, 'home')).toBe(1);
+    st.period = 3; expect(sitBack(st, 'home')).toBeLessThan(1);
   });
   it('forwards rotate in the offensive zone', () => {
     const spots = new Set<string>(); const st = stateWith({ carrier: 'home', puckX: 22 });

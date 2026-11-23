@@ -15,13 +15,13 @@ export const TUNING = {
     shotDistanceScale: 9,
     maxShotDistance: 25,
     /** An option's skill factor: base + perPoint * the rating that drives it. */
-    skill: { base: 0.81, perPoint: 0.005 },
+    skill: { base: 0.95, perPoint: 0.003 },
     /** The shoot option's own skill factor (shooting accuracy .6, power .4): base + perPoint * rating. */
     shootSkill: { base: 0.6, perPoint: 0.008 },
     /** Calm (scales shoot, pass and carry): 1 - pressure * (base - perPoise * poise). */
-    calm: { base: 0.66, perPoise: 0.003 },
+    calm: { base: 0.555, perPoise: 0.0015 },
     /** Error (relative, one sd) in how he judges a passing lane: base + perPoint * (100 - iq). */
-    laneNoise: { base: 0.06, perPoint: 0.002 },
+    laneNoise: { base: 0.09, perPoint: 0.001 },
     /** Speed cap while carrying: base + perPoint * puckHandling. */
     carrySpeed: { base: 0.86, perPoint: 0.001 },
     /** Base weight of each kind of option, before situation, skill and tendency. */
@@ -31,16 +31,6 @@ export const TUNING = {
     openNetShade: 0.6,
     /** Shoot weight is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
     shootPressure: 3.6,
-    /**
-     * Score effects on the shoot weight in a game that is no longer close: leading by L >= leadFrom scales it by
-     * max(leadMin, 1 - leadPerGoal * (L - leadFrom + 1)); trailing by D >= trailFrom by 1 + trailPerGoal * k, where
-     * k = min(D, trailMaxGoals) - trailFrom + 1, and the pressure power moves from shootPressure toward trailPressure
-     * by k / (trailMaxGoals - trailFrom + 1). By that same share times shootIn, a dump from the neutral zone goes at
-     * the net instead of a corner. In the third period a one- or two-goal margin scales it as the period runs out
-     * (progress 0..1): behind by 1 + latePush * progress (and the pressure power toward trailPressure by progress),
-     * ahead by 1 - lateSit * progress.
-     */
-    scoreEffects: { leadFrom: 3, leadPerGoal: 0.3, leadMin: 0.12, trailFrom: 4, trailPerGoal: 0.75, trailMaxGoals: 6, trailPressure: 1, shootIn: 0.6, latePush: 1, lateSit: 0.5 },
     /** Largest share any one kind of option (all passing lanes together count as one kind) may have of the draw. */
     maxShare: 0.97,
     /** Passes shorter or longer than this (m) are not considered. */
@@ -72,32 +62,35 @@ export const TUNING = {
 
   /** The night (game.ts): drawn once per game. */
   night: {
-    /** Each team's jump: a normal shift of its contest and faceoff ratings with this standard deviation (rating points). */
-    teamJumpSd: 12,
+    /**
+     * Each team's jump: a normal shift with this standard deviation (rating points) of its contest ratings and faceoffs
+     * only (not skating, passing, shooting or decisions), a small part of a 10-point talent gap.
+     */
+    teamJumpSd: 3,
     /** Each goalie's night (a hot or cold game): a normal shift of his save log-odds with this standard deviation. */
-    goalieSd: 0.75,
+    goalieSd: 0.2,
   },
 
   /** Skating (skating.ts): top speed (m/s) and acceleration (m/s^2), base plus per point of speed / acceleration. */
   skating: {
     topSpeed: { base: 7.62, perPoint: 0.016 },
-    accel: { base: 7.1, perPoint: 0.03 },
+    accel: { base: 7.8, perPoint: 0.02 },
   },
 
-  /** Team play (team-play.ts). */
-  teamPlay: {
-    /** A team leading by sitBackLead goals or more sits back: passive forecheck, its presser at 1 - sitBackPerGoal per goal of lead beyond one (at least sitBackMin) of his speed. */
-    sitBackLead: 3,
-    sitBackPerGoal: 0.15,
-    sitBackMin: 0.4,
-  },
+  /**
+   * Score effects (team-play.ts scoreMargin, brain, poke checks), kept to real-hockey size. A margin is comfortable from
+   * `lead` goals, or `lateLead` in the third period. The team comfortably ahead shoots at leaderShoot of normal and
+   * presses and pokes at sitBack of normal; the team comfortably behind shoots at trailerShoot; a team down by one in
+   * the third shoots up to 1 + latePush as the period runs out. The shoot factor never passes maxShoot.
+   */
+  scoreEffects: { lead: 3, lateLead: 2, leaderShoot: 0.85, sitBack: 0.85, trailerShoot: 1.2, latePush: 0.25, maxShoot: 1.3 },
 
   /** Passes and interceptions (actions.ts). */
   pass: {
     /** Speed (m/s): base plus per point of passing. */
     speed: { base: 13, perPoint: 0.09 },
     /** Direction error (rad, one standard deviation): a floor, per point of passing below 100, and at full pressure. */
-    error: { base: 0.023, perPoint: 0.0006, pressure: 0.03 },
+    error: { base: 0.032, perPoint: 0.0003, pressure: 0.03 },
     /** A pass stays "pending" (its receiver chases it) for its travel time plus this long (s). */
     graceSeconds: 1,
     /** An opponent this close (m) to a pass's path gets his one chance to intercept it. */
@@ -147,14 +140,14 @@ export const TUNING = {
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.2,
+      base: 2.05,
       perReactionSecond: 2.5,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
        * per * skillSpan * tanh((skill - 70) / skillSpan): a weak goalie leaks more than a strong one gains.
        */
-      perPoint: 0.03,
-      perPointAbove: 0.02,
+      perPoint: 0.025,
+      perPointAbove: 0.015,
       skillSpan: 25,
       screened: 0.6,
       /** Per m/s he is still moving when the puck arrives. */

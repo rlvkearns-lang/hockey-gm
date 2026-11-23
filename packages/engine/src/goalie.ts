@@ -302,6 +302,10 @@ export function resolveOnNet(
   const netX = end * GOAL;
   const fx = shot ? shot.from.x : netX - end * 3, fy = shot ? shot.from.y : ev.y;
   const distance = hypot2(netX - fx, ev.y - fy);
+  // A puck that was not shot (a pass or a loose puck sliding in) has been on its way since it was last let go: he has
+  // had that long to see it coming.
+  const rel = state.lastRelease;
+  const reactDistance = shot || rel === null ? distance : Math.max(distance, (state.tick - rel.tick) * DT * ev.speed);
 
   // How far the shot's line passes from his centre, plus how far he is from square to where it came from.
   const lx = netX - fx, ly = ev.y - fy;
@@ -309,7 +313,7 @@ export function resolveOnNet(
   const offLine = Math.abs((g.pos.x - fx) * ly - (g.pos.y - fy) * lx) / ll;
   const squareErr = Math.abs(wrap(Math.atan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
   const p = saveChance({
-    goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance,
+    goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
     screened: state.screenedUntilTick[defSide] > state.tick, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
     night: state.goalieNight[defSide],
   });

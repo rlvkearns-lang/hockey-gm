@@ -4,9 +4,10 @@ import { battleWinShareByType, goalsPer60ByType, runGames, setup, summarise, win
 
 /**
  * 300 games of two overall-70 teams (fresh rosters every game), and 300 of a 76 against a 66, played on worker
- * threads (runGames caches them for the file). The first test of each set pays for its games.
+ * threads (runGames caches them for the file). The first test of each set pays for its games: about 1.2 s a game, so
+ * up to 6 minutes on a single core; the timeout leaves room for a slow one.
  */
-const GAMES_TIMEOUT = 300_000;
+const GAMES_TIMEOUT = 900_000;
 const CACHED_TIMEOUT = 10_000;
 
 describe('calibration', () => {
@@ -22,6 +23,11 @@ describe('calibration', () => {
     expect(m.icingsTotal).toBeGreaterThan(3);    expect(m.icingsTotal).toBeLessThan(13);
     expect(m.tieShare).toBeGreaterThan(0.15);    expect(m.tieShare).toBeLessThan(0.30);
   }, GAMES_TIMEOUT);
+  it('no freak scores: nothing like 15 goals in a game, and few 0-0 games', () => {
+    const totals = runGames(300).map((r) => r.score.home + r.score.away);
+    expect(Math.max(...totals)).toBeLessThan(15);
+    expect(runGames(300).filter((r) => r.score.home === 0 && r.score.away === 0).length).toBeLessThanOrEqual(5);
+  }, CACHED_TIMEOUT);
   it('the better team wins more, and loses plenty', () => { const w = winShare(runGames(300, { homeOverall: 76, awayOverall: 66 })); expect(w.home).toBeGreaterThan(w.away + 0.12); expect(w.away).toBeGreaterThan(0.15); }, GAMES_TIMEOUT);
   it('snipers outscore grinders per 60 minutes', () => { const g = goalsPer60ByType(runGames(300)); expect(g['Sniper']).toBeGreaterThan(g['Grinder']! * 1.5); }, CACHED_TIMEOUT);
   it('heavier, stronger players win more battles, under 75%', () => { const b = battleWinShareByType(runGames(300)); expect(b['Power Forward']).toBeGreaterThan(b['Speedster']! + 0.05); expect(b['Power Forward']).toBeLessThan(0.75); }, CACHED_TIMEOUT);

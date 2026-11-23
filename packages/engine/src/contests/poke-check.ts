@@ -61,8 +61,9 @@ export const pokeCheckContest: Contest = {
     if (onCooldown(state, s.id, KIND)) return null;
     // He makes up his mind once per cooldown: poke now, or keep his position.
     setCooldown(state, s.id, KIND, T.cooldownSeconds);
-    // A team sitting on a big lead (sitBack) gambles for the puck less.
-    return ctx.rng.next() < pokeAttemptChance(ctx.defs.get(s.id)!) * sitBack(state, s.side) ? [s.id, carrier.id] : null;
+    // A team comfortably ahead (sitBack) gambles for the puck a little less; never always or never.
+    const p = Math.max(0.03, Math.min(0.97, pokeAttemptChance(ctx.defs.get(s.id)!) * sitBack(state, s.side)));
+    return ctx.rng.next() < p ? [s.id, carrier.id] : null;
   },
 
   start(ctx, participants) {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { simulateGame } from '../../src/game';
 import { bounceChance, hitAttemptChance, hitChance } from '../../src/contests/hit';
-import { def, hitOutcomes, hitsPer60, hitThatLands, runHit, setup, share, st as skaterState, target, targetsDuringHitClose } from '../helpers';
+import { def, hitOutcomes, landedHitEvents, hitsPer60, hitThatLands, runHit, setup, share, st as skaterState, target, targetsDuringHitClose } from '../helpers';
 
 /** Whole-game tests take about 1 s; this leaves room for a loaded machine. */
 const GAME_TIMEOUT = 20_000;
@@ -28,6 +28,10 @@ describe('hits', () => {
     expect(o.absorbed! + o.bounced!).toBeGreaterThan(50);
     expect(o.bounced! / (o.absorbed! + o.bounced!)).toBeLessThan(0.3);
     expect(bounceChance(0.9)).toBeGreaterThanOrEqual(0.03); expect(bounceChance(0.1)).toBeLessThanOrEqual(0.97);
+  });
+  it('a landed hit that knocks the puck off the carrier is the hitter\'s takeaway', () => {
+    const e = landedHitEvents();
+    expect(e.find((x) => x.type === 'takeaway')).toMatchObject({ playerId: 'away-C', otherId: 'home-C', detail: 'hit' });
   });
   it('a landed hit puts the target down and frees the puck', () => { const st = hitThatLands(); expect(target(st).downT).toBeGreaterThan(0.5); expect(st.carrierId).toBeNull(); });
   it('the target keeps playing while the hitter closes: team play still moves his target', () => {
