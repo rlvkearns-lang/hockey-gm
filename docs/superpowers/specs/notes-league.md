@@ -162,3 +162,11 @@ Proposed shape **[my call]**:
 - AHL games can be watched in 3D like any other, or followed through results and staff reports.
 - The assistant GM can manage the farm team entirely, bringing only call-up recommendations and injury replacements; handed off by default **[my call]**.
 - Prospects' feelings apply: stuck in the minors too long he gets frustrated; called up and scratched every night he may ask to go back down.
+
+## Ways to start a new game (owner agreed, 2026-11-23)
+
+- Take over a real team; start an expansion team (both from earlier notes).
+- Fantasy draft: every player goes into one pool and all teams draft from scratch. Likely the best start for the friends league.
+- Fictional league: made-up teams, cities and players. Also the fallback if real roster data proves hard to get.
+- Unemployed GM: start with no team and wait for an offer; pairs with owner mode.
+- Not included: historical seasons (each needs its own roster data).
