@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DT, RINK, type GameEvent, type GameSetup, type GameState, type GoalieState, type Side, type SkaterState } from '@hockey/engine';
 import {
-  BODY_PASS, GOALIE_OVERLAYS, initialGoalieAnim, initialSkaterAnim, OVERLAYS, poseGoalie, poseSkater, refreshGoalie, refreshSkater,
+  BODY_PASS, goalieHeldPuck, GOALIE_OVERLAYS, initialGoalieAnim, initialSkaterAnim, OVERLAYS, poseGoalie, poseSkater, refreshGoalie, refreshSkater,
   stepGoalieAnim, stepSkater, turnRateOf,
   type AnimContext, type BodyPass, type DrawnBody, type GoalieAnim, type GoalieOverlay, type GoalieSample, type Overlay, type SkaterAnim,
   type SkaterSample,
@@ -223,8 +223,10 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     puck: { engine: { x: 0, y: 0, z: 0 }, drawn: { x: 0, y: 0, z: 0 }, carrierId: null },
     contests: [], timeline, rink: RINK, defends: { home: -1, away: 1 },
   };
+  /** Where a goalie holds the puck this frame (filled after the goalies are posed). */
+  const heldPuck = { x: 0, y: 0, z: 0 };
   const puckInput: PuckDrawInput = {
-    tick: 0, alpha: 0, prevCarrier: null, nextCarrier: null, engine: { x: 0, z: 0 }, height: 0, nextPuck: { x: 0, z: 0 },
+    tick: 0, alpha: 0, prevCarrier: null, nextCarrier: null, engine: { x: 0, z: 0 }, height: 0, nextPuck: { x: 0, z: 0 }, held: null,
     holder: (id) => {
       const f = byId.get(id);
       return f && 'hold' in f && f.view.onIce ? f.hold : null;
@@ -304,6 +306,8 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
   function poseGoalieFig(fig: GoalieFig): void {
     const s = fig.sample!, b = fig.body;
     fig.pose = poseGoalie(fig.anim, s, ctx, fig.dims, goalieOverlays);
+    // A goalie holding the puck (after a save or a cover): the puck machine draws it where he has it.
+    if (goalieHeldPuck(fig.anim, s, ctx, fig.pose, heldPuck)) puckInput.held = heldPuck;
     b.onIce = true; b.pos.x = s.pos.x; b.pos.y = s.pos.y; b.facing = s.facing;
     b.offset.x = 0; b.offset.z = 0;
   }
@@ -397,6 +401,7 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     for (const fig of skaters) if (fig.sample) fig.anim = stepSkater(fig.anim, fig.sample, ctx, h, skaterOverlays);
     for (const fig of goalies) fig.anim = stepGoalieAnim(fig.anim, fig.sample!, ctx, h, goalieOverlays);
     for (const fig of skaters) poseSkaterFig(fig);
+    puckInput.held = null;
     for (const fig of goalies) poseGoalieFig(fig);
     bodyPass(bodies, ctx, h);
     for (const fig of skaters) drawSkater(fig);

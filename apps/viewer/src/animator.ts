@@ -5,10 +5,13 @@ import { stickhandle } from './carry';
 import { gaitRaw, initialGait, stepGait, type GaitState, type Motion } from './gait';
 import { fitGoalie, goalieMotion, goalieRaw, initialGoalieGait, mixGoalieRaw, stepGoalie, type GoalieFigurePose, type GoalieGait } from './goalie-pose';
 import { faceoffCrouch } from './overlays/faceoff';
+import { GOALIE_CATCHES, goalieReach, goalieTrack } from './overlays/goalie';
+import { beatenGoalie, blockOverlay, celebrateOverlay } from './overlays/reactions';
 import { STICK_OVERLAYS } from './overlays/stick';
 import { fitBody, mixRaw, type SkaterPose } from './pose-mix';
 
 export * from './anim-context';
+export { GOALIE_CATCHES, goalieHeldPuck } from './overlays/goalie';
 
 /**
  * The animator (pure: no three.js, no DOM): turns each figure's engine sample, the frame's context and the event
@@ -28,7 +31,7 @@ export * from './anim-context';
  */
 
 /** The registered overlays, in the order they are applied (later ones see the earlier ones' result). */
-export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, ...STICK_OVERLAYS];
+export const OVERLAYS: readonly Overlay[] = [faceoffCrouch as Overlay, ...STICK_OVERLAYS, blockOverlay as Overlay, celebrateOverlay as Overlay];
 
 export function initialSkaterAnim(): SkaterAnim {
   return { gait: initialGait(), fresh: true, carrying: false, slots: {} };
@@ -99,8 +102,8 @@ export function poseSkater(anim: SkaterAnim, sample: SkaterSample, ctx: AnimCont
 // ---------------------------------------------------------------------------------------------------------------
 // Goalies
 
-/** The registered goalie overlays, in the order they are applied (none yet). */
-export const GOALIE_OVERLAYS: readonly GoalieOverlay[] = [];
+/** The registered goalie overlays, in the order they are applied. */
+export const GOALIE_OVERLAYS: readonly GoalieOverlay[] = [goalieTrack, goalieReach as GoalieOverlay, beatenGoalie as GoalieOverlay];
 
 /**
  * The pass over all drawn bodies between posing and drawing (Task 4 pushes overlapping bodies apart here). For now
@@ -150,15 +153,15 @@ export function stepGoalieAnim(anim: GoalieAnim, sample: GoalieSample, ctx: Anim
 }
 
 /**
- * A goalie's pose: the gait's raw pose, each goalie overlay mixed in by its weight, solved once. The engine's goalies
- * all catch with the left hand.
+ * A goalie's pose: the gait's raw pose, each goalie overlay mixed in by its weight, solved once, for the hand
+ * GOALIE_CATCHES (overlays/goalie.ts: the engine's glove side is drawn on the figure's right).
  */
 export function poseGoalie(anim: GoalieAnim, sample: GoalieSample, ctx: AnimContext, dims: BodyDims, overlays: readonly GoalieOverlay[] = GOALIE_OVERLAYS): GoalieFigurePose {
-  let raw = goalieRaw(anim.gait, dims, 'L');
+  let raw = goalieRaw(anim.gait, dims, GOALIE_CATCHES);
   for (const ov of overlays) {
     const w = ov.weight(anim, sample, ctx);
     if (!(w > 0)) continue;
     raw = mixGoalieRaw(raw, ov.apply(raw, anim, sample, ctx, dims), Math.min(1, w));
   }
-  return fitGoalie(raw, dims, 'L');
+  return fitGoalie(raw, dims, GOALIE_CATCHES);
 }

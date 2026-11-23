@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DT, type GameState } from '@hockey/engine';
 import type { ArenaQuality } from './arena';
-import type { CameraName } from './cameras';
+import type { CameraName, CameraPose } from './cameras';
 import { forgetTarget, initialOperator, stepOperator, withCamera, type OperatorInput } from './operator';
 import { createControls } from './page/controls';
 import { $, createHud } from './page/hud';
@@ -105,6 +105,8 @@ function posNow(): number {
 }
 
 const puckV = new THREE.Vector3();
+/** A fixed camera the screenshot script asked for (hook.aimAt), in place of the operator's; null normally. */
+let scriptCamera: CameraPose | null = null;
 
 /** Point the camera for the current frame; `dt` is the game time just played (0 when paused); `snap` cuts to it. */
 function aimCamera(dt: number, snap = false): void {
@@ -125,7 +127,7 @@ function aimCamera(dt: number, snap = false): void {
   if (followOn && fv) input.followed = { pos: { x: fv.position.x, y: 0, z: fv.position.z }, facing: fv.facing, vel: velocityOf(f.prev, f.next, a, followId) };
   const r = stepOperator(operator, input, dt);
   operator = r.state;
-  renderer.aim(r.pose);
+  renderer.aim(scriptCamera ?? r.pose);
   // Draw the puck large enough to find from far away, and true to size up close.
   gs.setPuckScale(renderer.puckScaleAt(puckV));
   // The overhead camera hangs above the scoreboard; it would hide centre ice.
@@ -265,6 +267,8 @@ const hook = {
     playing = was;
   },
   renderOnce: (): void => { renderer.render(); },
+  /** For the screenshot script: hold the camera at `pose` (world) until called with null (the operator's again). */
+  aimAt: (pose: CameraPose | null): void => { scriptCamera = pose; aimCamera(0); },
   grab: (): string => renderer.grab(),
   fps: (): number => fps,
   info: () => {

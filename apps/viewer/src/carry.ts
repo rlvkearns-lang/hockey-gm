@@ -181,6 +181,13 @@ export type PuckDrawInput = {
   prevCarrier: string | null; nextCarrier: string | null;
   engine: IcePoint; height: number; nextPuck: IcePoint;
   holder(id: string): { blade: IcePoint; position: IcePoint } | null;
+  /**
+   * Where a goalie holds the puck this frame (world: x, z on the ice, y its height), or null (absent: nobody does):
+   * from the moment a saved shot crosses his plane, in his glove or under it after a frozen save, leaving the saving
+   * part on a rebound (overlays/goalie.ts goalieHeldPuck). The one exception to a loose puck being drawn exactly at the
+   * engine's; it ends where the engine's puck is (or at the faceoff's cut).
+   */
+  held?: { x: number; y: number; z: number } | null;
 };
 
 /**
@@ -197,6 +204,17 @@ export type PuckDrawInput = {
  */
 export function stepPuckDraw(s: PuckDraw, input: PuckDrawInput, dt: number): PuckDraw {
   const { engine, alpha: a } = input;
+  const held = input.held;
+  if (held) {
+    // The goalie has it: drawn where he holds it; nothing to ease from once he lets it go (it is then the engine's).
+    const h = Math.max(0, fin(dt));
+    const speed = s.fresh ? 0 : h > 0 ? Math.hypot(held.x - s.drawn.x, held.z - s.drawn.z) / h : s.speed;
+    return {
+      fresh: false, blend: { w: 0, from: { x: held.x, z: held.z } }, pickup: { id: '', ox: 0, oz: 0, v: 0 },
+      release: { active: false, tick: -1, id: '', ox: 0, oz: 0, a0: 0 }, blade: { id: '', x: 0, z: 0 },
+      drawn: { x: held.x, y: held.y, z: held.z }, speed,
+    };
+  }
   const A = input.prevCarrier, B = input.nextCarrier;
   const height = input.height;
   let blend: CarryBlend = { w: s.blend.w, from: { x: s.blend.from.x, z: s.blend.from.z } };

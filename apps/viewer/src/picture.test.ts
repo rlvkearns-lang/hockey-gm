@@ -23,9 +23,12 @@ import { sharedPlayback } from './test/game';
 // Re-pinned by Task 2's fix round 2 (a stick held above the hands in pose-mix.ts fitBody; the slapshot's and the
 // one-timer's swings in overlays/stick.ts): 5: 4942b8aaaf7560b6 and 42: 55d09213ba0e0c48 before, which the previous
 // pose-mix.ts and overlays/stick.ts still give.
+// Re-pinned by Task 3 (saves that reach the puck, the goalie's glove on the hand the engine's glove saves come to, the
+// held puck, blocks and goal reactions): 5: 073086cad08ddce8 and 42: d7a3e1ad01ac907f before, which this code still
+// gives with the skater overlays block and celebrate, every goalie overlay and GOALIE_CATCHES 'R' taken out.
 const PICTURE_HASH: Record<number, string> = {
-  5: '073086cad08ddce8',
-  42: 'd7a3e1ad01ac907f',
+  5: '0c5debb176ec837d',
+  42: '4a7c530204679412',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */
