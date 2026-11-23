@@ -18,21 +18,27 @@ export type Vec3 = { x: number; y: number; z: number };
 /**
  * His motion in his own frame. `forward` and `lateral` are the velocity components along his facing and toward +z
  * (m/s); `accelAlong` is the rate of change of speed (m/s^2); `turnRate` is the rate of change of facing (rad/s,
- * positive turning toward +z); `facing` is the engine facing.
+ * positive turning toward +z); `facing` is the engine facing. Non-finite fields are read as 0.
  */
 export type Motion = { speed: number; forward: number; lateral: number; accelAlong: number; turnRate: number; facing: number; down: boolean };
 
 export type Style = 'stand' | 'glide' | 'stride' | 'crossover' | 'backward' | 'stop' | 'down';
 export const STYLES: readonly Style[] = ['stand', 'glide', 'stride', 'crossover', 'backward', 'stop', 'down'];
 
+/** One style (and side) in a blended pose, with its share. */
+export type MixPart = { style: Style; side: 1 | -1; w: number };
+
 /**
  * `phase` counts stride cycles (it is not wrapped; poses use its fractional part). One cycle is a push with each leg
  * (stride), one crossover (crossover), or a C-cut with each leg (backward). `styleT` is seconds in the current style.
  * `lean` (pitch from acceleration) and `roll` (into a turn) ease toward their targets.
  * The optional fields are working values kept by stepGait; poseOf reads them when present:
- * `acc` smoothed accelAlong, `turn` smoothed turnRate, `side` which way a crossover crosses or a stop turns the skates
- * (+1 toward +z), `travel` his smoothed travel direction (body-frame yaw, held while he is
- * nearly still), and `from`/`fromSide` the style he is blending out of over the first BLEND seconds of `style`.
+ * `acc` smoothed accelAlong (impulses left out), `speed` smoothed speed (sets how deep a stop or how long a stride
+ * is, so a collision's jolt does not jerk the pose), `turn` smoothed turnRate, `travel` his smoothed travel direction
+ * (body-frame yaw, held while he is nearly still), `side` which way a crossover crosses or a stop turns the skates
+ * (+1 toward +z), `passive` seconds left in which he is being carried by a shove (no effort styles start), and the
+ * blend: `from` is the pose shown when the style (or side) last changed, as a mix of styles, which fades into the
+ * current style over `blendDur` seconds as `blendT` runs (without `blendT`, poseOf uses `styleT`).
  */
 export type GaitState = {
   phase: number;
@@ -41,11 +47,14 @@ export type GaitState = {
   lean: number;
   roll: number;
   acc?: number;
+  speed?: number;
   turn?: number;
   travel?: number;
   side?: 1 | -1;
-  from?: Style;
-  fromSide?: 1 | -1;
+  passive?: number;
+  from?: readonly MixPart[];
+  blendT?: number;
+  blendDur?: number;
 };
 
 /**
@@ -66,17 +75,28 @@ export type Pose = { hipY: number; pitch: number; roll: number; yaw: number; leg
 
 /**
  * Tunables. Thresholds come in enter/exit pairs (hysteresis); "off" is the angle between his travel and his facing.
- * See the task 2 report for the reasoning behind each.
+ * "Raw" acceleration is this frame's accelAlong (not lagged); "smoothed" is GaitState.acc. See the task 2 report.
  */
 export const GAIT = {
   /** Smoothing time constants (s). */
   accTau: 0.4,
   turnTau: 0.3,
   travelTau: 0.15,
+  speedTau: 0.15,
+  /** Fastest the travel direction his skates follow may turn (rad/s): a skater turns his feet only so fast. */
+  travelMaxRate: 4,
   leanTau: 0.25,
   rollTau: 0.2,
-  /** Raw acceleration is clamped to this (m/s^2) before smoothing, so one tick of a body shove cannot read as a push. */
+  /** Raw acceleration is clamped to this (m/s^2) before smoothing. */
   accClamp: 10,
+  /**
+   * Raw acceleration above this (m/s^2) is an impulse from another body, not effort (the engine's own skating tops out
+   * near 10): it is left out of the smoothed value, and for `passiveT` seconds (or until he accelerates by himself,
+   * raw above `effortAccel`) no stride, crossover or stop starts.
+   */
+  impulseAccel: 14,
+  passiveT: 0.6,
+  effortAccel: 1,
   /** Seconds a style is held before an ordinary change; down, stop and getting up are immediate. */
   minDwell: 0.45,
   /**
@@ -84,33 +104,46 @@ export const GAIT = {
    * skates down in a stride, the outside skate planted in a crossover), so the blend starts from a settled pose.
    */
   maxBreakWait: 0.4,
-  /** Seconds to blend from the old style's pose into the new one's. */
+  /** Seconds to blend from the pose shown into a new style's; falling and getting up take `blendDown`. */
   blend: 0.35,
+  blendDown: 0.65,
   /** Speed (m/s) above which he is moving rather than standing. */
   moveEnter: 0.9,
   moveExit: 0.5,
-  /** Smoothed acceleration (m/s^2) that makes him stride. */
+  /** Smoothed acceleration (m/s^2) that makes him stride; starting also needs raw above strideRawMin. */
   strideEnter: 2.0,
   strideExit: 0.5,
+  strideRawMin: -0.5,
   /** Travel off facing beyond which he skates backward. */
   backEnter: (115 * Math.PI) / 180,
   backExit: (100 * Math.PI) / 180,
   /** Speed (m/s) he must be doing to start skating backward (slower, travel direction is too noisy to read). */
   backMinSpeed: 1.2,
-  /** Braking (m/s^2) for a stop, and the speed he must be doing to start one. */
+  /** Smoothed braking (m/s^2) for a stop (raw also below stopRawMax), and the speed he must be doing to start one. */
   stopEnter: -4,
   stopExit: -1.5,
+  stopRawMax: -2,
   stopMinSpeed: 1.5,
-  /** Travel off facing beyond which he crosses over sideways, unless his speed is bleeding off faster than crossLatMinAcc. */
+  /** Travel off facing beyond which he crosses over sideways. */
   crossOffEnter: (55 * Math.PI) / 180,
   crossOffExit: (40 * Math.PI) / 180,
-  crossLatMinAcc: -3,
+  /** Starting a crossover needs raw acceleration above this (his speed is held, not bleeding off as after a shove). */
+  crossRawMin: -2,
+  /** Starting a turning crossover needs smoothed acceleration above crossTurnMinAcc; one holds until a stop takes over. */
+  crossTurnMinAcc: -2,
   /** Turn rate (rad/s) above which a turn at speed is taken with crossovers. */
   crossTurnEnter: 1.0,
   crossTurnExit: 0.7,
   crossTurnSpeedEnter: 3,
   crossTurnSpeedExit: 2.5,
-  crossTurnMinAcc: -2,
+  /**
+   * The skates follow his line of travel exactly while it is within this angle (rad) of his facing (hips opening by
+   * half of it), then turn smoothly back toward his facing as it swings further round (forward styles), or the same
+   * about his reversed travel (backward).
+   */
+  skateFollow: 1.75,
+  /** Height (m) over which a lifting skate stops holding the pelvis down. */
+  liftFade: 0.06,
 } as const;
 
 const TAU = 2 * Math.PI;
@@ -122,12 +155,14 @@ const frac = (v: number): number => v - Math.floor(v);
 const ease = (v: number, target: number, tau: number, dt: number): number => v + (target - v) * (1 - Math.exp(-dt / tau));
 const wrap = (a: number): number => { const w = a - TAU * Math.round(a / TAU); return w <= -Math.PI ? w + TAU : w; };
 const sign = (v: number): 1 | -1 => (v < 0 ? -1 : 1);
+const fin = (v: number): number => (Number.isFinite(v) ? v : 0);
 const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
 const add = (a: Vec3, b: Vec3): Vec3 => v3(a.x + b.x, a.y + b.y, a.z + b.z);
 const sub = (a: Vec3, b: Vec3): Vec3 => v3(a.x - b.x, a.y - b.y, a.z - b.z);
 const mul = (a: Vec3, k: number): Vec3 => v3(a.x * k, a.y * k, a.z * k);
 const len = (a: Vec3): number => Math.hypot(a.x, a.y, a.z);
-const lerp3 = (a: Vec3, b: Vec3, t: number): Vec3 => v3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
+/** Turn a body-frame point by heading h about the vertical (x toward +z). */
+const turn = (v: Vec3, h: number): Vec3 => { const c = Math.cos(h), s = Math.sin(h); return v3(v.x * c - v.z * s, v.y, v.x * s + v.z * c); };
 
 // ---------------------------------------------------------------------------------------------------------------
 // Motion and gait state
@@ -148,6 +183,14 @@ export function motionOf(prev: SkaterState, next: SkaterState, dt: number): Moti
   };
 }
 
+/** Motion with every non-finite field read as 0. */
+function sane(m: Motion): Motion {
+  return {
+    speed: Math.abs(fin(m.speed)), forward: fin(m.forward), lateral: fin(m.lateral), accelAlong: fin(m.accelAlong),
+    turnRate: fin(m.turnRate), facing: fin(m.facing), down: m.down === true,
+  };
+}
+
 export function initialGait(): GaitState {
   return { phase: 0, style: 'stand', styleT: 10, lean: 0, roll: 0, acc: 0, turn: 0, side: 1 };
 }
@@ -157,11 +200,20 @@ const offOf = (m: Motion): number => (m.speed > 1e-6 ? Math.atan2(Math.abs(m.lat
 /** His travel direction as a body-frame yaw. */
 const travelYawOf = (m: Motion): number => (m.speed > 1e-6 ? Math.atan2(m.lateral, m.forward) : 0);
 
-function classify(cur: Style, m: Motion, acc: number, turn: number): Style {
+/** Follow r exactly within skateFollow, then turn smoothly back to 0 at r = +-PI (continuous all the way round). */
+function follow(r: number): number {
+  const a = GAIT.skateFollow;
+  return r * (1 - smooth((Math.abs(r) - a) / (Math.PI - a)));
+}
+/** Heading of his skates for travel `ty` in the forward styles (along travel), and backward (along reversed travel). */
+export const forwardHeading = (ty: number): number => follow(wrap(ty));
+export const backwardHeading = (ty: number): number => follow(wrap(ty + Math.PI));
+
+function classify(cur: Style, m: Motion, acc: number, turn: number, passive: boolean): Style {
   const G = GAIT;
   if (m.down) return 'down';
-  const sp = m.speed, off = offOf(m);
-  const pushing = acc > (cur === 'stride' ? G.strideExit : G.strideEnter);
+  const sp = m.speed, off = offOf(m), raw = m.accelAlong;
+  const pushing = cur === 'stride' ? acc > G.strideExit : acc > G.strideEnter && raw > G.strideRawMin && !passive;
   const backward = off > (cur === 'backward' ? G.backExit : G.backEnter);
   if (sp <= (cur === 'stand' ? G.moveEnter : G.moveExit)) {
     // Barely moving: he stands, unless he is clearly pushing off (a start from rest).
@@ -172,11 +224,12 @@ function classify(cur: Style, m: Motion, acc: number, turn: number): Style {
   const notBehind = off < G.backEnter;
   if (cur === 'stop' && acc < G.stopExit && notBehind) return 'stop';
   if (backward && (cur === 'backward' || sp > G.backMinSpeed)) return 'backward';
-  if (sp > G.stopMinSpeed && acc < G.stopEnter && notBehind) return 'stop';
+  if (!passive && sp > G.stopMinSpeed && acc < G.stopEnter && raw < G.stopRawMax && notBehind) return 'stop';
   const inCross = cur === 'crossover';
-  const sideways = off > (inCross ? G.crossOffExit : G.crossOffEnter) && acc > G.crossLatMinAcc;
+  const canStart = !passive && raw > G.crossRawMin && raw < G.impulseAccel;
+  const sideways = off > (inCross ? G.crossOffExit : G.crossOffEnter) && (inCross || canStart);
   const hardTurn = sp > (inCross ? G.crossTurnSpeedExit : G.crossTurnSpeedEnter)
-    && Math.abs(turn) > (inCross ? G.crossTurnExit : G.crossTurnEnter) && acc > G.crossTurnMinAcc;
+    && Math.abs(turn) > (inCross ? G.crossTurnExit : G.crossTurnEnter) && (inCross || (canStart && acc > G.crossTurnMinAcc));
   if (sideways || hardTurn) return 'crossover';
   return pushing ? 'stride' : 'glide';
 }
@@ -211,7 +264,7 @@ function phaseRate(style: Style, m: Motion, acc: number): number {
       return pushes / 2;
     }
     case 'glide': return 0.2; // slow weight shifts
-    case 'crossover': return clamp(0.8 + 0.1 * m.speed, 0.8, 1.7);
+    case 'crossover': return clamp(0.8 + 0.07 * m.speed, 0.8, 1.4);
     case 'backward': return (0.5 + 0.05 * m.speed) * backEffort(acc);
     default: return 0;
   }
@@ -221,50 +274,87 @@ function phaseRate(style: Style, m: Motion, acc: number): number {
 function atBreak(style: Style, phase: number): boolean {
   const q = frac(phase);
   if (style === 'stride') return q < 0.1 || (q >= 0.5 && q < 0.6);
-  if (style === 'crossover') return q >= 0.45 && q < 0.85;
+  if (style === 'crossover') return q >= 0.45 && q < 0.75;
   return true;
 }
 
-export function stepGait(g: GaitState, m: Motion, dt: number): GaitState {
+/** Share of the current style in the pose shown (the rest is `from`). */
+function blendWeight(g: GaitState): number {
+  if (!g.from || g.from.length === 0) return 1;
+  return smooth((g.blendT ?? g.styleT) / (g.blendDur ?? GAIT.blend));
+}
+
+/** The pose shown now, as a mix of styles: `from` faded by the blend, plus the current style. */
+function shownMix(g: GaitState): MixPart[] {
+  const w = blendWeight(g), parts: MixPart[] = [];
+  const put = (style: Style, side: 1 | -1, share: number): void => {
+    if (share <= 1e-6) return;
+    const same = parts.find((p) => p.style === style && p.side === side);
+    if (same) same.w += share; else parts.push({ style, side, w: share });
+  };
+  if (w < 1) for (const p of g.from!) put(p.style, p.side, p.w * (1 - w));
+  put(g.style, g.side ?? 1, w);
+  return parts;
+}
+
+export function stepGait(g: GaitState, motion: Motion, dt: number): GaitState {
+  const m = sane(motion);
   const h = clamp(Number.isFinite(dt) ? dt : 0, 0, 0.25);
-  const acc = ease(g.acc ?? 0, clamp(m.accelAlong, -GAIT.accClamp, GAIT.accClamp), GAIT.accTau, h);
-  const turn = ease(g.turn ?? 0, m.turnRate, GAIT.turnTau, h);
+  const raw = m.accelAlong;
+  const impulse = raw > GAIT.impulseAccel;
+  let passive = Math.max(0, (g.passive ?? 0) - h);
+  if (impulse) passive = GAIT.passiveT;
+  else if (raw > GAIT.effortAccel) passive = 0;
+  const acc = ease(fin(g.acc ?? 0), impulse ? 0 : clamp(raw, -GAIT.accClamp, GAIT.accClamp), GAIT.accTau, h);
+  const turnRate = ease(fin(g.turn ?? 0), m.turnRate, GAIT.turnTau, h);
   const side = g.side ?? 1;
   const ty = travelYawOf(m);
-  const travel = m.speed > GAIT.moveExit ? (g.travel ?? ty) + wrap(ty - (g.travel ?? ty)) * (1 - Math.exp(-h / GAIT.travelTau)) : g.travel ?? 0;
+  const held = fin(g.travel ?? ty);
+  const step = clamp(wrap(ty - held) * (1 - Math.exp(-h / GAIT.travelTau)), -GAIT.travelMaxRate * h, GAIT.travelMaxRate * h);
+  const travel = m.speed > GAIT.moveExit ? held + step : held;
 
-  let want = classify(g.style, m, acc, turn);
+  let want = classify(g.style, m, acc, turnRate, passive > 0);
   const urgent = want === 'down' || g.style === 'down' || want === 'stop';
-  if (want !== g.style && !urgent && (g.styleT < GAIT.minDwell || (!atBreak(g.style, g.phase) && g.styleT < GAIT.minDwell + GAIT.maxBreakWait))) want = g.style;
+  // Times are taken at the end of this step, so a change lands on the first frame at or after its moment.
+  const inStyle = g.styleT + h;
+  if (want !== g.style && !urgent && (inStyle < GAIT.minDwell || (!atBreak(g.style, g.phase) && inStyle < GAIT.minDwell + GAIT.maxBreakWait))) want = g.style;
 
   let wantSide = side;
-  if (want === 'crossover') wantSide = crossSide(m, turn, side, g.style !== 'crossover');
-  else if (want === 'stop' && g.style !== 'stop') wantSide = stopSide(travel, turn);
+  if (want === 'crossover') wantSide = crossSide(m, turnRate, side, g.style !== 'crossover');
+  else if (want === 'stop' && g.style !== 'stop') wantSide = stopSide(travel, turnRate);
   else if (want === 'stop' && Math.abs(travel) > 1.2 && sign(travel) === side) {
     // His travel has swung well round to the side his toes point: turn the skates the other way.
-    wantSide = stopSide(travel, turn);
+    wantSide = stopSide(travel, turnRate);
   }
-  if (want === 'crossover' && g.style === 'crossover' && wantSide !== side && g.styleT < GAIT.minDwell) wantSide = side;
+  if (want === g.style && wantSide !== side && inStyle < GAIT.minDwell) wantSide = side;
 
-  const changed = want !== g.style || wantSide !== side;
+  const styleChanged = want !== g.style;
+  const changed = styleChanged || wantSide !== side;
   const next: GaitState = {
     phase: g.phase + phaseRate(want, m, acc) * h,
     style: want,
-    styleT: changed ? 0 : g.styleT + h,
-    lean: ease(g.lean, want === 'down' ? 0 : clamp(0.045 * acc, -0.25, 0.35), GAIT.leanTau, h),
-    roll: ease(g.roll, want === 'down' || m.speed < GAIT.moveExit ? 0 : clamp(0.85 * Math.atan((m.speed * turn) / 9.81), -0.6, 0.6), GAIT.rollTau, h),
+    // A side change keeps the style's clock (and so its dwell) running; only the blend restarts.
+    styleT: styleChanged ? 0 : g.styleT + h,
+    lean: ease(fin(g.lean), want === 'down' ? 0 : clamp(0.045 * acc, -0.25, 0.35), GAIT.leanTau, h),
+    roll: ease(fin(g.roll), want === 'down' || m.speed < GAIT.moveExit ? 0 : clamp(0.85 * Math.atan((m.speed * turnRate) / 9.81), -0.6, 0.6), GAIT.rollTau, h),
     acc,
-    turn,
+    speed: ease(fin(g.speed ?? m.speed), m.speed, GAIT.speedTau, h),
+    turn: turnRate,
     travel: wrap(travel),
     side: wantSide,
   };
+  if (passive > 0) next.passive = passive;
   if (changed) {
-    // A blend interrupted before it is half done keeps blending from the style it started from.
-    const early = g.from !== undefined && smooth(g.styleT / GAIT.blend) < 0.5;
-    next.from = early ? g.from : g.style;
-    next.fromSide = early ? g.fromSide ?? side : side;
+    // Blend from exactly the pose shown at this moment, whatever blend was under way.
+    const from = shownMix(g);
+    next.from = from;
+    next.blendT = 0;
+    next.blendDur = want === 'down' || from.some((p) => p.style === 'down') ? GAIT.blendDown : GAIT.blend;
+  } else if (g.from && blendWeight(g) < 1) {
+    next.from = g.from;
+    next.blendT = (g.blendT ?? g.styleT) + h;
+    next.blendDur = g.blendDur ?? GAIT.blend;
   }
-  else if (g.from !== undefined && next.styleT < GAIT.blend) { next.from = g.from; next.fromSide = g.fromSide ?? side; }
   return next;
 }
 
@@ -307,6 +397,11 @@ export function shoulderJoint(p: Pick<Pose, 'hipY' | 'pitch' | 'roll'>, side: 0 
 /** An arm hanging at angle `a` from straight down (forward positive), `k` of full reach, `out` sideways share. */
 const swingArm = (a: number, k: number, out: number, R: number): Vec3 => v3(R * k * Math.sin(a), -R * k * Math.cos(a), R * out);
 
+/** Turn a leg pattern built facing along travel to heading H (feet and skates), hips opening by half of it. */
+function headed(legs: [RawLeg, RawLeg], H: number): [RawLeg, RawLeg] {
+  return legs.map((l) => ({ foot: turn(l.foot, H), footYaw: l.footYaw + H })) as [RawLeg, RawLeg];
+}
+
 function standPose(d: BodyDims, lean: number): RawPose {
   const R = armReach(d), half = d.shoulderWidth / 2;
   return {
@@ -316,104 +411,112 @@ function standPose(d: BodyDims, lean: number): RawPose {
   };
 }
 
-function glidePose(d: BodyDims, ph: number, lean: number): RawPose {
+function glidePose(d: BodyDims, ph: number, H: number, lean: number): RawPose {
   const R = armReach(d), half = d.shoulderWidth / 2;
   const shift = 0.03 * Math.sin(TAU * ph); // small weight shifts from skate to skate
   return {
-    hipY: d.hipHeight * 0.98, pitch: 0.35 + 0.6 * lean, roll: 0.04 * Math.sin(TAU * ph), yaw: 0,
-    legs: [{ foot: v3(0.06, 0, -half - shift), footYaw: -0.05 }, { foot: v3(0.02, 0, half - shift), footYaw: 0.05 }],
+    hipY: d.hipHeight * 0.98, pitch: 0.35 + 0.6 * lean, roll: 0.04 * Math.sin(TAU * ph), yaw: 0.5 * H,
+    legs: headed([{ foot: v3(0.06, 0, -half - shift), footYaw: -0.05 }, { foot: v3(0.02, 0, half - shift), footYaw: 0.05 }], H),
     topRel: v3(0.35 * R, -0.6 * R, -0.05 * R), freeRel: swingArm(0.3, 0.95, -0.1, R), twoHands: 1,
     stickAngle: -0.25 + 0.03 * Math.sin(TAU * ph),
   };
 }
 
+/** Stride: share of the cycle each leg spends on the ice (glide then push), and where the push starts. */
+const STRIDE_STANCE = 0.6, STRIDE_PUSH = 0.15, STRIDE_SET_YAW = 0.08;
+
 /**
  * Forward stride. Each leg (left at phase q = ph, right half a cycle later): on the ice for q in [0, 0.6) (a short
- * glide under the body, then a push back and out at 45 degrees with the skate turned out), then lifted and recovered
- * under the body to set down pointing along travel. Double support around q = 0 and 0.5, so one skate is always down.
+ * glide under the body, then a push back and out at 45 degrees to his travel with the skate turned out), then lifted
+ * and recovered under the body to set down pointing along travel. Double support around q = 0 and 0.5, so one skate
+ * is always down. Built facing along travel, then turned to heading H.
  */
-function stridePose(d: BodyDims, ph: number, m: Motion, acc: number, lean: number): RawPose {
+function stridePose(d: BodyDims, ph: number, speed: number, acc: number, H: number, lean: number): RawPose {
   const R = armReach(d);
-  const amp = strideAmp(m.speed, acc);
+  const amp = strideAmp(speed, acc);
   const reach = 0.62 * (d.thigh + d.shin) * amp;
   const diag = reach * Math.SQRT1_2;
   const baseZ = d.hipWidth / 2 + 0.02;
   const setX = 0.1;
   // Weight over the gliding skate: the pelvis moves toward the leg that has just set down.
   const shiftZ = -0.06 * amp * Math.cos(TAU * (ph - 0.2));
-  const back: number[] = [];
   const legs = ([-1, 1] as const).map((sg, i): RawLeg => {
     const q = frac(ph + (i === 0 ? 0 : 0.5));
-    const endX = setX - 0.06 - diag, endZ = sg * (baseZ + diag), endYaw = sg * 0.63;
-    let foot: Vec3, yaw: number, e: number;
-    if (q < 0.6) {
-      e = smooth((q - 0.15) / 0.45);
-      const x = setX - 0.06 * clamp01(q / 0.15) - diag * e;
+    const endX = setX - 0.06 - diag, endZ = sg * (baseZ + diag), endYaw = sg * (STRIDE_SET_YAW + 0.55);
+    let foot: Vec3, yaw: number;
+    if (q < STRIDE_STANCE) {
+      const e = smooth((q - STRIDE_PUSH) / (STRIDE_STANCE - STRIDE_PUSH));
+      const x = setX - 0.06 * clamp01(q / STRIDE_PUSH) - diag * e;
       foot = v3(x, 0, sg * (baseZ + diag * e));
-      yaw = sg * (0.08 + 0.55 * e);
+      yaw = sg * (STRIDE_SET_YAW + 0.55 * e);
     } else {
-      const u = (q - 0.6) / 0.4, s = smooth(u);
-      e = 1 - s;
+      const u = (q - STRIDE_STANCE) / (1 - STRIDE_STANCE), s = smooth(u);
       foot = v3(lerp(endX, setX, s), 0.13 * amp * Math.sin(Math.PI * u), lerp(endZ, sg * baseZ, s) - sg * 0.04 * Math.sin(Math.PI * u));
-      yaw = lerp(endYaw, sg * 0.03, smooth(u * 1.4));
+      // Toe turns back from the push to set down exactly as the next glide starts.
+      yaw = lerp(endYaw, sg * STRIDE_SET_YAW, s);
     }
-    back.push(e);
     foot.z -= shiftZ;
     return { foot, footYaw: yaw };
   }) as [RawLeg, RawLeg];
-  // Arms swing opposite the legs: a skate pushed back brings that side's arm forward. The free (left) arm swings big;
-  // the stick hand stays low in front with a small swing.
-  const s = (back[0]! - back[1]!) * amp;
+  // Arms swing opposite the legs, evenly: a skate pushed back brings that side's arm forward (the left arm is furthest
+  // forward as the left push ends, q = 0.6). The free (left) arm swings big; the stick hand stays low with a small swing.
+  const s = amp * Math.sin(TAU * (ph - 0.35));
   return {
-    hipY: d.hipHeight * (0.96 - 0.04 * amp), pitch: 0.4 + 0.12 * amp + lean, roll: shiftZ * 0.8, yaw: -0.08 * s,
-    legs,
-    topRel: swingArm(0.75 - 0.3 * s, 0.85, -0.15, R), freeRel: swingArm(0.2 + 0.95 * s, 0.93, -0.08 - 0.12 * Math.max(0, -s), R),
+    hipY: d.hipHeight * (0.96 - 0.04 * amp), pitch: 0.4 + 0.12 * amp + lean, roll: shiftZ * 0.8, yaw: 0.5 * H - 0.08 * s,
+    legs: headed(legs, H),
+    topRel: swingArm(0.75 - 0.3 * s, 0.85, -0.15, R), freeRel: swingArm(0.2 + 0.68 * s, 0.93, -0.08 - 0.12 * Math.max(0, -s), R),
     twoHands: 0, stickAngle: -0.35 - 0.15 * s,
   };
 }
 
+/** Crossover windows: outside skate lifted [0, CROSS_LAND); inside pushes [CROSS_LAND, CROSS_LIFT), lifted after. */
+const CROSS_LAND = 0.45, CROSS_LIFT = 0.75;
+
 /**
- * Crossover toward side `dir` (+1: +z). The outside leg lifts and crosses over in front of the inside one
- * (ph 0 to 0.45), then rides back out under the body while the inside leg pushes under and out behind it
- * (0.45 to 0.85) and recovers (0.85 to 1). The body rolls into the turn, so the skates sit outward of the pelvis.
+ * Crossover toward side `dir` (+1: +z of the pattern). The outside leg lifts and crosses over in front of the inside
+ * one (ph 0 to 0.45), then rides back out under the body while the inside leg pushes under and out behind it (0.45 to
+ * 0.75) and recovers (0.75 to 1). Built facing along travel and turned to heading H; the body rolls into the turn, so
+ * the skates sit outward of the pelvis.
  */
-function crossoverPose(d: BodyDims, ph: number, travel: number, dir: 1 | -1, lean: number, roll: number): RawPose {
+function crossoverPose(d: BodyDims, ph: number, H: number, dir: 1 | -1, lean: number, roll: number): RawPose {
   const R = armReach(d), u = d.shoulderWidth / 2;
   const p = frac(ph);
   const hipY = d.hipHeight * 0.93;
   const bodyRoll = roll + dir * 0.12;
-  const outShift = -Math.sign(bodyRoll) * hipY * Math.sin(Math.min(0.6, Math.abs(bodyRoll))) * 0.4;
-  // Skates turned partly toward his travel (sin: continuous however his travel swings).
-  const yawBase = 0.5 * Math.sin(travel) + dir * 0.1;
+  const inYaw = dir * 0.06; // skates slightly into the turn
   // Outside leg.
-  let o: Vec3, oYaw = yawBase;
-  if (p < 0.45) {
-    const t = p / 0.45, s = smooth(t);
+  let o: Vec3, oYaw = inYaw;
+  if (p < CROSS_LAND) {
+    const t = p / CROSS_LAND, s = smooth(t);
     o = v3(lerp(-0.08, 0.15, s), 0.12 * Math.sin(Math.PI * t), dir * lerp(-1.3 * u, 1.0 * u, s));
     oYaw += dir * 0.15 * Math.sin(Math.PI * t);
   } else {
-    const s = smooth((p - 0.45) / 0.55);
+    const s = smooth((p - CROSS_LAND) / (1 - CROSS_LAND));
     o = v3(lerp(0.15, -0.08, s), 0, dir * lerp(1.0 * u, -1.3 * u, s));
   }
   // Inside leg.
-  let iFoot: Vec3, iYaw = yawBase;
-  if (p < 0.45) {
-    const s = smooth(p / 0.45);
+  let iFoot: Vec3, iYaw = inYaw;
+  if (p < CROSS_LAND) {
+    const s = smooth(p / CROSS_LAND);
     iFoot = v3(lerp(0, -0.03, s), 0, dir * lerp(1.1 * u, 0.85 * u, s));
-  } else if (p < 0.85) {
-    const s = smooth((p - 0.45) / 0.4);
+  } else if (p < CROSS_LIFT) {
+    const s = smooth((p - CROSS_LAND) / (CROSS_LIFT - CROSS_LAND));
     iFoot = v3(lerp(-0.03, -0.18, s), 0, dir * lerp(0.85 * u, -0.3 * u, s));
     iYaw += dir * 0.15 * s;
   } else {
-    const t = (p - 0.85) / 0.15, s = smooth(t);
+    const t = (p - CROSS_LIFT) / (1 - CROSS_LIFT), s = smooth(t);
     iFoot = v3(lerp(-0.18, 0, s), 0.08 * Math.sin(Math.PI * t), dir * lerp(-0.3 * u, 1.1 * u, s));
     iYaw += dir * 0.15 * (1 - s);
   }
-  o.z += outShift; iFoot.z += outShift;
-  const outLeg: RawLeg = { foot: o, footYaw: oYaw }, inLeg: RawLeg = { foot: iFoot, footYaw: iYaw };
+  const pattern: [RawLeg, RawLeg] = dir > 0
+    ? [{ foot: o, footYaw: oYaw }, { foot: iFoot, footYaw: iYaw }]
+    : [{ foot: iFoot, footYaw: iYaw }, { foot: o, footYaw: oYaw }];
+  const legs = headed(pattern, H);
+  const outShift = -Math.sign(bodyRoll) * hipY * Math.sin(Math.min(0.6, Math.abs(bodyRoll))) * 0.4;
+  for (const l of legs) l.foot.z += outShift;
   return {
-    hipY, pitch: 0.4 + 0.8 * lean, roll: bodyRoll, yaw: dir * 0.1,
-    legs: dir > 0 ? [outLeg, inLeg] : [inLeg, outLeg],
+    hipY, pitch: 0.4 + 0.8 * lean, roll: bodyRoll, yaw: 0.5 * H + dir * 0.1,
+    legs,
     topRel: v3(0.3 * R, -0.65 * R, -0.05 * R), freeRel: swingArm(0.4, 0.9, -0.1, R), twoHands: 1, stickAngle: -0.2 + 0.3 * dir,
   };
 }
@@ -421,8 +524,9 @@ function crossoverPose(d: BodyDims, ph: number, travel: number, dir: 1 | -1, lea
 /**
  * Backward: seated, torso upright, both skates always on the ice. Each leg in turn (left ph 0 to 0.5, right 0.5 to 1)
  * sweeps a C-cut: out to the side and forward in a half circle with the toe turned in, then rides back under the body.
+ * Built for straight-backward travel and turned to heading H (along his reversed travel).
  */
-function backwardPose(d: BodyDims, ph: number, acc: number, lean: number): RawPose {
+function backwardPose(d: BodyDims, ph: number, acc: number, H: number, lean: number): RawPose {
   const R = armReach(d), half = d.shoulderWidth / 2 + 0.02;
   const eff = backEffort(acc), A = 0.22 * eff * (d.thigh + d.shin) / 0.9;
   const p = frac(ph);
@@ -443,8 +547,8 @@ function backwardPose(d: BodyDims, ph: number, acc: number, lean: number): RawPo
   const shift = 0.05 * eff * Math.sin(TAU * p);
   for (const l of legs) l.foot.z += shift;
   return {
-    hipY: d.hipHeight * 0.9, pitch: 0.18 + 0.3 * lean, roll: -0.6 * shift, yaw: 0,
-    legs,
+    hipY: d.hipHeight * 0.9, pitch: 0.18 + 0.3 * lean, roll: -0.6 * shift, yaw: 0.5 * H,
+    legs: headed(legs, H),
     topRel: v3(0.35 * R, -0.65 * R, 0), freeRel: swingArm(0.3, 0.9, -0.1, R), twoHands: 1, stickAngle: -0.15,
   };
 }
@@ -453,9 +557,9 @@ function backwardPose(d: BodyDims, ph: number, acc: number, lean: number): RawPo
  * Hockey stop: hips and both skates turn sideways to travel (the short way, side `s`), feet out ahead of him along
  * travel so he leans back against the stop, knees deeply bent; it eases out as his speed drops.
  */
-function stopPose(d: BodyDims, m: Motion, travel: number, s: 1 | -1, lean: number): RawPose {
+function stopPose(d: BodyDims, speed: number, travel: number, s: 1 | -1, lean: number): RawPose {
   const R = armReach(d), half = (d.shoulderWidth / 2) * 1.1;
-  const k = clamp01((m.speed - 0.5) / 3);
+  const k = clamp01((speed - 0.5) / 3);
   // The hips turn most of the way sideways and follow his travel a little; sin keeps that continuous (and within
   // about 1.4 rad of his facing) however far round his travel swings while he pivots.
   const ty = travel;
@@ -475,42 +579,50 @@ function stopPose(d: BodyDims, m: Motion, travel: number, s: 1 | -1, lean: numbe
   };
 }
 
-/** Down: sitting on the ice leaning back on his hands, legs out in front. */
+/**
+ * Down: sitting on the ice leaning back on his hands, knees up, skates flat in front of his hips (each foot straight
+ * ahead of its hip joint and below it, so the leg solve bends the knee up and forward, never splayed).
+ */
 function downPose(d: BodyDims): RawPose {
-  const R = armReach(d), half = d.hipWidth / 2 + 0.08;
-  const out = (d.thigh + d.shin) * 0.72;
+  const R = armReach(d), w = d.hipWidth / 2;
+  const hipY = d.skate + 0.12;
+  const reachOut = 0.66 * (d.thigh + d.shin);
+  const out = Math.sqrt(Math.max(0, reachOut * reachOut - (hipY - d.skate) ** 2));
   return {
-    hipY: 0.2, pitch: -0.4, roll: 0, yaw: 0,
-    legs: [{ foot: v3(out, 0, -half), footYaw: -0.3 }, { foot: v3(out, 0, half), footYaw: 0.3 }],
+    hipY, pitch: -0.4, roll: 0, yaw: 0,
+    legs: [{ foot: v3(out, 0, -w), footYaw: -0.15 }, { foot: v3(out, 0, w), footYaw: 0.15 }],
     topRel: v3(-0.15 * R, -1.1 * R, 0.25 * R), freeRel: v3(-0.15 * R, -1.1 * R, -0.25 * R), twoHands: 0, stickAngle: 0.4,
   };
 }
 
 function rawPose(style: Style, g: GaitState, side: 1 | -1, m: Motion, d: BodyDims): RawPose {
-  const acc = g.acc ?? m.accelAlong;
-  const travel = g.travel ?? travelYawOf(m);
+  const acc = fin(g.acc ?? m.accelAlong);
+  const travel = fin(g.travel ?? travelYawOf(m));
+  const phase = fin(g.phase), lean = fin(g.lean), roll = fin(g.roll), speed = fin(g.speed ?? m.speed);
   switch (style) {
-    case 'stand': return standPose(d, g.lean);
-    case 'glide': return glidePose(d, g.phase, g.lean);
-    case 'stride': return stridePose(d, g.phase, m, acc, g.lean);
-    case 'crossover': return crossoverPose(d, g.phase, travel, side, g.lean, g.roll);
-    case 'backward': return backwardPose(d, g.phase, acc, g.lean);
-    case 'stop': return stopPose(d, m, travel, side, g.lean);
+    case 'stand': return standPose(d, lean);
+    case 'glide': return glidePose(d, phase, forwardHeading(travel), lean);
+    case 'stride': return stridePose(d, phase, speed, acc, forwardHeading(travel), lean);
+    case 'crossover': return crossoverPose(d, phase, forwardHeading(travel), side, lean, roll);
+    case 'backward': return backwardPose(d, phase, acc, backwardHeading(travel), lean);
+    case 'stop': return stopPose(d, speed, travel, side, lean);
     case 'down': return downPose(d);
   }
 }
 
 /**
- * Every style's yaws are continuous and stay well inside (-PI, PI), so they blend as plain numbers (a short-way-round
- * blend would be ambiguous between skate headings far apart, such as a stop turning the other way).
+ * Weighted mix of raw poses (weights sum to 1). Every style's yaws are continuous and stay inside (-PI, PI), so they
+ * mix as plain numbers (a short-way-round blend would be ambiguous between skate headings far apart).
  */
-function mixRaw(a: RawPose, b: RawPose, w: number): RawPose {
-  const leg = (i: 0 | 1): RawLeg => ({ foot: lerp3(a.legs[i].foot, b.legs[i].foot, w), footYaw: lerp(a.legs[i].footYaw, b.legs[i].footYaw, w) });
+function mixRaw(parts: { raw: RawPose; w: number }[]): RawPose {
+  const sum = (f: (r: RawPose) => number): number => parts.reduce((t, p) => t + f(p.raw) * p.w, 0);
+  const sum3 = (f: (r: RawPose) => Vec3): Vec3 => v3(sum((r) => f(r).x), sum((r) => f(r).y), sum((r) => f(r).z));
+  const leg = (i: 0 | 1): RawLeg => ({ foot: sum3((r) => r.legs[i].foot), footYaw: sum((r) => r.legs[i].footYaw) });
   return {
-    hipY: lerp(a.hipY, b.hipY, w), pitch: lerp(a.pitch, b.pitch, w), roll: lerp(a.roll, b.roll, w), yaw: lerp(a.yaw, b.yaw, w),
+    hipY: sum((r) => r.hipY), pitch: sum((r) => r.pitch), roll: sum((r) => r.roll), yaw: sum((r) => r.yaw),
     legs: [leg(0), leg(1)],
-    topRel: lerp3(a.topRel, b.topRel, w), freeRel: lerp3(a.freeRel, b.freeRel, w), twoHands: lerp(a.twoHands, b.twoHands, w),
-    stickAngle: lerp(a.stickAngle, b.stickAngle, w),
+    topRel: sum3((r) => r.topRel), freeRel: sum3((r) => r.freeRel), twoHands: sum((r) => r.twoHands),
+    stickAngle: sum((r) => r.stickAngle),
   };
 }
 
@@ -523,25 +635,26 @@ function fit(raw: RawPose, d: BodyDims): Pose {
   const feet = raw.legs.map((l) => ({ ...l.foot }));
   const minY = Math.min(feet[0]!.y, feet[1]!.y);
   for (const f of feet) f.y = Math.max(0, f.y - minY);
-  const lifted = feet.map((f) => f.y > 0.01);
-  let hipY = Math.max(0.1, raw.hipY);
   const yaw = raw.yaw;
-  // Planted legs: the pelvis comes down until each planted ankle is in reach (a planted skate further out than a leg
-  // can reach is drawn in toward the hip).
+  const want = Math.max(0.1, raw.hipY);
+  // Each skate on the ice holds the pelvis down to where its ankle is in reach (one further out than a leg can reach
+  // is drawn in toward the hip). A lifting skate lets go gradually over its first liftFade of height, so the pelvis
+  // rises smoothly as the weight comes off it.
+  let hipY = want;
   for (const i of [0, 1] as const) {
-    if (lifted[i]) continue;
-    const f = feet[i]!, hip = hipJoint({ hipY, yaw }, i, d);
+    const f = feet[i]!, hip = hipJoint({ hipY: want, yaw }, i, d);
     const hx = f.x - hip.x, hz = f.z - hip.z, h = Math.hypot(hx, hz);
     const ankleY = f.y + d.skate;
+    let limit: number;
     if (h >= maxLeg * 0.999) {
-      const k = (maxLeg * 0.999) / h;
-      f.x = hip.x + hx * k; f.z = hip.z + hz * k;
-      hipY = Math.min(hipY, ankleY);
-    } else hipY = Math.min(hipY, ankleY + Math.sqrt(maxLeg * maxLeg - h * h));
+      if (f.y === 0) { const k = (maxLeg * 0.999) / h; f.x = hip.x + hx * k; f.z = hip.z + hz * k; }
+      limit = ankleY;
+    } else limit = ankleY + Math.sqrt(maxLeg * maxLeg - h * h);
+    hipY = Math.min(hipY, lerp(limit, want, smooth(f.y / GAIT.liftFade)));
   }
-  // Lifted legs: draw a skate that is out of reach in toward the hip.
+  hipY = Math.max(0.1, hipY);
+  // Skates still out of reach (only lifted ones can be) are drawn in toward the hip.
   for (const i of [0, 1] as const) {
-    if (!lifted[i]) continue;
     const hip = hipJoint({ hipY, yaw }, i, d);
     const ankle = within(add(feet[i]!, v3(0, d.skate, 0)), hip, maxLeg);
     feet[i] = v3(ankle.x, Math.max(0, ankle.y - d.skate), ankle.z);
@@ -557,9 +670,11 @@ function fit(raw: RawPose, d: BodyDims): Pose {
   const onShaft = add(top, mul(shaft, shaftGrip(top, shaft, sl, reach, 0.36 * d.stick)));
   const free = add(sl, raw.freeRel);
   const bottom = lift(lerp3(free, onShaft, clamp01(raw.twoHands)), sl);
-  const leg = (i: 0 | 1): LegPose => ({ foot: feet[i]!, footYaw: raw.legs[i].footYaw, lifted: lifted[i]! });
+  const leg = (i: 0 | 1): LegPose => ({ foot: feet[i]!, footYaw: raw.legs[i].footYaw, lifted: feet[i]!.y > 0.01 });
   return { hipY, pitch: raw.pitch, roll: raw.roll, yaw, legs: [leg(0), leg(1)], arms: [{ hand: bottom }, { hand: top }], stickAngle: raw.stickAngle };
 }
+
+const lerp3 = (a: Vec3, b: Vec3, t: number): Vec3 => v3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
 
 /** Distance down the shaft for the lower hand: as near `want` as the arm (shoulder `sh`, reach `r`) allows. */
 function shaftGrip(top: Vec3, dir: Vec3, sh: Vec3, r: number, want: number): number {
@@ -568,30 +683,33 @@ function shaftGrip(top: Vec3, dir: Vec3, sh: Vec3, r: number, want: number): num
   const d2 = len(toSh) ** 2 - tc * tc;
   if (d2 >= r * r) return Math.max(0, tc);
   const half = Math.sqrt(r * r - d2);
-  return clamp(want, Math.max(0, tc - half), tc + half);
+  const lo = Math.max(0, tc - half);
+  return clamp(want, lo, Math.max(lo, tc + half)); // never above the butt: continuous with the branch above
 }
 
-export function poseOf(g: GaitState, m: Motion, d: BodyDims): Pose {
-  const side = g.side ?? 1;
-  let raw = rawPose(g.style, g, side, m, d);
-  const w = smooth(g.styleT / GAIT.blend);
-  if (g.from !== undefined && w < 1) raw = mixRaw(rawPose(g.from, g, g.fromSide ?? side, m, d), raw, w);
-  return fit(raw, d);
+export function poseOf(g: GaitState, motion: Motion, d: BodyDims): Pose {
+  const m = sane(motion);
+  const parts = shownMix(g).map((p) => ({ raw: rawPose(p.style, g, p.side, m, d), w: p.w }));
+  return fit(parts.length === 1 ? parts[0]!.raw : mixRaw(parts), d);
 }
 
 /**
  * Two-bone leg solve with the knee bending forward (+x). From hip to ankle: hipRoll swings the leg's plane out toward
  * +z (about x), hipPitch swings the thigh forward within that plane, kneeAngle bends the shin back (0 straight). So
  * the thigh points along (sin a, -cos a cos r, cos a sin r) with a = hipPitch, r = hipRoll, and the shin along the same
- * with a = hipPitch - kneeAngle. A foot out of reach gives a straight leg pointing at it; never NaN.
+ * with a = hipPitch - kneeAngle. hipRoll stays within +-PI/2 (a foot level with or above the hip is reached by
+ * pitching the thigh past horizontal, not by flipping the leg over). A foot out of reach gives a straight leg pointing
+ * at it; never NaN.
  */
 export function solveLeg(hip: Vec3, foot: Vec3, thigh: number, shin: number): { kneeAngle: number; hipPitch: number; hipRoll: number } {
   const dx = foot.x - hip.x, dy = foot.y - hip.y, dz = foot.z - hip.z;
   const raw = Math.hypot(dx, dy, dz);
   const lo = Math.abs(thigh - shin) + 1e-9, hi = thigh + shin;
   const dist = clamp(raw, lo, hi);
-  const hipRoll = Math.atan2(dz, -dy);
-  const down = Math.hypot(dy, dz);
+  // The leg's plane through the x axis containing the foot, taken with its "down" direction below horizontal.
+  const below = -dy;
+  const hipRoll = below > 1e-9 ? Math.atan(dz / below) : below < -1e-9 ? Math.atan(dz / below) : dz === 0 ? 0 : sign(dz) * (Math.PI / 2);
+  const down = below * Math.cos(hipRoll) + dz * Math.sin(hipRoll); // foot's coordinate along the plane's down direction
   const toFoot = raw > 1e-12 ? Math.atan2(dx, down) : 0;
   const cosKnee = clamp((thigh * thigh + shin * shin - dist * dist) / (2 * thigh * shin), -1, 1);
   const cosHip = clamp((thigh * thigh + dist * dist - shin * shin) / (2 * thigh * dist), -1, 1);
