@@ -3,7 +3,7 @@ import type { SkaterState } from '@hockey/engine';
 import { bodyDims } from './body';
 import {
   STYLES, hipJoint, initialGait, motionOf, poseOf, solveLeg, stepGait,
-  type GaitState, type Motion, type Pose, type Style, type Vec3,
+  type GaitState, type Motion, type Pose, type SkaterPose, type Style, type Vec3,
 } from './gait';
 
 const m = (p: Partial<Motion>): Motion => ({ speed: 0, forward: 0, lateral: 0, accelAlong: 0, turnRate: 0, facing: 0, down: false, ...p });
@@ -435,3 +435,130 @@ describe('review fixes', () => {
 });
 
 const frac = (v: number) => v - Math.floor(v);
+
+// ---------------------------------------------------------------------------------------------------------------
+// Milestone 2, task 1: the sprint and the stick when carrying the puck.
+
+describe('sprint', () => {
+  it('flat-out skating is a sprint, and easing off returns to a stride or glide', () => {
+    let g = initialGait();
+    for (let i = 0; i < 120; i++) g = stepGait(g, m({ speed: 8.8, forward: 8.8, accelAlong: 2.5 }), 1 / 60);
+    expect(g.style).toBe('sprint');
+    for (let i = 0; i < 120; i++) g = stepGait(g, m({ speed: 5, forward: 5, accelAlong: 0 }), 1 / 60);
+    expect(['stride', 'glide']).toContain(g.style);
+  });
+  it('a moderate stride is not a sprint', () => {
+    let g = initialGait();
+    for (let i = 0; i < 120; i++) g = stepGait(g, m({ speed: 5.5, forward: 5.5, accelAlong: 2 }), 1 / 60);
+    expect(g.style).toBe('stride');
+  });
+  it('the sprint leans further forward and looks down more than the stride', () => {
+    const d = bodyDims(185, 90);
+    const s = poseOf({ ...initialGait(), style: 'sprint', styleT: 1, phase: 0.3 }, m({ speed: 9, forward: 9, accelAlong: 2 }), d);
+    const t = poseOf({ ...initialGait(), style: 'stride', styleT: 1, phase: 0.3 }, m({ speed: 6, forward: 6, accelAlong: 2 }), d);
+    expect(s.pitch).toBeGreaterThan(t.pitch + 0.08);
+    // Milestone 1's `look` is the head's turn (a number); the head's pitch toward the ice is `lookDown`.
+    expect(s.lookDown ?? 0).toBeGreaterThan(t.lookDown ?? 0);
+  });
+  it('with the puck the blade is on the ice in every moving style; sprinting without it the blade is up', () => {
+    const d = bodyDims(185, 90);
+    for (const style of ['glide', 'stride', 'sprint', 'crossover', 'backward'] as const) {
+      const p = poseOf({ ...initialGait(), style, styleT: 1, phase: 0.4 }, m({ speed: 7, forward: 7 }), d, { hasPuck: true });
+      expect(p.blade.y).toBeLessThan(0.03);
+    }
+    const free = poseOf({ ...initialGait(), style: 'sprint', styleT: 1, phase: 0.4 }, m({ speed: 9, forward: 9, accelAlong: 2 }), d);
+    expect(free.blade.y).toBeGreaterThan(0.1);
+  });
+
+  // Beyond the brief's list.
+  it('fast but coasting, or carried along by a shove, is never a sprint', () => {
+    let g = initialGait(); const seen = new Set<Style>();
+    for (let i = 0; i < 180; i++) { g = stepGait(g, m({ speed: 8, forward: 8 }), 1 / 60); seen.add(g.style); }
+    expect(seen.has('sprint')).toBe(false); expect(g.style).toBe('glide');
+    for (const hz of RATES) for (const v0 of [6, 8, 9]) for (const dir of [[1, 0], [Math.SQRT1_2, Math.SQRT1_2]] as [number, number][]) {
+      const s = new Set<Style>();
+      play(shove(v0, dir), hz, 2, (st) => s.add(st.style));
+      expect(s.has('sprint'), `v0=${v0} ${hz} Hz saw ${[...s]}`).toBe(false);
+    }
+  });
+  it('the sprint pushes harder: longer pushes, deeper knees and a bigger arm drive than the stride at the same speed', () => {
+    const mo = m({ speed: 8.5, forward: 8.5, accelAlong: 3 });
+    let sReach = 0, tReach = 0, sArm = 0, tArm = 0;
+    for (let ph = 0; ph < 1; ph += 0.01) {
+      const s = pose({ style: 'sprint', phase: ph, acc: 3 }, mo), t = pose({ style: 'stride', phase: ph, acc: 3 }, mo);
+      sReach = Math.max(sReach, -s.legs[0].foot.x); tReach = Math.max(tReach, -t.legs[0].foot.x);
+      sArm = Math.max(sArm, s.arms[0].hand.x); tArm = Math.max(tArm, t.arms[0].hand.x);
+      expect(s.hipY).toBeLessThan(t.hipY);
+    }
+    expect(sReach).toBeGreaterThan(tReach + 0.03);
+    expect(sArm).toBeGreaterThan(tArm + 0.03);
+  });
+  it('blends into and out of the sprint, and in and out of carrying the puck, move nothing more than 6 cm a frame', () => {
+    // Accelerate from rest to 9 m/s, hold it under effort, coast, then accelerate again and brake hard.
+    const run = (t: number): Motion => {
+      if (t < 1.2) return m({ speed: 0.5 + 7.5 * t, forward: 0.5 + 7.5 * t, accelAlong: 7.5 });
+      if (t < 2.5) return m({ speed: 9.5, forward: 9.5, accelAlong: 2.5 });
+      if (t < 3.5) return m({ speed: 9, forward: 9 });
+      if (t < 4.5) return m({ speed: 9, forward: 9, accelAlong: 3 });
+      if (t < 4.9) return m({ speed: 9 - 10 * (t - 4.5), forward: 9 - 10 * (t - 4.5), accelAlong: -10 });
+      return m({ speed: 5, forward: 5, accelAlong: 4 });
+    };
+    for (const d of BODIES) for (const hz of RATES) {
+      const seen = new Set<Style>();
+      let prev: Pose | null = null, worst = 0;
+      play(run, hz, 6, (g, p) => { seen.add(g.style); if (prev) worst = Math.max(worst, moved(prev, p) * (hz / 60)); prev = p; }, d);
+      expect(seen.has('sprint')).toBe(true);
+      expect(worst, `${hz} Hz`).toBeLessThan(0.06);
+    }
+    // Sprint interrupted mid-blend by a stop, a crossover or a fall.
+    const sprint = m({ speed: 9, forward: 9, accelAlong: 3 });
+    const scenes: [string, Motion][] = [
+      ['stop', m({ speed: 9, forward: 9, accelAlong: -10 })], ['cross', m({ speed: 9, forward: 9, turnRate: 2.2, accelAlong: 1 })],
+      ['down', m({ speed: 9, forward: 9, down: true })], ['glide', m({ speed: 9, forward: 9 })],
+    ];
+    for (const hz of RATES) for (const [name, b] of scenes) for (const k of [0.05, 0.17, 0.4, 0.6]) {
+      const w = worstMove((t) => (t < 2.5 ? sprint : t < 2.5 + k ? b : t < 2.5 + k + 0.12 ? sprint : b), hz, 4);
+      expect(w.j, `sprint/${name} k=${k} ${hz} Hz ${w.at}`).toBeLessThan(0.06);
+    }
+    // Picking the puck up and losing it while sprinting: the free hand comes to the stick and the blade down smoothly.
+    for (const d of BODIES) for (const hz of RATES) {
+      let g = initialGait(), prev: SkaterPose | null = null, worst = 0, last: SkaterPose | null = null;
+      for (let i = 0; i < hz * 5; i++) {
+        const t = i / hz, carrying = t > 2 && t < 3.5;
+        g = stepGait(g, sprint, 1 / hz, carrying);
+        const p = poseOf(g, sprint, d, { hasPuck: carrying });
+        if (prev) worst = Math.max(worst, moved(prev, p) * (hz / 60), Math.abs(p.blade.y - prev.blade.y) * (hz / 60));
+        prev = p;
+        if (Math.abs(t - 3.4) < 0.5 / hz) last = p;
+      }
+      expect(g.style).toBe('sprint');
+      expect(last!.blade.y).toBeLessThan(0.03);
+      expect(prev!.blade.y).toBeGreaterThan(0.1);
+      expect(worst, `${hz} Hz`).toBeLessThan(0.06);
+    }
+  });
+  it('the sprint pelvis rises and falls smoothly through each push, and no foot or hand moves more than 6 cm a frame', () => {
+    for (const d of BODIES) for (const speed of [7.5, 9, 10]) {
+      let prev: Pose | null = null;
+      for (let q = 0; q <= 1.0005; q += 0.001) {
+        const p = poseOf({ phase: q, style: 'sprint', styleT: 1, lean: 0.2, roll: 0, acc: 4 }, m({ speed, forward: speed, accelAlong: 4 }), d);
+        if (prev) {
+          expect(Math.abs(p.hipY - prev.hipY)).toBeLessThan(0.002);
+          for (const i of [0, 1] as const) expect(Math.abs(p.legs[i].footYaw - prev.legs[i].footYaw)).toBeLessThan(0.01);
+        }
+        prev = p;
+      }
+      for (const puck of [false, true]) {
+        let g: GaitState = { ...initialGait(), style: 'sprint', styleT: 1, acc: 4, speed }, p0: Pose | null = null, worst = 0;
+        for (let i = 0; i < 180; i++) {
+          g = stepGait(g, m({ speed, forward: speed, accelAlong: 4 }), 1 / 60, puck);
+          const p = poseOf(g, m({ speed, forward: speed, accelAlong: 4 }), d, { hasPuck: puck });
+          if (p0) worst = Math.max(worst, moved(p0, p));
+          p0 = p;
+        }
+        expect(g.style).toBe('sprint');
+        expect(worst, `speed ${speed} puck ${puck}`).toBeLessThan(0.06);
+      }
+    }
+  });
+});

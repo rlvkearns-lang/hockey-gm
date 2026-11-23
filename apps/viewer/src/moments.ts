@@ -43,7 +43,7 @@ export function createMomentScanner(): MomentScanner {
     if (run.style === 'backward' && secs >= 0.8) offer(t, 'backward', secs, run);
     if (run.style === 'stop' && secs >= 0.3) offer(t, 'stop', run.startSpeed, run);
     if (run.style === 'crossover' && secs >= 0.6 && run.peak > 4) offer(t, 'crossover', secs + run.peak * 0.1, run);
-    if (run.style === 'stride' && secs >= 1) offer(t, 'sprint', run.peak, run);
+    if ((run.style === 'stride' && secs >= 1) || (run.style === 'sprint' && secs >= 0.5)) offer(t, 'sprint', run.peak, run);
   };
 
   function onStep(s: ScanState): void {

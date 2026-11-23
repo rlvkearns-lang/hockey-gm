@@ -21,7 +21,7 @@ const TEAM_COLORS: Record<Side, RigColors & { marker: number }> = {
   away: { jersey: 0xf2f3f5, trim: 0x1b4fa0, pants: 0x1c2438, marker: 0x1b4fa0 },
 };
 const STYLE_NAMES: Record<Style, string> = {
-  stand: 'standing', glide: 'glide', stride: 'stride', crossover: 'crossover', backward: 'backward', stop: 'stop', down: 'down',
+  stand: 'standing', glide: 'glide', stride: 'stride', sprint: 'sprint', crossover: 'crossover', backward: 'backward', stop: 'stop', down: 'down',
 };
 type CameraMode = 'follow' | 'side' | 'above';
 /** Screenshot camera (window.__viewer.orbit): fixed in his body frame, `angle` from his facing toward his right. */

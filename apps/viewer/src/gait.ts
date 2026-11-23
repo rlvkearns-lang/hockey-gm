@@ -22,8 +22,9 @@ export type Vec3 = { x: number; y: number; z: number };
  */
 export type Motion = { speed: number; forward: number; lateral: number; accelAlong: number; turnRate: number; facing: number; down: boolean };
 
-export type Style = 'stand' | 'glide' | 'stride' | 'crossover' | 'backward' | 'stop' | 'down';
-export const STYLES: readonly Style[] = ['stand', 'glide', 'stride', 'crossover', 'backward', 'stop', 'down'];
+/** `sprint` is a stride flat out: head down, deeper lean, longer harder pushes, the stick in one hand (see stridePose). */
+export type Style = 'stand' | 'glide' | 'stride' | 'sprint' | 'crossover' | 'backward' | 'stop' | 'down';
+export const STYLES: readonly Style[] = ['stand', 'glide', 'stride', 'sprint', 'crossover', 'backward', 'stop', 'down'];
 
 /** One style (and side) in a blended pose, with its share. */
 export type MixPart = { style: Style; side: 1 | -1; w: number };
@@ -36,9 +37,10 @@ export type MixPart = { style: Style; side: 1 | -1; w: number };
  * `acc` smoothed accelAlong (impulses left out), `speed` smoothed speed (sets how deep a stop or how long a stride
  * is, so a collision's jolt does not jerk the pose), `turn` smoothed turnRate, `travel` his smoothed travel direction
  * (body-frame yaw, held while he is nearly still), `side` which way a crossover crosses or a stop turns the skates
- * (+1 toward +z), `passive` seconds left in which he is being carried by a shove (no effort styles start), and the
- * blend: `from` is the pose shown when the style (or side) last changed, as a mix of styles, which fades into the
- * current style over `blendDur` seconds as `blendT` runs (without `blendT`, poseOf uses `styleT`).
+ * (+1 toward +z), `passive` seconds left in which he is being carried by a shove (no effort styles start), `puck` how
+ * far his hands and stick have gone over to carrying the puck (0..1, eased by stepGait from its `carrying` argument;
+ * absent if it was never given), and the blend: `from` is the pose shown when the style (or side) last changed, as a
+ * mix of styles, which fades into the current style over `blendDur` seconds as `blendT` runs (without `blendT`, poseOf uses `styleT`).
  */
 export type GaitState = {
   phase: number;
@@ -52,6 +54,7 @@ export type GaitState = {
   travel?: number;
   side?: 1 | -1;
   passive?: number;
+  puck?: number;
   from?: readonly MixPart[];
   blendT?: number;
   blendDur?: number;
@@ -77,6 +80,14 @@ export type Pose = {
   twist?: number;
   /** Head turned (heading convention) from the torso toward where he looks; 0 if absent. */
   look?: number;
+  /** Head pitched down from its usual eyes-up carriage toward the ice ahead (rad, positive down); 0 if absent. */
+  lookDown?: number;
+  /**
+   * The heel of the stick blade (body frame), where the shaft ends: on the ice (y = 0) unless he carries the stick
+   * with the blade up. The shaft runs from the top hand straight to it, so a rig should aim the shaft at this point
+   * rather than assume the heel reaches the ice. poseOf always sets it; mirror its z for a right shot.
+   */
+  blade?: Vec3;
   /**
    * How far down the shaft from the butt the top hand holds it (m); 0 if absent. The shaft then runs from the hand
    * `stick - grip` to the heel, with the butt `grip` back up the shaft behind the hand.
@@ -118,13 +129,30 @@ export const GAIT = {
   /** Seconds to blend from the pose shown into a new style's; falling and getting up take `blendDown`. */
   blend: 0.35,
   blendDown: 0.65,
+  /** Blend out of a sprint into anything but a stride (its long pushes are far from every other style's feet). */
+  blendSprint: 0.5,
   /** Speed (m/s) above which he is moving rather than standing. */
   moveEnter: 0.9,
   moveExit: 0.5,
   /** Smoothed acceleration (m/s^2) that makes him stride; starting also needs raw above strideRawMin. */
-  strideEnter: 2.0,
+  strideEnter: 1.8,
   strideExit: 0.5,
   strideRawMin: -0.5,
+  /**
+   * A stride becomes a sprint at speed (m/s) and smoothed acceleration (m/s^2) above the enter pair (not while
+   * shoved). The sprint drops back to a stride when his speed falls below sprintSpeedExit while he still drives, and
+   * to a glide when his acceleration falls below sprintAccExit (unless he is braking hard, when it holds until the stop
+   * starts). The engine's top speeds are 7.6 to 9.2 m/s and a skater at his top speed has no acceleration, so the
+   * sprint is the hard end of a rush up to top speed and the half second or so after it. See the task 1 report.
+   */
+  sprintSpeedEnter: 7.0,
+  sprintSpeedExit: 6.5,
+  sprintAccEnter: 2.0,
+  sprintAccExit: 0.6,
+  /** Height (m) of the blade heel when he sprints with the stick in his top hand only. */
+  sprintBladeUp: 0.22,
+  /** Seconds for his hands and stick to go over to carrying the puck, or back. */
+  puckBlend: 0.4,
   /** Travel off facing beyond which he skates backward. */
   backEnter: (115 * Math.PI) / 180,
   backExit: (100 * Math.PI) / 180,
@@ -224,7 +252,7 @@ function classify(cur: Style, m: Motion, acc: number, turn: number, passive: boo
   const G = GAIT;
   if (m.down) return 'down';
   const sp = m.speed, off = offOf(m), raw = m.accelAlong;
-  const pushing = cur === 'stride' ? acc > G.strideExit : acc > G.strideEnter && raw > G.strideRawMin && !passive;
+  const pushing = cur === 'stride' || cur === 'sprint' ? acc > G.strideExit : acc > G.strideEnter && raw > G.strideRawMin && !passive;
   const backward = off > (cur === 'backward' ? G.backExit : G.backEnter);
   if (sp <= (cur === 'stand' ? G.moveEnter : G.moveExit)) {
     // Barely moving: he stands, unless he is clearly pushing off (a start from rest).
@@ -242,7 +270,15 @@ function classify(cur: Style, m: Motion, acc: number, turn: number, passive: boo
   const hardTurn = sp > (inCross ? G.crossTurnSpeedExit : G.crossTurnSpeedEnter)
     && Math.abs(turn) > (inCross ? G.crossTurnExit : G.crossTurnEnter) && (inCross || (canStart && acc > G.crossTurnMinAcc));
   if (sideways || hardTurn) return 'crossover';
-  return pushing ? 'stride' : 'glide';
+  if (cur === 'sprint') {
+    // Flat out until he slows (back to a stride) or eases off (straight to a glide: a stride for a moment between
+    // would be one more change); braking hard holds it until the stop takes over, rather than blending through a glide.
+    if (acc > G.sprintAccExit) return sp > G.sprintSpeedExit ? 'sprint' : 'stride';
+    return raw < G.stopRawMax && !passive && sp > G.sprintSpeedExit ? 'sprint' : 'glide';
+  }
+  if (!pushing) return 'glide';
+  // Flat out: only from a stride, and never while carried along by a shove.
+  return cur === 'stride' && !passive && raw > G.strideRawMin && sp > G.sprintSpeedEnter && acc > G.sprintAccEnter ? 'sprint' : 'stride';
 }
 
 /** Which way a crossover crosses: toward his sideways travel, else toward the turn. */
@@ -274,6 +310,11 @@ function phaseRate(style: Style, m: Motion, acc: number): number {
       const pushes = clamp(1.2 + 0.11 * m.speed + 0.06 * Math.max(0, acc), 1.2, 2.4);
       return pushes / 2;
     }
+    case 'sprint': {
+      // Longer pushes at a little less than the stride's rate at the same speed: about 1.8 to 2.1 a second.
+      const pushes = clamp(1.0 + 0.09 * m.speed + 0.04 * Math.max(0, acc), 1.2, 2.1);
+      return pushes / 2;
+    }
     case 'glide': return 0.2; // slow weight shifts
     case 'crossover': return clamp(0.8 + 0.07 * m.speed, 0.8, 1.4);
     case 'backward': return (0.5 + 0.05 * m.speed) * backEffort(acc);
@@ -284,7 +325,7 @@ function phaseRate(style: Style, m: Motion, acc: number): number {
 /** Whether a style's cycle is at a natural point to leave it. */
 function atBreak(style: Style, phase: number): boolean {
   const q = frac(phase);
-  if (style === 'stride') return q < 0.1 || (q >= 0.5 && q < 0.6);
+  if (style === 'stride' || style === 'sprint') return q < 0.1 || (q >= 0.5 && q < 0.6);
   if (style === 'crossover') return q >= 0.45 && q < 0.75;
   return true;
 }
@@ -308,7 +349,12 @@ function shownMix(g: GaitState): MixPart[] {
   return parts;
 }
 
-export function stepGait(g: GaitState, motion: Motion, dt: number): GaitState {
+/**
+ * Advance the gait by `dt` seconds of motion. `carrying`, when given, says whether he has the puck: his hands and
+ * stick then go over to (or back from) carrying it over GAIT.puckBlend seconds (GaitState.puck), which poseOf uses in
+ * place of its `hasPuck` option, so picking the puck up or losing it never snaps the arms or the stick.
+ */
+export function stepGait(g: GaitState, motion: Motion, dt: number, carrying?: boolean): GaitState {
   const m = sane(motion);
   const h = clamp(Number.isFinite(dt) ? dt : 0, 0, 0.25);
   const raw = m.accelAlong;
@@ -355,12 +401,17 @@ export function stepGait(g: GaitState, motion: Motion, dt: number): GaitState {
     side: wantSide,
   };
   if (passive > 0) next.passive = passive;
+  if (typeof carrying === 'boolean') {
+    const k = clamp01(fin(g.puck ?? (carrying ? 1 : 0)));
+    next.puck = carrying ? Math.min(1, k + h / GAIT.puckBlend) : Math.max(0, k - h / GAIT.puckBlend);
+  } else if (g.puck !== undefined) next.puck = g.puck;
   if (changed) {
     // Blend from exactly the pose shown at this moment, whatever blend was under way.
     const from = shownMix(g);
     next.from = from;
     next.blendT = 0;
-    next.blendDur = want === 'down' || from.some((p) => p.style === 'down') ? GAIT.blendDown : GAIT.blend;
+    next.blendDur = want === 'down' || from.some((p) => p.style === 'down') ? GAIT.blendDown
+      : want !== 'stride' && from.some((p) => p.style === 'sprint' && p.w > 0.05) ? GAIT.blendSprint : GAIT.blend;
   } else if (g.from && blendWeight(g) < 1) {
     next.from = g.from;
     next.blendT = (g.blendT ?? g.styleT) + h;
@@ -387,6 +438,10 @@ type RawPose = {
   twoHands: number;
   /** Where the stick points on the ice (x, z from the pelvis; y unused). */
   blade: Vec3;
+  /** Head pitched down toward the ice (Pose.lookDown); 0 if absent. */
+  lookDown?: number;
+  /** Height of the blade heel off the ice (m); 0 if absent (the shaft reaches the ice). */
+  bladeUp?: number;
 };
 
 const armReach = (d: BodyDims): number => d.upperArm + d.forearm;
@@ -462,18 +517,21 @@ function glidePose(d: BodyDims, ph: number, H: number, lean: number): RawPose {
 const STRIDE_STANCE = 0.6, STRIDE_PUSH = 0.15, STRIDE_SET_YAW = 0.08;
 
 /**
- * Forward stride. Each leg (left at phase q = ph, right half a cycle later): on the ice for q in [0, 0.6) (a short
- * glide under the body, then a push back and out at 45 degrees to his travel with the skate turned out), then lifted
+ * Forward stride (power 0) or sprint (power 1). Each leg (left at phase q = ph, right half a cycle later): on the ice
+ * for q in [0, 0.6) (a short glide under the body, then a push back and out at 45 degrees to his travel with the skate turned out), then lifted
  * and recovered under the body to set down pointing along travel. Double support around q = 0 and 0.5, so one skate
  * is always down. Built facing along travel, then turned to heading H. The shoulders counter-rotate against the legs;
  * at full effort the free hand lets go of the stick and swings, at an easy pace both hands stay on it.
+ * The sprint is the same pattern driven harder: head down, deeper lean and knees, longer pushes, a bigger arm drive, and
+ * the stick carried in the top hand only with the blade off the ice. Sharing the pattern keeps the two in step, so a
+ * blend between them at the same phase is smooth.
  */
-function stridePose(d: BodyDims, ph: number, speed: number, acc: number, H: number, lean: number): RawPose {
+function stridePose(d: BodyDims, ph: number, speed: number, acc: number, H: number, lean: number, power = 0): RawPose {
   const R = armReach(d);
-  const amp = strideAmp(speed, acc);
+  const amp = lerp(strideAmp(speed, acc), 1, power);
   // Striding well off his facing (squared up, moving at an angle) takes shorter pushes, not a wide split.
   const offFacing = 1 - 0.5 * smooth((Math.abs(H) - 0.4) / 0.8);
-  const reach = 0.62 * (d.thigh + d.shin) * amp * offFacing;
+  const reach = (0.62 + 0.05 * power) * (d.thigh + d.shin) * amp * offFacing;
   const diag = reach * Math.SQRT1_2;
   const baseZ = d.hipWidth / 2 + 0.02;
   const setX = 0.1;
@@ -500,13 +558,16 @@ function stridePose(d: BodyDims, ph: number, speed: number, acc: number, H: numb
   // Arms swing opposite the legs, evenly: a skate pushed back brings that side's arm forward (the left arm is furthest
   // forward as the left push ends, q = 0.6). The free (left) arm swings big; the stick hand rides at the hip.
   const s = amp * Math.sin(TAU * (ph - 0.35));
+  const drive = 0.55 + 0.1 * power; // free arm swing
   return {
-    hipY: d.hipHeight * (0.92 - 0.02 * amp), pitch: 0.4 + 0.12 * amp + lean, roll: shiftZ * 0.8, yaw: 0.5 * H - 0.08 * s,
-    twist: 0.14 * s, look: lookAt(H),
+    hipY: d.hipHeight * (0.92 - 0.02 * amp - 0.035 * power), pitch: 0.4 + 0.12 * amp + 0.17 * power + lean, roll: shiftZ * 0.8,
+    yaw: 0.5 * H - 0.08 * s, twist: (0.14 + 0.06 * power) * s, look: lookAt(H), lookDown: 0.4 * power,
     legs: headed(legs, H),
-    top: hipHand(d, 0.22 - 0.04 * s, 0.04, 0.12), freeRel: swingArm(0.2 + 0.55 * s, 0.93, -0.08 - 0.12 * Math.max(0, -s), R),
-    twoHands: clamp01((0.75 - amp) / 0.2),
+    // Sprinting, the stick hand pumps too, forward and back beside the hip.
+    top: hipHand(d, 0.22 - (0.04 + 0.08 * power) * s, 0.04, 0.12), freeRel: swingArm(0.2 + drive * s, 0.93, -0.08 - 0.12 * Math.max(0, -s), R),
+    twoHands: clamp01((0.75 - amp) / 0.2) * (1 - power),
     blade: turn(v3(0.95, 0, -0.5 - 0.04 * s), 0.3 * H),
+    bladeUp: GAIT.sprintBladeUp * power,
   };
 }
 
@@ -650,7 +711,16 @@ function downPose(d: BodyDims): RawPose {
  * Extra pose inputs the gait cannot see: `crouch` (0..1) lowers the stance, e.g. a centre at the faceoff dot; `dot` is
  * that dot in his body frame (left-shot frame: mirror z for a right shot), where the crouched stance points the stick.
  */
-export type PoseOptions = { crouch?: number; dot?: Vec3 };
+export type PoseOptions = {
+  crouch?: number; dot?: Vec3;
+  /**
+   * He has the puck: both hands on the stick and the blade on the ice (where carry.ts's carryPoint puts the puck). A
+   * gait stepped with `carrying` uses its eased GaitState.puck instead, so the change does not snap.
+   */
+  hasPuck?: boolean;
+  /** Stickhandling (carry.ts stickhandle): moves where the blade is aimed (forward, toward +z) while he has the puck. */
+  handle?: { dx: number; dz: number };
+};
 
 function rawPose(style: Style, g: GaitState, side: 1 | -1, m: Motion, d: BodyDims, o: PoseOptions): RawPose {
   const acc = fin(g.acc ?? m.accelAlong);
@@ -660,6 +730,7 @@ function rawPose(style: Style, g: GaitState, side: 1 | -1, m: Motion, d: BodyDim
     case 'stand': return standPose(d, lean, clamp01(fin(o.crouch ?? 0)), o.dot && Number.isFinite(o.dot.x) && Number.isFinite(o.dot.z) ? o.dot : undefined);
     case 'glide': return glidePose(d, phase, forwardHeading(travel), lean);
     case 'stride': return stridePose(d, phase, speed, acc, forwardHeading(travel), lean);
+    case 'sprint': return stridePose(d, phase, speed, acc, forwardHeading(travel), lean, 1);
     case 'crossover': return crossoverPose(d, phase, forwardHeading(travel), side, lean, roll, speed);
     case 'backward': return backwardPose(d, phase, acc, backwardHeading(travel), lean);
     case 'stop': return stopPose(d, speed, travel, side, lean);
@@ -677,10 +748,10 @@ function mixRaw(parts: { raw: RawPose; w: number }[]): RawPose {
   const leg = (i: 0 | 1): RawLeg => ({ foot: sum3((r) => r.legs[i].foot), footYaw: sum((r) => r.legs[i].footYaw) });
   return {
     hipY: sum((r) => r.hipY), pitch: sum((r) => r.pitch), roll: sum((r) => r.roll), yaw: sum((r) => r.yaw),
-    twist: sum((r) => r.twist), look: sum((r) => r.look),
+    twist: sum((r) => r.twist), look: sum((r) => r.look), lookDown: sum((r) => r.lookDown ?? 0),
     legs: [leg(0), leg(1)],
     top: sum3((r) => r.top), freeRel: sum3((r) => r.freeRel), twoHands: sum((r) => r.twoHands),
-    blade: sum3((r) => r.blade),
+    blade: sum3((r) => r.blade), bladeUp: sum((r) => r.bladeUp ?? 0),
   };
 }
 
@@ -688,7 +759,7 @@ function mixRaw(parts: { raw: RawPose; w: number }[]): RawPose {
 const within = (p: Vec3, c: Vec3, r: number): Vec3 => { const v = sub(p, c), l = len(v); return l > r ? add(c, mul(v, r / l)) : p; };
 
 /** Fit a raw pose to the body: lowest skate on the ice, hips low enough for the planted legs, hands within reach. */
-function fit(raw: RawPose, d: BodyDims): Pose {
+function fit(raw: RawPose, d: BodyDims): SkaterPose {
   const maxLeg = 0.985 * (d.thigh + d.shin);
   const feet = raw.legs.map((l) => ({ ...l.foot }));
   const minY = Math.min(feet[0]!.y, feet[1]!.y);
@@ -725,16 +796,20 @@ function fit(raw: RawPose, d: BodyDims): Pose {
   const top = lift(add(v3(0, hipY, 0), raw.top), sr);
   const stickAngle = Math.atan2(raw.blade.z - top.z, raw.blade.x - top.x);
   // The top hand chokes up a little, so the blade is carried about a metre in front rather than at full stick length.
-  const grip = STICK_GRIP * d.stick;
-  const sinT = Math.min(1, top.y / (d.stick - grip)), cosT = Math.sqrt(1 - sinT * sinT);
+  // The shaft descends from it to the heel, on the ice or raised by bladeUp.
+  const grip = STICK_GRIP * d.stick, below = d.stick - grip;
+  const up = clamp(fin(raw.bladeUp ?? 0), 0, Math.max(0, top.y));
+  const sinT = Math.min(1, (top.y - up) / below), cosT = Math.sqrt(1 - sinT * sinT);
   const shaft = v3(Math.cos(stickAngle) * cosT, -sinT, Math.sin(stickAngle) * cosT);
+  const heel = add(top, mul(shaft, below));
   const onShaft = add(top, mul(shaft, shaftGrip(top, shaft, sl, reach, 0.36 * d.stick)));
   const free = add(sl, raw.freeRel);
   const bottom = lift(lerp3(free, onShaft, clamp01(raw.twoHands)), sl);
   const leg = (i: 0 | 1): LegPose => ({ foot: feet[i]!, footYaw: raw.legs[i].footYaw, lifted: feet[i]!.y > 0.01 });
   return {
-    hipY, pitch: raw.pitch, roll: raw.roll, yaw, twist: raw.twist, look: raw.look,
+    hipY, pitch: raw.pitch, roll: raw.roll, yaw, twist: raw.twist, look: raw.look, lookDown: fin(raw.lookDown ?? 0),
     legs: [leg(0), leg(1)], arms: [{ hand: bottom }, { hand: top }], stickAngle, grip,
+    blade: v3(heel.x, Math.max(0, heel.y), heel.z),
   };
 }
 
@@ -751,10 +826,27 @@ function shaftGrip(top: Vec3, dir: Vec3, sh: Vec3, r: number, want: number): num
   return clamp(want, lo, Math.max(lo, tc + half)); // never above the butt: continuous with the branch above
 }
 
-export function poseOf(g: GaitState, motion: Motion, d: BodyDims, opts: PoseOptions = {}): Pose {
+/** A pose from poseOf: always says where the blade is and how far the head is down. */
+export type SkaterPose = Pose & { blade: Vec3; lookDown: number };
+
+/**
+ * With the puck (share k, 0..1): both hands on the stick, the blade on the ice, and the stickhandle moving the blade.
+ */
+function withPuck(raw: RawPose, k: number, handle: PoseOptions['handle']): RawPose {
+  if (k <= 0) return raw;
+  const hx = clamp(fin(handle?.dx ?? 0), -0.2, 0.2), hz = clamp(fin(handle?.dz ?? 0), -0.2, 0.2);
+  return {
+    ...raw,
+    twoHands: lerp(raw.twoHands, 1, k), bladeUp: (raw.bladeUp ?? 0) * (1 - k),
+    blade: add(raw.blade, v3(hx * k, 0, hz * k)),
+  };
+}
+
+export function poseOf(g: GaitState, motion: Motion, d: BodyDims, opts: PoseOptions = {}): SkaterPose {
   const m = sane(motion);
   const parts = shownMix(g).map((p) => ({ raw: rawPose(p.style, g, p.side, m, d, opts), w: p.w }));
-  return fit(parts.length === 1 ? parts[0]!.raw : mixRaw(parts), d);
+  const k = smooth(g.puck !== undefined ? fin(g.puck) : opts.hasPuck === true ? 1 : 0);
+  return fit(withPuck(parts.length === 1 ? parts[0]!.raw : mixRaw(parts), k, opts.handle), d);
 }
 
 /**
