@@ -45,3 +45,13 @@ Mockup of the watch screen layout: https://claude.ai/artifact/8zAg7iarbD54vTWYPK
 - Wanted eventually, not soon. The first 3D version is silent.
 - When added: rink sounds (skates, stick on puck, boards, posts, hits, whistle, goal horn) plus crowd (murmur that swells on chances and roars on goals).
 - No commentary: the owner thinks AI voice generation would be a hassle.
+
+## Art style (owner, 2026-11-23)
+
+- The game does not need to look photorealistic. Character art can be paintings or high-quality pixel art.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- One stylised look across the whole game, not realism.
+- Portraits must be generated from parts (head shape, hair, brows, eyes, nose, beard, skin, wrinkles) so that every generated player gets a unique face that ages and matches his 3D head. That rules out one-off paintings; it suits either a clean illustrated style (flat shapes, soft shading, "painted" feel) or pixel art.
+- Trade-off: pixel art is the easiest to generate well and has charm, but sits oddly next to a smooth 3D game view; an illustrated style matches simple stylised 3D players better. To be decided from a side-by-side mockup of the same generated face in each style, at several ages.
