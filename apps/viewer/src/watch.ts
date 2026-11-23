@@ -123,6 +123,8 @@ function aimCamera(dt: number, snap = false): void {
     attackingRight: f.prev.attackDir.home === 1, zoom: stage.clientWidth < NARROW_PX ? NARROW_ZOOM : 1,
     // The scene's cut on this frame: the camera cuts with a restart or a change of ends, and eases across a jump.
     cut: gs.cutKind(), snap,
+    // A board battle under way (the one nearest the puck): the broadcast camera closes in on it.
+    battle: battleSpot(f.next, puckV.x, puckV.z),
   };
   if (followOn && fv) input.followed = { pos: { x: fv.position.x, y: 0, z: fv.position.z }, facing: fv.facing, vel: velocityOf(f.prev, f.next, a, followId) };
   const r = stepOperator(operator, input, dt);
@@ -134,6 +136,17 @@ function aimCamera(dt: number, snap = false): void {
   if (g.scoreboard) g.scoreboard.visible = operator.camera !== 'overhead';
   const off = operator.camera === 'follow' && !followOn;
   hud.benchNote(off ? { def: g.defs.get(followId) } : null);
+}
+
+/** The spot (world) of the board battle under way nearest the puck at (x, z), or null. */
+function battleSpot(st: GameState, x: number, z: number): Vec3 | null {
+  let best: Vec3 | null = null, bd = Infinity;
+  for (const c of st.contests) {
+    if (c.kind !== 'boardBattle') continue;
+    const d = Math.hypot(c.spot.x - x, c.spot.y - z);
+    if (d < bd) { bd = d; best = { x: c.spot.x, y: 0, z: c.spot.y }; }
+  }
+  return best;
 }
 
 /** A skater's or goalie's velocity (world) blended between the frame's ticks. */

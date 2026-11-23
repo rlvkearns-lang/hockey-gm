@@ -8,7 +8,9 @@ import { contactFrames } from '../test/contact-frames';
 import { recorded, testSetup } from '../test/game';
 import { drivePeriod, type PeriodFrame, type PeriodSkater } from '../test/period';
 import { buildTimeline } from '../timeline';
-import { battleOn, battleSlotOf, KEEP_SECONDS } from './battles';
+import { initialSkaterAnim, OVERLAYS, poseSkater, stepSkater, type Overlay, type SkaterSample } from '../animator';
+import { contextWith, sample } from '../test/anim';
+import { BATTLE_OVERLAYS, battleOn, battleSlotOf, KEEP_SECONDS } from './battles';
 import { boardsGap, MAX_OFFSET, pairMin, radiusOfWeight, weightOfDims } from './contact';
 
 /**
@@ -266,32 +268,134 @@ describe('battles through a whole period (seed 5, 60 Hz, the animator and the bo
 });
 
 describe('seeking into a battle', () => {
-  it('a seek into the middle of a dig shows the poses play shows', () => {
-    const seed = 5, rec = recorded(seed), setup = testSetup(seed), tl = buildTimeline(rec.events), pb = createCursor(setup, rec);
-    const played = createGameScene(setup, { timeline: tl }), seeked = createGameScene(setup, { timeline: tl });
-    const starts = rec.events.filter((e): e is GameEventOf<'contestStart'> => e.type === 'contestStart' && e.detail.kind === 'boardBattle');
-    let checked = 0, worst = 0, worstAt = '';
-    for (const e of starts) {
-      if (checked >= 4) break;
-      const end = tl.contest(e.detail.contestId)?.end;
-      if (!end || end.detail.result === 'protected' || end.tick - e.tick < 70) continue;
-      const t = end.tick - 20; // in the dig, with the stances well under way (a battle can outlast the pre-roll)
-      seekScene(pb, played, t - 150, 0);
-      for (let i = 1; i <= 300; i++) { pb.seek(t - 150 + i / 2); played.update(pb.frame(), 1 / 60); }
+  /** Seek against play (4 s of play at 60 Hz before) at each moment: the stance parts of everyone in the battle. */
+  function compare(seed: number, moments: { t: number; ids: string[] }[], skaters?: readonly Overlay[]): { worst: number; worstAt: string; pos: number; posAt: string; each: number[] } {
+    const rec = recorded(seed), setup = testSetup(seed), tl = buildTimeline(rec.events), pb = createCursor(setup, rec);
+    const opts = skaters ? { timeline: tl, animation: { skaters } } : { timeline: tl };
+    const played = createGameScene(setup, opts), seeked = createGameScene(setup, opts);
+    let worst = 0, worstAt = '', pos = 0, posAt = '';
+    const each: number[] = [];
+    for (const { t, ids } of moments) {
+      seekScene(pb, played, t - 120, 0);
+      for (let i = 1; i <= 240; i++) { pb.seek(t - 120 + i / 2); played.update(pb.frame(), 1 / 60); }
       seekScene(pb, seeked, t);
-      const ids = e.detail.participants;
+      let here = 0;
       for (const id of ids) {
-        const a = played.figure(id)!.pose!, b = seeked.figure(id)!.pose!;
-        // The stance's own parts: the blade (where the dig puts it), the free hand, the shoulders' turn. (The hips and the
-        // top hand solved from the blade also carry the gait's stride, which no engine state pins: scene-seek.test.ts.)
+        const fa = played.figure(id)!, fb = seeked.figure(id)!;
+        if (!fa.pose || !fb.pose) continue;
+        const a = fa.pose, b = fb.pose;
+        // The stance's own parts: the blade, the free hand, the shoulders' turn. (The hips and the top hand solved from
+        // the blade also carry the gait's stride, which no engine state pins: scene-seek.test.ts.)
         const m = Math.max(dist3(a.arms[0].hand, b.arms[0].hand), dist3(a.blade, b.blade), Math.abs((a.twist ?? 0) - (b.twist ?? 0)));
+        here = Math.max(here, m);
         if (m > worst) { worst = m; worstAt = `${t} ${id}`; }
+        const d = Math.hypot(fa.position.x - fb.position.x, fa.position.z - fb.position.z);
+        if (d > pos) { pos = d; posAt = `${t} ${id}`; }
       }
-      checked++;
+      each.push(here);
     }
     played.dispose(); seeked.dispose();
-    expect(checked).toBe(4);
-    // The gait's stride phase is not pinned by any engine state (scene-seek.test.ts); the battle stances are.
-    expect(worst, worstAt).toBeLessThan(0.08);
+    return { worst, worstAt, pos, posAt, each };
+  }
+
+  it('a seek into the middle of a dig shows the poses play shows', () => {
+    const rec = recorded(5), tl = buildTimeline(rec.events);
+    const moments = rec.events.filter((e): e is GameEventOf<'contestStart'> => e.type === 'contestStart' && e.detail.kind === 'boardBattle')
+      .map((e) => ({ e, end: tl.contest(e.detail.contestId)?.end }))
+      .filter(({ e, end }) => end && end.detail.result !== 'protected' && end.tick - e.tick >= 70).slice(0, 4)
+      .map(({ e, end }) => ({ t: end!.tick - 20, ids: e.detail.participants })); // in the dig, the stances well under way
+    expect(moments.length).toBe(4);
+    const r = compare(5, moments), plain = compare(5, moments, OVERLAYS.filter((o) => !BATTLE_OVERLAYS.includes(o)));
+    // The gait's stride phase is not pinned by any engine state (scene-seek.test.ts); the battle stances are: they add
+    // no more than 0.03 m to what the skating alone differs by, and stay within 0.1 m.
+    r.each.forEach((m, i) => expect(m, `${moments[i]!.t}: ${m.toFixed(3)} against ${plain.each[i]!.toFixed(3)} plain`).toBeLessThan(Math.max(0.1, plain.each[i]! + 0.03)));
+  });
+
+  it('a seek just after a man is pinned or a supporter joins shows what play shows', () => {
+    // From the engine's states: the tick each of the first battles names its pinned man, and the tick a supporter joins.
+    const seed = 5, rec = recorded(seed), pb = createCursor(testSetup(seed), rec);
+    const moments: { t: number; ids: string[] }[] = [];
+    let pins = 0, sups = 0;
+    for (const e of rec.events) {
+      if (pins >= 3 && sups >= 3) break;
+      if (e.type !== 'contestStart' || e.detail.kind !== 'boardBattle') continue;
+      let pinSeen = false, supSeen = false;
+      for (let t = e.tick; t < e.tick + 150; t++) {
+        pb.seek(t);
+        const c = pb.frame().prev.contests.find((k) => k.id === e.detail.contestId);
+        if (!c || c.kind !== 'boardBattle') break;
+        if (!pinSeen && c.roles.pinned !== null) { pinSeen = true; if (pins < 3) { pins++; moments.push({ t: t + 3, ids: c.participants.slice() }); } }
+        if (!supSeen && (c.roles.supportA !== null || c.roles.supportB !== null)) { supSeen = true; if (sups < 3) { sups++; moments.push({ t: t + 3, ids: c.participants.slice() }); } }
+      }
+    }
+    expect(moments.length).toBe(6);
+    const r = compare(seed, moments);
+    // The same moments with the battle overlays out: what the skating itself differs by (its stride's phase, which no
+    // engine state pins, swings a free arm and the stick). The battle stances add no more than 0.08 m to it, at each
+    // moment, and the drawn places agree within 0.15 m.
+    const plain = compare(seed, moments, OVERLAYS.filter((o) => !BATTLE_OVERLAYS.includes(o)));
+    r.each.forEach((m, i) => expect(m, `${moments[i]!.t}: ${m.toFixed(3)} against ${plain.each[i]!.toFixed(3)} without the battle stances`).toBeLessThan(Math.max(0.15, plain.each[i]! + 0.08)));
+    expect(r.pos, `drawn place ${r.posAt}`).toBeLessThan(0.15);
+  });
+});
+
+describe('battles end and mirror cleanly', () => {
+  it('a battle cut off by a period break leaves nothing on anyone after the break', () => {
+    // A contest the engine closed with `whistle` at a period's end (seed 42 has a board battle there).
+    for (const seed of [42, 5]) {
+      const rec = recorded(seed), setup = testSetup(seed), tl = buildTimeline(rec.events), pb = createCursor(setup, rec);
+      const ends = new Set(tl.periodEnds);
+      const cut = rec.events.find((e): e is GameEventOf<'contestEnd'> => e.type === 'contestEnd' && e.detail.result === 'whistle' && ends.has(e.tick));
+      expect(cut, `seed ${seed}`).toBeDefined();
+      const ids = tl.contest(cut!.detail.contestId)!.start.detail.participants;
+      const withB = createGameScene(setup, { timeline: tl });
+      const without = createGameScene(setup, { timeline: tl, animation: { skaters: OVERLAYS.filter((o) => !BATTLE_OVERLAYS.includes(o)) } });
+      for (const sc of [withB, without]) seekScene(pb, sc, cut!.tick - 60);
+      for (let i = 1; i <= 180; i++) { pb.seek(cut!.tick - 60 + i / 2); withB.update(pb.frame(), 1 / 60); without.update(pb.frame(), 1 / 60); }
+      // 1.5 s after the break: every participant drawn exactly as with no battle overlays at all.
+      for (const id of ids) {
+        const a = withB.figure(id)!, b = without.figure(id)!;
+        expect(a.onIce).toBe(b.onIce);
+        if (a.pose && b.pose) expect(a.pose, `${seed} ${id}`).toEqual(b.pose);
+      }
+      withB.dispose(); without.dispose();
+    }
+  });
+
+  it('a right shot in a battle is the mirror image of a left shot in the mirrored battle', () => {
+    // A pin on the boards at +y with him the pinner, and the same mirrored across his facing (y to -y) with him a right
+    // shot: his body-frame pose (left-shot frame, as the rig mirrors it) is the same.
+    const make = (sgn: 1 | -1, right: boolean) => {
+      const me = sample({ right, speed: 0.3 }), other = sample({ speed: 0.2 });
+      (me as { id: string }).id = 'p1'; (other as { id: string }).id = 'p2';
+      me.pos.x = 3; me.pos.y = sgn * 11.6; me.facing = sgn * 1.3;
+      other.pos.x = 3.2; other.pos.y = sgn * 12.3; other.facing = sgn * 1.4;
+      (me.state as { pos: { x: number; y: number }; facing: number }).pos = { ...me.pos }; (me.state as { facing: number }).facing = me.facing;
+      me.vel.x = 0.3 * Math.cos(me.facing); me.vel.y = 0.3 * Math.sin(me.facing);
+      const ctx = contextWith({});
+      (ctx.skaters as Map<string, SkaterSample>).set('p1', me).set('p2', other);
+      const contest = {
+        id: 77, kind: 'boardBattle', stage: 'dig', stageT: 0.4, participants: ['p1', 'p2'], leader: 'p1', spot: { x: 3.3, y: sgn * 12.4 }, freeIds: [],
+        roles: { a: 'p1', b: 'p2', carrier: null, stripped: null, first: 'p1', pinned: 'p2', digLast: 'p1', supportA: null, supportB: null, winner: null },
+        data: { holdsPuck: true, slide: 0, held: 0, firstSet: true, balance: 2, nextAt: 1, digRounds: 1, clean: false },
+      } as unknown as ContestState;
+      (ctx as unknown as { contests: ContestState[] }).contests = [contest];
+      (ctx.state as { contests: ContestState[] }).contests = [contest];
+      ctx.puck.engine = { x: 3.3, y: 0, z: sgn * 12.4 }; ctx.puck.drawn = { ...ctx.puck.engine };
+      let anim = initialSkaterAnim();
+      for (let i = 0; i < 30; i++) { anim = stepSkater(anim, me, ctx, 1 / 30, BATTLE_OVERLAYS); ctx.time += 1 / 30; }
+      return { pose: poseSkater(anim, me, ctx, me.dims, BATTLE_OVERLAYS), ctx };
+    };
+    const l = make(1, false), r = make(-1, true);
+    const near = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(1e-6);
+    near(l.pose.pose.hipY, r.pose.pose.hipY); near(l.pose.pose.twist ?? 0, r.pose.pose.twist ?? 0); near(l.pose.pose.roll, r.pose.pose.roll);
+    for (const k of ['x', 'y', 'z'] as const) {
+      near(l.pose.pose.blade[k], r.pose.pose.blade[k]);
+      near(l.pose.pose.arms[0].hand[k], r.pose.pose.arms[0].hand[k]); near(l.pose.pose.arms[1].hand[k], r.pose.pose.arms[1].hand[k]);
+    }
+    // And the drawn offset mirrors across his facing: x the same, the cross-ice part reversed.
+    near(l.pose.offset.x, r.pose.offset.x); near(l.pose.offset.z, -r.pose.offset.z);
+    // The stance is really on (not two plain skating poses).
+    expect(Math.abs(l.pose.pose.pitch - 0.36)).toBeGreaterThan(0.2);
   });
 });

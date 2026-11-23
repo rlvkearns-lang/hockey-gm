@@ -38,9 +38,11 @@ import { sharedPlayback } from './test/game';
 // still gives Task 3's 97e20551b0cad32b and eba1ba61baa6f591.
 // Re-pinned by Task 5 (board battles, net-front battles and loose-puck races, overlays/battles.ts): 5: 59c71060018936d9
 // and 42: 2f707429f246afd7 before (473e45b), which this code still gives with BATTLE_OVERLAYS taken out of OVERLAYS.
+// Re-pinned by Task 5's fix round 1 (the shoulder battle, the result held as a beat, the net-front shove): 5:
+// 1dc7b8be0de90acb and 42: c4115d5c8b595eef before (8368d45); with BATTLE_OVERLAYS out this code still gives 473e45b's.
 const PICTURE_HASH: Record<number, string> = {
-  5: '1dc7b8be0de90acb',
-  42: 'c4115d5c8b595eef',
+  5: '303e6178dfc64315',
+  42: 'cad81dcc00ac9916',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */

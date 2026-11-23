@@ -539,8 +539,9 @@ if (only && only.includes('battles')) {
   console.log('battles', JSON.stringify(found));
   log.battles = found;
   for (const [k, v] of Object.entries(found)) {
-    const span = v.end - v.start, o = [];
-    for (let i = 0; i < 10; i++) o.push(Math.round(-6 + (span + 30) * i / 9));
+    // BATTLE_FRAMES frames (10) from just before the start to BATTLE_TAIL ticks after the end (24).
+    const nf = Number(process.env.BATTLE_FRAMES ?? 10), tail = Number(process.env.BATTLE_TAIL ?? 24), span = v.end - v.start, o = [];
+    for (let i = 0; i < nf; i++) o.push(Math.round(-6 + (span + 6 + tail) * i / (nf - 1)));
     for (const view of (process.env.BATTLE_VIEWS ?? 'side,follow,broadcast').split(',')) {
       const r = await bp.evaluate(({ v, o, view }) => {
         const w = window.__watch;
@@ -569,8 +570,8 @@ if (only && only.includes('battles')) {
         w.seek(start - 18);
         w.step(18 / 30);
         const sheet = document.createElement('canvas'), c0 = document.querySelector('.stage canvas');
-        const fw = 480, fh = 360;
-        sheet.width = fw * 5; sheet.height = fh * 2;
+        const fw = 480, fh = 360, cols = Math.ceil(o.length / 2);
+        sheet.width = fw * cols; sheet.height = fh * 2;
         const g = sheet.getContext('2d');
         g.fillStyle = '#000'; g.fillRect(0, 0, sheet.width, sheet.height);
         const shots = [];
@@ -578,12 +579,22 @@ if (only && only.includes('battles')) {
         for (let i = 0; i < o.length; i++) {
           const t = v.start + o[i];
           if (t > at) { w.step((t - at) / 30); at = t; }
+          if (view === 'side') {
+            // Keep the two men in the picture as they move: the same angle, aimed at their midpoint now.
+            const st = w.state(), q = v.ids.slice(0, 2).map((id) => st.skaters.find((x) => x.id === id)).filter((x) => x && x.onIce);
+            if (q.length) {
+              const cx = q.reduce((a2, p2) => a2 + p2.pos.x, 0) / q.length, cz = q.reduce((a2, p2) => a2 + p2.pos.y, 0) / q.length;
+              const mx2 = mx + (cx - mx) * 0.7, mz2 = mz + (cz - mz) * 0.7;
+              w.aimAt({ pos: { x: mx2 + nx * 7.5, y: 2.4, z: mz2 + nz * 7.5 }, look: { x: mx2, y: 0.55, z: mz2 }, fov: 40 });
+              w.renderOnce();
+            }
+          }
           const url = w.grab();
           const sw = c0.width * (view === 'side' ? 0.62 : 0.8), sh = sw * 0.75;
-          g.drawImage(c0, (c0.width - sw) / 2, (c0.height - sh) / 2, sw, sh, (i % 5) * fw, Math.floor(i / 5) * fh, fw, fh);
+          g.drawImage(c0, (c0.width - sw) / 2, (c0.height - sh) / 2, sw, sh, (i % cols) * fw, Math.floor(i / cols) * fh, fw, fh);
           const sec = ((t - v.start) / 30).toFixed(1);
-          g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect((i % 5) * fw, Math.floor(i / 5) * fh, 96, 22);
-          g.fillStyle = '#fff'; g.font = '16px sans-serif'; g.fillText(`${i + 1}  ${sec} s`, (i % 5) * fw + 4, Math.floor(i / 5) * fh + 16);
+          g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect((i % cols) * fw, Math.floor(i / cols) * fh, 96, 22);
+          g.fillStyle = '#fff'; g.font = '16px sans-serif'; g.fillText(`${i + 1}  ${sec} s`, (i % cols) * fw + 4, Math.floor(i / cols) * fh + 16);
           shots.push({ url, tick: w.info().tick });
         }
         w.aimAt(null);

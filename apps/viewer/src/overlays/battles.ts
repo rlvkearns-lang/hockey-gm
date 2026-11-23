@@ -48,15 +48,20 @@ const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
 const fin = (v: number, d = 0): number => (Number.isFinite(v) ? v : d);
 
 /** How long (s) a battle's slot is kept after its end: every stance has come off by then. */
-export const KEEP_SECONDS = 1.2;
+export const KEEP_SECONDS = 1.6;
 /** The winner and loser hold their result this long (s) after the end, then come off over OFF_RESULT. */
-const HOLD_RESULT = 0.65;
+const HOLD_RESULT = 1.0;
+/** After a win by support, the two men stay tangled up this long (s) while the supporter goes with the puck; a
+ * scramble's loser stays bent over this long (the winner is the first one up and moving). */
+const UNTANGLE = 0.6, STILL_BENT = 0.8;
 /** The blade's aim point stays at least this far (m) from his centre, and moves at most this fast (m/s). */
 const AIM_MIN = 0.15, AIM_SPEED = 5;
 /** A blade is put no nearer his centre than this (m). */
 const BLADE_MIN = 0.5;
 /** The furthest (m, from under his pelvis) a blade is put on the ice reaching for the puck. */
 const REACH = 1.6;
+/** Net front: the defender's shoves, this many a second. */
+const NET_SHOVE_HZ = 1.4;
 /** Dig jabs: this many a second. */
 const JAB_HZ = 2.6;
 
@@ -68,20 +73,22 @@ export type Stances = {
   shield: number; lean: number; drive: number; inside: number;
   pinner: number; pinned: number; scrum: number; ahead: number; dig: number; onPuck: number;
   support: number; win: number; lose: number;
+  /** The supporting player who takes the puck out of the pile (a win by support) and goes. */
+  away: number;
   /** Net front: attacker, defender; the stage (free, tied). */
   att: number; def: number; free: number; tied: number;
   /** Loose-puck race: racing; the winner and loser of it. */
   race: number; raceWin: number; raceLose: number;
 };
-const STANCES = ['shield', 'lean', 'drive', 'inside', 'pinner', 'pinned', 'scrum', 'ahead', 'dig', 'onPuck', 'support', 'win', 'lose', 'att', 'def', 'free', 'tied', 'race', 'raceWin', 'raceLose'] as const;
+const STANCES = ['shield', 'lean', 'drive', 'inside', 'pinner', 'pinned', 'scrum', 'ahead', 'dig', 'onPuck', 'support', 'win', 'lose', 'away', 'att', 'def', 'free', 'tied', 'race', 'raceWin', 'raceLose'] as const;
 type StanceKey = typeof STANCES[number];
-const BOARD: readonly StanceKey[] = ['shield', 'lean', 'drive', 'inside', 'pinner', 'pinned', 'scrum', 'ahead', 'dig', 'onPuck', 'support', 'win', 'lose'];
+const BOARD: readonly StanceKey[] = ['shield', 'lean', 'drive', 'inside', 'pinner', 'pinned', 'scrum', 'ahead', 'dig', 'onPuck', 'support', 'win', 'lose', 'away'];
 const NET: readonly StanceKey[] = ['att', 'def', 'free', 'tied'];
 const RACE: readonly StanceKey[] = ['race', 'raceWin', 'raceLose'];
 /** Seconds each stance takes to come fully on (and off). */
 const RATE: Record<StanceKey, number> = {
   shield: 0.3, lean: 0.3, drive: 0.3, inside: 0.3, pinner: 0.35, pinned: 0.35, scrum: 0.35, ahead: 0.3, dig: 0.3, onPuck: 0.25,
-  support: 0.4, win: 0.45, lose: 0.45, att: 0.35, def: 0.35, free: 0.35, tied: 0.3, race: 0.45, raceWin: 0.3, raceLose: 0.4,
+  support: 0.4, win: 0.45, lose: 0.45, away: 0.3, att: 0.35, def: 0.35, free: 0.35, tied: 0.3, race: 0.45, raceWin: 0.3, raceLose: 0.4,
 };
 
 const newStances = (): Stances => Object.fromEntries(STANCES.map((k) => [k, 0])) as Stances;
@@ -95,6 +102,8 @@ export type BattleRec = {
   supportA: string | null; supportB: string | null; carrier: string | null; leader: string | null;
   /** The result once known (the stage resolve, or the contestEnd event), the winner and the loser shown. */
   how: string; winnerId: string | null; loserId: string | null;
+  /** Who the engine gave the puck at the end (contestEnd winnerId when the puck went `toWinner`; null if it squirted). */
+  recv: string | null;
   /** The spot (engine x, y) and the boards' outward normal there (engine x, y). */
   sx: number; sy: number; nx: number; ny: number;
   /** Where the other of the two men was last seen on the ice (engine x, y): he may step off while it fades. */
@@ -123,7 +132,7 @@ export const battleSlotOf = (anim: SkaterAnim): BattleSlot | undefined => slotOf
 
 const newRec = (): BattleRec => ({
   cid: -1, kind: null, stage: '', stageAt: -1, end: -1, a: '', b: '', pinned: null, digLast: null, winner: null, first: null,
-  supportA: null, supportB: null, carrier: null, leader: null, how: '', winnerId: null, loserId: null,
+  supportA: null, supportB: null, carrier: null, leader: null, how: '', winnerId: null, loserId: null, recv: null,
   sx: 0, sy: 0, nx: 1, ny: 0, ox: 0, oy: 0, face: NaN, hold: 0,
 });
 const newSlot = (): BattleSlot => ({ recs: { boardBattle: newRec(), netFront: newRec(), looseRace: newRec() }, st: newStances(), ax: 0, ay: 0, px: 0, py: 0, lim: { board: newLim(), net: newLim(), race: newLim() } });
@@ -182,6 +191,7 @@ function readEnd(sl: BattleRec, ctx: AnimContext): void {
   sl.end = ctx.state.tick;
   const e = ctx.timeline.contest(sl.cid)?.end;
   const res = (e?.detail.result ?? 'whistle') as ContestOutcome;
+  sl.recv = e && e.detail.puck === 'toWinner' ? e.detail.winnerId : null;
   if (sl.kind === 'boardBattle') {
     if (res === 'protected') { sl.how = 'protect'; sl.winnerId = sl.carrier ?? e?.detail.winnerId ?? null; sl.loserId = sl.winnerId === sl.a ? sl.b : sl.a; }
     else if (res === 'pinned' || res === 'stick' || res === 'support' || res === 'scramble') {
@@ -206,6 +216,7 @@ function targets(sl: BattleRec, me: string, ctx: AnimContext, t: Stances): Stanc
         if (s === 'protect') { if (sl.carrier === me) t.shield = 1; else t.lean = 1; }
         else if (s === 'arrive') { t.drive = 1; t.inside = sl.first === me ? 1 : 0; }
         else {
+          // Nobody pinned (the shove before the pin, or a scramble): the shoulder battle, never the pinner's stance.
           if (sl.pinned === null) { t.scrum = 1; t.ahead = sl.leader === me ? 1 : 0; }
           else if (sl.pinned === me) t.pinned = 1;
           else t.pinner = 1;
@@ -214,8 +225,20 @@ function targets(sl: BattleRec, me: string, ctx: AnimContext, t: Stances): Stanc
         }
       }
     } else if (since < HOLD_RESULT && sl.how !== '') {
-      if (me === sl.winnerId) t.win = 1;
+      // The result as a beat a viewer can read, held about a second (see winPose, losePose, awayPose).
+      const how = sl.how, main = me === sl.a || me === sl.b;
+      if (how === 'support') {
+        // The supporter who took it goes with it; the two men are still tangled up a moment.
+        if (me === sl.recv && !main) t.away = 1;
+        else if (main && since < UNTANGLE) {
+          if (sl.pinned === null) t.scrum = 1; else if (sl.pinned === me) t.pinned = 1; else t.pinner = 1;
+        }
+      } else if (how === 'protect') {
+        if (me === sl.winnerId) { t.shield = 1; t.win = 1; } else if (me === sl.loserId) t.lose = 1;
+      } else if (how === 'scramble' && me === sl.loserId && since < STILL_BENT) t.scrum = 1;
+      else if (me === sl.winnerId) t.win = 1;
       else if (me === sl.loserId) t.lose = 1;
+      if (me === sl.recv && !main && how !== 'support') t.away = 1;
     }
   } else if (sl.kind === 'netFront') {
     if (live) {
@@ -471,7 +494,7 @@ function jab(g: Geo, onPuck: number, turn: number): Vec3 {
   let ph = 0;
   for (let i = 0; i < id.length; i++) ph += id.charCodeAt(i) * 0.37;
   const w = Math.sin(g.ctx.time * 2 * Math.PI * JAB_HZ + ph), o = smooth(onPuck);
-  const back = (1 - o) * (0.2 + 0.08 * (0.5 + 0.5 * w)) + o * 0.02 * (0.5 + 0.5 * w);
+  const back = (1 - o) * (0.21 + 0.06 * (0.5 + 0.5 * w)) + o * 0.02 * (0.5 + 0.5 * w);
   const lift = (1 - o) * 0.06 * Math.max(0, Math.sin(g.ctx.time * 2 * Math.PI * JAB_HZ + ph + 1.2));
   // Beside the puck on his blade side (a blade short of it toward him would stand his stick on end).
   const ux = -p.x / d, uz = -p.z / d, a = -Math.PI / 2;
@@ -491,8 +514,14 @@ function shieldPose(r: RawPose, g: Geo): RawPose {
   const tw = clamp(o.h - side * 2.5, -1.0, 1.0) * far;
   const out = turned(r, tw, 1.0);
   const hh = g.dims.hipHeight;
-  // The puck to his far side (away from the checker), the near shoulder and hip into him.
-  const dz = -side * 0.3 * far;
+  // The puck to his far side (away from the checker), the near shoulder and hip into him; never into the boards (the
+  // carried puck goes where the blade goes).
+  // (Only while the check is on: once he has rolled off it the puck goes back where his skating carries it, so it
+  // does not jump when he passes it.)
+  let dz = -side * 0.22 * far * (1 - smooth(sinceEnd(g) / 0.3));
+  const c = Math.cos(g.s.facing), n = Math.sin(g.s.facing), m = g.s.right ? -1 : 1, bz = r.blade.z + dz;
+  const gapAt = boardsGap(g.s.pos.x + r.blade.x * c - m * bz * n, g.s.pos.y + r.blade.x * n + m * bz * c, nrm);
+  dz *= smooth((gapAt - BOARDS_KEEP) / 0.3);
   return {
     ...out, hipY: out.hipY - 0.08 * hh, pitch: out.pitch + 0.15, roll: out.roll + side * 0.16 * far,
     look: clamp(o.h - out.twist, -1.3, 1.3) * 0.5,
@@ -520,7 +549,8 @@ function drivePose(r: RawPose, g: Geo, inside: number): RawPose {
   const p = aimPt(g);
   const out = turned(r, Math.atan2(p.z, p.x), 0.8, nearK(Math.hypot(p.x, p.z)));
   const hh = g.dims.hipHeight;
-  let d: RawPose = { ...out, hipY: out.hipY - (0.1 + 0.05 * inside) * hh, pitch: out.pitch + 0.3, lookDown: 0.3, top: v3(0.34, 0.1, 0.14), twoHands: 0.5 };
+  // Skating hard at the puck, stick out to it (not yet low: low is for the pin and the shoulder battle).
+  let d: RawPose = { ...out, hipY: out.hipY - 0.04 * hh, pitch: out.pitch + 0.18, lookDown: 0.3, top: v3(0.34, 0.1, 0.14), twoHands: 0.5 };
   const o = otherMan(g, mainOther(g));
   if (o && inside > 0) {
     // The first man in: his shoulder dropped into the other, an arm out to hold him off the puck.
@@ -532,16 +562,25 @@ function drivePose(r: RawPose, g: Geo, inside: number): RawPose {
 }
 const mixV = (a: Vec3, b: Vec3, k: number): Vec3 => v3(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k);
 
+/** The shoulder battle's crouch: both men's hips at this share of their hip height (level with each other). */
+const SHOULDER_HIP = 0.8;
 function scrumPose(r: RawPose, g: Geo, ahead: number): RawPose {
-  // Nobody pinned: both down low and wide, side by side, shoulder into shoulder, both hands on the stick in the puck
-  // (no glove on the other's back, no one upright on the boards: that is a pin).
-  const out = stance(turned(r, boardsHeading(g), 1.1), 0.4, -0.05, 0.05);
-  const hh = g.dims.hipHeight;
+  // Nobody pinned (the shove before a pin, or a scramble): the two men side by side along the boards, level, each
+  // turned with his boards-side shoulder to the boards and his inside shoulder into the other man, both sticks hacking
+  // at the puck between them. Nobody square to the boards, nobody behind anybody, nobody upright (those are the pin).
   const o = otherMan(g, mainOther(g));
+  const hb = boardsHeading(g);
+  // Along the boards toward the other man, turned 35 degrees in toward the boards.
+  const tx = -g.sl.ny, ty = g.sl.nx, oe = g.ctx.skaters.get(mainOther(g));
+  // (Which side of him along the boards the other man is drawn: as shoulderOffset puts them.)
+  const w = oe ? clamp(((oe.pos.x - g.s.pos.x) * tx + (oe.pos.y - g.s.pos.y) * ty) / 0.2 + (g.s.id === g.sl.a ? 1 : -1), -1, 1) : 0;
+  const h = hb + wrap(headingOf(g, tx, ty) - hb) * 0.6 * w;
+  const out = stance(turned(r, h, 1.4), 0.38, -0.05, 0.05);
+  const hh = g.dims.hipHeight;
   const side = o ? clamp(o.p.z / 0.5, -1, 1) : 0;
   const s: RawPose = {
-    ...out, hipY: out.hipY - (0.2 + 0.04 * ahead) * hh, pitch: out.pitch + 0.5 + 0.1 * ahead, roll: out.roll + side * (0.22 + 0.12 * ahead),
-    lookDown: 0.45, top: v3(0.12, 0.28, 0.14), twoHands: 1,
+    ...out, hipY: SHOULDER_HIP * hh - 0.03 * ahead * hh, pitch: 0.75 + 0.08 * ahead, roll: out.roll + side * (0.25 + 0.12 * ahead),
+    lookDown: 0.5, top: v3(0.12, 0.25, 0.14), twoHands: 1,
   };
   return bladeAt(s, reachable(aimPt(g), REACH, 0), g.dims);
 }
@@ -613,18 +652,41 @@ function outSign(g: Geo, team: SkaterSample | undefined): number {
   return (g.s.right ? -1 : 1) * (along >= 0 ? 1 : -1);
 }
 
-/** How far the winner's blade is still on the puck after the end (1 at the end, 0 WIN_LET_GO s later). */
-const WIN_LET_GO = 0.25;
+/** How far the winner's blade is still on the puck after the end (1 at the end, 0 WIN_LET_GO s later) when the engine
+ * does not give him the puck; when it does, the carry keeps the puck on his blade. */
+const WIN_LET_GO = 0.6;
+/** Seconds since the battle's end (0 while it is under way). */
+const sinceEnd = (g: Geo): number => (g.sl.end < 0 ? 0 : Math.max(0, (g.ctx.tick + g.ctx.alpha - g.sl.end) * DT));
 function winPose(r: RawPose, g: Geo): RawPose {
-  const hb = boardsHeading(g), how = g.sl.how, sg = outSign(g, g.s);
-  // Out along the boards, or, having dug it out from against them, spun out toward open ice.
-  const h = how === 'stick' ? hb + sg * 2.4 : hb + sg * Math.PI / 2;
-  const out = turned(r, h, 1.1);
-  const hh = g.dims.hipHeight;
-  const w: RawPose = { ...out, hipY: out.hipY - 0.1 * hh, pitch: out.pitch + 0.32, lookDown: 0.2, top: v3(0.3, 0.06, 0.14) };
-  const on = g.sl.end < 0 ? 1 : 1 - smooth((g.ctx.tick + g.ctx.alpha - g.sl.end) * DT / WIN_LET_GO);
+  const hb = boardsHeading(g), how = g.sl.how, sg = outSign(g, g.s), hh = g.dims.hipHeight;
+  const loser = otherMan(g, g.sl.loserId);
+  let h: number, w: RawPose;
+  if (how === 'stick' && loser) {
+    // He spins off the boards with it, away from the pinner: low, driving, his back to the man he beat.
+    h = wrap(loser.h + Math.PI);
+    const out = turned(r, h, 1.5);
+    w = { ...out, hipY: out.hipY - 0.12 * hh, pitch: out.pitch + 0.4, lookDown: 0.25, top: v3(0.3, 0.06, 0.14) };
+  } else if (how === 'scramble') {
+    // The first one up and moving with it: upright, turned out along the boards.
+    h = hb + sg * Math.PI / 2;
+    const out = turned(r, h, 1.2);
+    w = { ...out, pitch: out.pitch + 0.15, lookDown: 0.1, top: v3(0.3, 0.06, 0.14) };
+  } else {
+    // pinned: he steps back off the boards and turns up ice along them; protect: he rolls off the check along them.
+    h = hb + sg * Math.PI / 2;
+    const out = turned(r, h, 1.3);
+    w = { ...out, hipY: out.hipY - 0.06 * hh, pitch: out.pitch + 0.25, lookDown: 0.2, top: v3(0.3, 0.06, 0.14) };
+  }
+  if (how === 'protect') return w; // his shield (on with it) keeps the puck on the far side of his body
+  // The puck on his blade: while it is under way, and after it as long as the engine leaves the puck loose for him.
+  // Given the puck, he carries it out in front of him, stick on the ice, clear of the bodies (the carry puts the puck
+  // where his blade is), head up.
+  const carried = g.ctx.puck.carrierId === g.s.id;
+  // (Carrying it, his stick stays where his skating has it: the carry holds the puck there, and a pass from there
+  // leaves without a jump.)
+  if (carried && g.sl.end >= 0) return carryOut({ ...w, top: r.top, blade: r.blade, bladeAt: r.bladeAt, bladeAtW: r.bladeAtW, bladeUp: r.bladeUp }, g, h, sinceEnd(g));
+  const on = g.sl.end < 0 ? 1 : 1 - smooth(sinceEnd(g) / WIN_LET_GO);
   if (!(on > 0)) return w;
-  // With the puck on his blade (pushing it back to his supporting player on a win by support).
   let p = aimPt(g);
   if (how === 'support') {
     const sup = otherMan(g, g.s.id === g.sl.a ? g.sl.supportA : g.sl.supportB);
@@ -637,25 +699,50 @@ function winPose(r: RawPose, g: Geo): RawPose {
 }
 
 function losePose(r: RawPose, g: Geo): RawPose {
-  const hb = boardsHeading(g), how = g.sl.how, hh = g.dims.hipHeight;
+  const hb = boardsHeading(g), how = g.sl.how, hh = g.dims.hipHeight, t = sinceEnd(g);
   const win = otherMan(g, g.sl.winnerId);
+  if (how === 'stick' && win) {
+    // The pinner beaten: left reaching after him, a glove grabbing at his back, the stick stretched after the puck.
+    const out = turned(r, win.h, 1.2);
+    const l: RawPose = { ...out, hipY: out.hipY - 0.12 * hh, pitch: out.pitch + 0.45, lookDown: 0.2, top: along(turnOf(win.h, 1.2) - out.yaw, 0.42, 0.12, 0.12), twoHands: 0 };
+    l.freeRel = gloveOn(l, win.h, win.d - 0.2, 0.05, 1.15, g.dims);
+    return bladeAt(l, reachable(v3(win.p.x * 1.15, 0, win.p.z * 1.15), 1.75), g.dims);
+  }
   if ((how === 'scramble' || how === 'protect') && win) {
     // Lunging after it one-handed, stretched, the free arm flung back.
     const out = turned(r, win.h, 1.0);
     const l: RawPose = { ...out, hipY: out.hipY - 0.14 * hh, pitch: out.pitch + 0.5, lookDown: 0.3, top: along(turnOf(win.h, 1.0) - out.yaw, 0.45, 0.12, 0.15), twoHands: 0, freeRel: v3(-0.3, -0.25, -0.3) };
     return bladeAt(l, reachable(v3(win.p.x * 1.2, 0, win.p.z * 1.2), 1.75), g.dims);
   }
-  // Turned the wrong way: facing the boards, his stick off the puck.
-  const out = turned(r, hb, 1.2);
-  const tw = turnOf(hb, 1.2);
-  const thrown = how === 'stick' ? 1 : 0; // a pinner the pinned man spun off: thrown forward into the boards
+  // The pinned man beaten: left leaning on the boards a moment, head down, then turning to go after him.
+  const turn = win ? smooth((t - 0.5) / 0.5) : 0;
+  const hd = win ? hb + wrap(win.h - hb) * turn : hb;
+  const out = turned(r, hd, 1.3);
+  const tw = turnOf(hd, 1.3);
   const l: RawPose = {
-    ...out, hipY: out.hipY - (0.02 + 0.08 * thrown) * hh, pitch: 0.25 + 0.5 * thrown, roll: 0, lookDown: -0.1,
-    look: win ? clamp(wrap(win.h - tw), -1.2, 1.2) * 0.4 : 0, top: along(tw - out.yaw, 0.3 + 0.15 * thrown, 0.12, 0.1 + 0.25 * thrown), twoHands: 0,
+    ...out, hipY: out.hipY - 0.04 * hh, pitch: 0.5 - 0.25 * turn, roll: 0, lookDown: 0.6 * (1 - turn),
+    look: 0, top: along(tw - out.yaw, 0.3, 0.12, 0.1), twoHands: 0,
   };
-  const gap = boardsGap(g.s.pos.x, g.s.pos.y, nrm);
-  l.freeRel = gloveOn(l, hb, gap - 0.1, -0.15, 1.0, g.dims);
-  return bladeAt(l, along(tw - out.yaw, 0.55, -0.35, 0.18), g.dims);
+  // A glove on the boards only while he is at them; his stick lifted off the ice (he has lost it).
+  const gap = boardsGap(g.s.pos.x, g.s.pos.y, nrm), onBoards = 1 - smooth((gap - 0.6) / 0.4);
+  l.freeRel = mixV(v3(0.15, -0.55, -0.1), gloveOn(l, hb, gap - 0.1, -0.15, 1.0, g.dims), onBoards);
+  return bladeAt(l, along(tw - out.yaw, 0.6, -0.3, 0.35), g.dims);
+}
+
+/**
+ * The winner given the puck: head up, both hands on the stick, carrying it on out (the carry puts the puck on his
+ * blade where his skating carries it; moving the blade further out would make the puck jump when he lets it go).
+ */
+function carryOut(w: RawPose, _g: Geo, _h: number, since: number): RawPose {
+  const k = smooth(since / 0.3);
+  return { ...w, lookDown: (w.lookDown ?? 0) * (1 - k), twoHands: w.twoHands + (1 - w.twoHands) * k };
+}
+
+/** The supporting player who takes the puck out of the pile: low and driving away with it (the carry has it on his blade). */
+function awayPose(r: RawPose, g: Geo): RawPose {
+  const hh = g.dims.hipHeight;
+  const a: RawPose = { ...r, hipY: r.hipY - 0.1 * hh, pitch: r.pitch + 0.3, lookDown: 0 };
+  return g.ctx.puck.carrierId === g.s.id ? carryOut(a, g, 0, sinceEnd(g)) : a;
 }
 
 /** A battle stance's blade target moves no faster than this (m/s, body frame). */
@@ -730,13 +817,16 @@ function limitPose(r: RawPose, lim: BladeLim, time: number, dims: BodyDims): Raw
   const hMax = HAND_SPEED * dt, bMax = HEEL_SPEED * dt;
   const over = (p: ReturnType<typeof fitBody>): number => Math.max(Math.max(d3(p.arms[0].hand, lim.h0), d3(p.arms[1].hand, lim.h1)) / hMax, d3(p.blade, lim.heel) / bMax);
   if (over(f) <= 1) return keep(r, f, false);
-  let lo = 0, hi = 1, best = lim.out, bf = fitBody(lim.out, dims);
+  let lo = 0, hi = 1, best = upperPart(lim.out, r, 0), bf = fitBody(best, dims);
   for (let i = 0; i < 5; i++) {
     const mid = (lo + hi) / 2, m = upperPart(lim.out, r, mid), mf = fitBody(m, dims);
     if (over(mf) <= 1) { lo = mid; best = m; bf = mf; } else hi = mid;
   }
   return keep(best, bf, true);
 }
+
+/** The shield's far-side pull stops this far (m) short of the boards (the carried puck goes where his blade goes). */
+const BOARDS_KEEP = 0.12;
 
 /** A board battle stance amount: smooth of the slot's. */
 const am = (sl: BattleSlot, k: StanceKey): number => smooth(sl.st[k]);
@@ -763,6 +853,7 @@ function boardApply(raw: RawPose, anim: SkaterAnim, s: SkaterSample, ctx: AnimCo
   mix(am(sl, 'support'), (b) => supportPose(b, g));
   mix(am(sl, 'win'), (b) => winPose(b, g));
   mix(am(sl, 'lose'), (b) => losePose(b, g));
+  mix(am(sl, 'away'), (b) => awayPose(b, g));
   return limitPose(limitBlade(r, sl.lim.board, ctx.time, maxAm(sl, BOARD)), sl.lim.board, ctx.time, dims);
 }
 
@@ -834,9 +925,39 @@ function pinOffset(anim: SkaterAnim, s: SkaterSample, ctx: AnimContext, out: { x
   return out;
 }
 
+/**
+ * The shoulder battle's drawn places: the two men drawn beside each other along the boards rather than one behind the
+ * other. Each steps SHOULDER_ASIDE m along the boards away from the other (the `a` man to the boards' left when they
+ * are level, so the two always pick opposite sides) and up to SHOULDER_LEVEL m along the normal toward level with
+ * him: from the engine's places, at most about 0.35 m each, with the two ending about their two radii apart. Both
+ * work it out alike from the same samples and the same stance amount.
+ */
+const SHOULDER_ASIDE = 0.3, SHOULDER_LEVEL = 0.17;
+function shoulderOffset(anim: SkaterAnim, s: SkaterSample, ctx: AnimContext, out: { x: number; z: number }): void {
+  const slot = battleSlotOf(anim);
+  if (!slot || !(slot.st.scrum > 0)) return;
+  const sl = slot.recs.boardBattle;
+  if (s.id !== sl.a && s.id !== sl.b) return;
+  const o = ctx.skaters.get(s.id === sl.a ? sl.b : sl.a);
+  if (!o || !o.onIce) return;
+  const tx = -sl.ny, ty = sl.nx;
+  const tdiff = (o.pos.x - s.pos.x) * tx + (o.pos.y - s.pos.y) * ty; // the other man along the boards from him
+  const dn = ((o.pos.x - s.pos.x) * sl.nx + (o.pos.y - s.pos.y) * sl.ny) / 2; // half the gap along the normal
+  const k = smooth(slot.st.scrum);
+  const side = clamp(tdiff / 0.2 + (s.id === sl.a ? 1 : -1), -1, 1); // +1: the other man is (or goes) to the + side
+  const mt = -SHOULDER_ASIDE * side * k, mn = clamp(dn, -SHOULDER_LEVEL, SHOULDER_LEVEL) * k;
+  out.x += tx * mt + sl.nx * mn; out.z += ty * mt + sl.ny * mn;
+}
+const boardOut = { x: 0, z: 0 };
+
 export const boardBattleOverlay: Overlay = {
   id: 'boardBattle', weight: weightOf(BOARD), apply: boardApply,
-  offset: (anim, s, ctx) => pinOffset(anim, s, ctx, pinOut),
+  offset: (anim, s, ctx) => {
+    const p = pinOffset(anim, s, ctx, pinOut);
+    boardOut.x = p.x; boardOut.z = p.z;
+    shoulderOffset(anim, s, ctx, boardOut);
+    return boardOut;
+  },
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -849,33 +970,41 @@ function netApply(raw: RawPose, anim: SkaterAnim, s: SkaterSample, ctx: AnimCont
   const free = am(sl, 'free'), tied = am(sl, 'tied'), hh = dims.hipHeight;
   let r = raw;
   const att = am(sl, 'att'), def = am(sl, 'def');
+  // The shove: the defender drives in and eases off about 1.4 times a second (not while the attacker is free), and the
+  // attacker rocks with it (both from the same clock, so they move together).
+  const push = (1 - free) * (0.5 + 0.5 * Math.sin(ctx.time * 2 * Math.PI * NET_SHOVE_HZ));
   if (att > 0) {
-    // Planted wide in front, facing the puck, blade on the ice for a tip; tied up: his stick lifted, pushed back.
+    // Planted wide in front, knees bent, facing the puck and looking at it, blade on the ice in front for a tip; rocked
+    // forward by the shove; tied up: his stick lifted, pushed back.
     const f = Number.isNaN(g.sl.face) ? s.facing : g.sl.face, h = headingOf(g, Math.cos(f), Math.sin(f));
-    const out = stance(turned(r, h, 1.15), 0.36, 0, 0.04);
+    const out = stance(turned(r, h, 1.15), 0.4, 0, 0.04);
     const tw = turnOf(h, 1.15);
+    const d = otherMan(g, g.sl.b);
+    const rock = d ? 0.12 * push : 0, rh = d ? wrap(d.h + Math.PI) : 0; // thrown away from the defender
     const a: RawPose = {
-      ...out, hipY: out.hipY - (0.11 - 0.05 * free) * hh, pitch: out.pitch + 0.15 - 0.25 * tied, look: clamp(wrap(h - tw), -1, 1) * 0.7,
-      lookDown: 0, twoHands: 1, top: v3(0.24, 0.04 + 0.2 * tied, 0.12),
+      ...out, hipY: out.hipY - (0.16 - 0.06 * free) * hh, pitch: out.pitch + 0.2 - 0.25 * tied + rock * Math.cos(rh), roll: out.roll + rock * Math.sin(rh),
+      look: clamp(wrap(h - tw), -1, 1) * 0.8, lookDown: 0, twoHands: 1, top: v3(0.24, 0.04 + 0.2 * tied, 0.12),
     };
     r = mixStance(r, bladeAt(a, along(tw - out.yaw, 0.95 + 0.15 * free, -0.25, 0.45 * tied), dims), att, dims);
   }
   if (def > 0) {
     const o = otherMan(g, g.sl.a);
     if (o) {
-      // Behind him, leaning in, his glove and forearm driven into his back, the stick one-handed at his skates; tied:
-      // the blade lifting the attacker's stick; free: the push off, the stick back on the ice.
+      // Behind him, leaning in and shoving, both hands on the stick held across the attacker's hips (a cross-check);
+      // tied: the blade lifting the attacker's stick; free: the push off, the stick back on the ice.
       const out = turned(r, o.h, 1.3);
       const tw = turnOf(o.h, 1.3) - out.yaw;
-      // Leaning toward him whichever way the engine has him facing (at most sideways).
-      const L = 0.6 - 0.35 * free, lh = clamp(o.h, -1.6, 1.6);
+      const L = 0.55 - 0.35 * free + 0.15 * push, lh = clamp(o.h, -1.6, 1.6);
+      const f0 = clamp(o.d - 0.4, 0.3, 0.5);
       const d0: RawPose = {
-        ...out, hipY: out.hipY - 0.1 * hh, pitch: out.pitch + L * Math.cos(lh), roll: out.roll + L * Math.sin(lh), lookDown: 0.05, twoHands: 0,
-        top: along(tw, 0.3, 0.18, 0.1),
+        ...out, hipY: out.hipY - 0.1 * hh, pitch: out.pitch + L * Math.cos(lh), roll: out.roll + L * Math.sin(lh), lookDown: 0.05, twoHands: 1,
+        top: along(tw, f0 + 0.08 * push, 0.28, 0.12 - 0.25 * free),
       };
-      d0.freeRel = gloveOn(d0, o.h, o.d - 0.3 - 0.15 * free, -0.05, 1.1 - 0.2 * free, dims);
-      const stick = along(tw, clamp(o.d, 0.8, 1.2), -0.3, 0), lift = along(tw, clamp(o.d - 0.1, 0.6, 1.1), -0.25, 0.3);
-      const target = v3(stick.x + (lift.x - stick.x) * tied, lift.y * tied, stick.z + (lift.z - stick.z) * tied);
+      // The shaft across his hips: the blade out to the defender's left at hip height; tied: under the attacker's stick;
+      // free: down on the ice.
+      const cross = along(tw, f0 + 0.08 * push, -0.8, 0.6), lift = along(tw, clamp(o.d - 0.1, 0.6, 1.1), -0.25, 0.3), down = along(tw, 1.0, -0.3, 0);
+      const k1 = clamp01(1 - tied - free);
+      const target = v3(cross.x * k1 + lift.x * tied + down.x * free, cross.y * k1 + lift.y * tied + down.y * free, cross.z * k1 + lift.z * tied + down.z * free);
       r = mixStance(r, bladeAt(d0, target, dims), def, dims);
     }
   }

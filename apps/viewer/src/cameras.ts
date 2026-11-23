@@ -26,6 +26,12 @@ export type CameraInput = {
   zoom?: number;
   /** The angle's last target, if it is the same angle: ice level keeps its spot while the view from it stays good. */
   current?: CameraPose;
+  /**
+   * A board battle under way: its spot (world, on the ice) and how far the camera has eased onto it (0..1, the
+   * operator eases it in and out). The broadcast camera closes in on it, and over the near boards climbs and looks down
+   * more steeply so the bodies are seen over the boards.
+   */
+  battle?: { spot: Vec3; k: number };
 };
 /** Where the camera is, the point it looks at (world) and its vertical field of view (degrees). */
 export type CameraPose = { pos: Vec3; look: Vec3; fov: number };
@@ -62,6 +68,14 @@ function insideBoards(x: number, z: number, inset: number): { x: number; z: numb
 
 /** Broadcast: high in the stands opposite the benches; it pans along the rink with the puck and stops short of the ends. */
 const BROADCAST = { height: 15.5, back: 29, fov: 29, maxLook: 21, follow: 0.55, lead: 0.45, maxLead: 4, zFollow: 0.35, nearBias: 1.2 };
+/**
+ * On a board battle the broadcast camera frames it `zoom` times tighter and looks at its spot. On the near boards
+ * (within `nearFrom` m of them) it climbs `rise` m higher and comes `closer` m in from its rail, so its line of sight
+ * clears the boards' top (BOARD_TOP) down to a skater's thigh a step off them.
+ */
+const BATTLE_VIEW = { zoom: 2.3, rise: 3, closer: 6.5, nearFrom: 4 };
+/** Height (m) of the boards' top edge (arena.ts BOARD_H). */
+export const BOARD_TOP = 1.07;
 /** Overhead: under the roof lights, over the puck's half; it stops where the end boards are still in the picture. */
 const OVERHEAD = { height: 28, maxLook: 18.5, zFollow: 0.45, fov: 62 };
 /**
@@ -87,7 +101,17 @@ function broadcast(input: CameraInput): CameraPose {
   // Toward the near boards only a little in the wide view (the near stands would fill the bottom); a tight view
   // (zoom) follows the puck across the ice, or a puck on the near boards would drop out of the bottom of the picture.
   const lz = zoom > 1 ? clamp(puck.z * 0.8, -10, 11) : NEAR * BROADCAST.nearBias + clamp(NEAR * puck.z * BROADCAST.zFollow, -4, 1.8) * NEAR;
-  return { pos: v3(lx * BROADCAST.follow, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, lz), fov: BROADCAST.fov / zoom };
+  const pose = { pos: v3(lx * BROADCAST.follow, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, lz), fov: BROADCAST.fov / zoom };
+  const b = input.battle;
+  if (!b || !(b.k > 0)) return pose;
+  // A board battle: closer in on its spot; on the near boards, higher and steeper over them.
+  const k = clamp(b.k, 0, 1), sx = clamp(b.spot.x, -BROADCAST.maxLook - 4, BROADCAST.maxLook + 4);
+  const near = k * clamp((NEAR * b.spot.z - (halfWidthAt(b.spot.x) - BATTLE_VIEW.nearFrom)) / 2, 0, 1);
+  pose.look = v3(toward(pose.look.x, sx, k), toward(0, 0.9, k), toward(pose.look.z, b.spot.z, k));
+  // (Square on to it along the rail, so the boards run across the picture.)
+  pose.pos = v3(toward(pose.pos.x, sx, k), pose.pos.y + BATTLE_VIEW.rise * near, pose.pos.z - NEAR * BATTLE_VIEW.closer * near);
+  pose.fov = pose.fov / (1 + (BATTLE_VIEW.zoom - 1) * k);
+  return pose;
 }
 
 function overhead(input: CameraInput): CameraPose {

@@ -43,6 +43,8 @@ export type CameraOperator = {
   trail: readonly { t: number; x: number; z: number }[];
   /** The next step cuts (a new angle or a new operator). */
   pending: boolean;
+  /** How far the camera has eased onto a board battle (0..1), and the battle spot it watches (eased). */
+  battleK: number; battleSpot: Vec3;
 };
 
 /**
@@ -50,10 +52,13 @@ export type CameraOperator = {
  * tighter the broadcast camera should frame (a small picture), the player followed (when he is on the ice), the
  * scene's cut on this frame, if any, and `snap` for a seek or a new game.
  */
-export type OperatorInput = Omit<CameraInput, 'current'> & { cut?: CutKind | null | undefined; snap?: boolean };
+export type OperatorInput = Omit<CameraInput, 'current' | 'battle'> & { cut?: CutKind | null | undefined; snap?: boolean; battle?: Vec3 | null };
+
+/** Seconds the camera takes to ease onto a board battle (and off it when it ends), and to follow its spot. */
+export const BATTLE_EASE = 0.6, BATTLE_SPOT_TAU = 0.4;
 
 export function initialOperator(camera: CameraName): CameraOperator {
-  return { camera, cam: { pos: { x: 0, y: 15, z: 29 }, look: { x: 0, y: 0, z: 0 }, fov: 30 }, focus: { x: 0, y: 0, z: 0 }, lastTarget: null, followOn: false, pending: true, clock: 0, trail: [] };
+  return { camera, cam: { pos: { x: 0, y: 15, z: 29 }, look: { x: 0, y: 0, z: 0 }, fov: 30 }, focus: { x: 0, y: 0, z: 0 }, lastTarget: null, followOn: false, pending: true, clock: 0, trail: [], battleK: 0, battleSpot: { x: 0, y: 0, z: 0 } };
 }
 
 /** The operator on angle `name`: its next step cuts to it. */
@@ -91,10 +96,15 @@ export function stepOperator(op: CameraOperator, input: OperatorInput, dt: numbe
   const h = Number.isFinite(dt) && dt > 0 ? dt : 0;
   let snap = op.pending || input.snap === true || input.cut === 'restart' || input.cut === 'ends';
   const focus = snap ? { ...input.puck } : easePoint(op.focus, input.puck, h, FOCUS_TAU);
+  // A board battle: eased on and off (never a cut), its spot followed smoothly.
+  const bt = input.battle ?? null, want = bt ? 1 : 0;
+  const battleK = snap ? want : Math.min(1, Math.max(0, op.battleK + Math.max(-h / BATTLE_EASE, Math.min(h / BATTLE_EASE, want - op.battleK))));
+  const battleSpot = bt ? (snap || op.battleK <= 0 ? { ...bt } : easePoint(op.battleSpot, bt, h, BATTLE_SPOT_TAU)) : op.battleSpot;
   const camInput: CameraInput = {
     puck: focus, attackingRight: input.attackingRight,
     current: op.lastTarget ?? undefined,
   };
+  if (battleK > 0) camInput.battle = { spot: battleSpot, k: battleK * battleK * (3 - 2 * battleK) };
   if (input.puckVel) camInput.puckVel = input.puckVel;
   if (input.zoom !== undefined) camInput.zoom = input.zoom;
   if (input.followed) camInput.followed = input.followed;
@@ -127,5 +137,5 @@ export function stepOperator(op: CameraOperator, input: OperatorInput, dt: numbe
     });
     cam = rel(easeCamera(rel(op.cam, -1), rel(target, -1), h, false), 1);
   } else cam = easeCamera(op.cam, target, h, snap);
-  return { state: { camera: op.camera, cam, focus, lastTarget: target, followOn, pending: false, clock, trail }, pose: cam, cut: snap };
+  return { state: { camera: op.camera, cam, focus, lastTarget: target, followOn, pending: false, clock, trail, battleK, battleSpot }, pose: cam, cut: snap };
 }
