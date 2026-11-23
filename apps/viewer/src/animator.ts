@@ -14,7 +14,7 @@ import { STICK_OVERLAYS } from './overlays/stick';
 import { fitBody, mixRaw, type SkaterPose } from './pose-mix';
 
 export * from './anim-context';
-export { GOALIE_CATCHES, goalieHeldPuck } from './overlays/goalie';
+export { GOALIE_CATCHES, goalieHeldPuck, SAVE_HOLD_REACH } from './overlays/goalie';
 
 /**
  * The animator (pure: no three.js, no DOM): turns each figure's engine sample, the frame's context and the event

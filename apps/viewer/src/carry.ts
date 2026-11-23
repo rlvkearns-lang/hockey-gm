@@ -184,8 +184,12 @@ export type PuckDrawInput = {
   /**
    * Where a goalie holds the puck this frame (world: x, z on the ice, y its height), or null (absent: nobody does):
    * from the moment a saved shot crosses his plane, in his glove or under it after a frozen save, leaving the saving
-   * part on a rebound (overlays/goalie.ts goalieHeldPuck). The one exception to a loose puck being drawn exactly at the
-   * engine's; it ends where the engine's puck is (or at the faceoff's cut).
+   * part on a rebound (overlays/goalie.ts goalieHeldPuck); it ends where the engine's puck is (or at the faceoff's cut).
+   * It is one of the ruled exceptions to a loose puck being drawn exactly at the engine's. In live play the only one:
+   * a puck the goalie stops, from its plane crossing until it rejoins the engine's puck, at most SAVE_HOLD_AFTER ticks
+   * after the save's tick and within SAVE_HOLD_REACH of the engine's puck (overlays/goalie.ts). In stopped play also a
+   * puck held in his glove or under it until the faceoff setup, and (scene.ts) the puck eased into the net after a
+   * goal.
    */
   held?: { x: number; y: number; z: number } | null;
 };

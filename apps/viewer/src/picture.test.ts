@@ -50,9 +50,13 @@ import { sharedPlayback } from './test/game';
 // Re-pinned by Task 6's fix round 1 (a centre's blade held by the dot over the stick actions until 0.2 s before the
 // drop, overlays/faceoff-lineup.ts faceoffStickHold): 42: d320c1950eefa9b2 before (1434304), which this code still gives
 // with faceoffStickHold taken out of OVERLAYS. (The puck eased into the net after a goal is outside both windows.)
+// Re-pinned by the final review's fix (I1: a saved puck is the engine's until it reaches his plane, the contact plane
+// or the face of the saving hand as drawn): 42: 306b8fd4fe697692 before (4bedaf3). Every figure is as before; the drawn
+// puck differs in one frame (3047.5, 2.5 mm in height: on the shot's path at the glove's face of the save at 3049,
+// where it was the engine's puck blended toward the save's tick). Seed 5's 40 s hold no save.
 const PICTURE_HASH: Record<number, string> = {
   5: '303e6178dfc64315',
-  42: '306b8fd4fe697692',
+  42: '29aa931989810448',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */

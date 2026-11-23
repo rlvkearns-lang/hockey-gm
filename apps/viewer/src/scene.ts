@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DT, RINK, type GameEvent, type GameSetup, type GameState, type GoalieState, type Side, type SkaterState } from '@hockey/engine';
 import {
-  BODY_PASS, goalieHeldPuck, GOALIE_OVERLAYS, initialGoalieAnim, initialSkaterAnim, OVERLAYS, poseGoalie, poseSkater, refreshGoalie, refreshSkater,
+  BODY_PASS, goalieHeldPuck, GOALIE_OVERLAYS, initialGoalieAnim, SAVE_HOLD_REACH, initialSkaterAnim, OVERLAYS, poseGoalie, poseSkater, refreshGoalie, refreshSkater,
   stepGoalieAnim, stepSkater, turnRateOf,
   type AnimContext, type BodyPass, type DrawnBody, type GoalieAnim, type GoalieOverlay, type GoalieSample, type Overlay, type SkaterAnim,
   type SkaterSample,
@@ -477,7 +477,15 @@ export function createGameScene(setup: GameSetup, opts: GameSceneOptions = {}): 
     bodyPass(bodies, ctx, h);
     // A puck a goalie holds goes where the pass draws him.
     const holder = heldBy as GoalieFig | null;
-    if (holder) { heldPuck.x += holder.body.offset.x; heldPuck.z += holder.body.offset.z; }
+    if (holder) {
+      heldPuck.x += holder.body.offset.x; heldPuck.z += holder.body.offset.z;
+      // In live play a stopped puck is never drawn more than SAVE_HOLD_REACH from the engine's (the ruled exception's
+      // bound; overlays/goalie.ts).
+      if (prev.phase === 'live' && next.phase === 'live') {
+        const e = ctx.puck.engine, dx = heldPuck.x - e.x, dy = heldPuck.y - e.y, dz = heldPuck.z - e.z, d = Math.hypot(dx, dy, dz);
+        if (d > SAVE_HOLD_REACH) { const k = SAVE_HOLD_REACH / d; heldPuck.x = e.x + dx * k; heldPuck.y = e.y + dy * k; heldPuck.z = e.z + dz * k; }
+      }
+    }
     for (const fig of skaters) drawSkater(fig);
     for (const fig of goalies) drawGoalie(fig);
     updatePuck(frame, h);

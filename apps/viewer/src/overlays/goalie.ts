@@ -46,6 +46,15 @@ const REB_HOLD = 4.5, REB_FADE = 10.5;
 const COVER_HOLD = 3.6, COVER_FADE = 7.5;
 /** The rebound leaves the saving part and joins the engine's puck over at least this long (ticks), and by the save's tick. */
 const REB_LEAVE = 4.5;
+/**
+ * The ruled exception for a stopped puck in live play (the fifth exception to "a loose puck is drawn at the engine's
+ * puck"): from the moment it reaches his plane it is drawn at the saving part until it rejoins the engine's puck, at
+ * most SAVE_HOLD_AFTER ticks after the save's tick (the contact is at or before the save's tick, and REB_LEAVE is
+ * shorter), and never more than SAVE_HOLD_REACH m from the engine's puck (the scene holds it to that in live play).
+ */
+export const SAVE_HOLD_AFTER = 6, SAVE_HOLD_REACH = 1.6;
+/** A saving hand meets the puck this far (m) in front of its middle (the face of the blocker or the glove). */
+export const HAND_FACE = 0.1;
 /** On a goal the part ends this far short (m) of where the puck crossed. */
 const BEATEN_SHORT = 0.42;
 /** On a low goal the pad kick is this much (m) short along the leg as the puck goes by. */
@@ -287,9 +296,12 @@ function fill(plan: ReachPlan, slot: ReachSlot, f: Found, s: GoalieSample, ctx: 
   plan.reach = gloveHeld && now >= tc ? after : reach * after;
   plan.since = Math.max(0, (now - tc) * DT);
   plan.w = Math.max(plan.set, plan.reach);
-  // The puck is his from the moment it crosses his plane (or the last tick of its flight, if that is later), until a
-  // rebound has joined the engine's puck or a held puck is put on the dot.
-  if (kind === 'save') plan.hold = now >= Math.min(tc, T - 1) && (plan.freeze ? holding || now < T : now < Math.max(T, tc + REB_LEAVE));
+  // The puck is his from the moment it reaches his plane (never before: until then it is the engine's), until a
+  // rebound has joined the engine's puck (by REB_LEAVE after the contact, at most SAVE_HOLD_AFTER ticks after the
+  // save's tick) or a held puck is put on the dot.
+  // (From a tick before the contact plane it may be his: a hand drawn out in front of the plane meets it a moment
+  // sooner; goalieHeldPuck decides that from the hand as drawn.)
+  if (kind === 'save') plan.hold = now >= tc - 1 && (plan.freeze ? holding || now < T : now < Math.max(T, tc + REB_LEAVE));
   plan.active = plan.w > 1e-4 || plan.hold;
 }
 
@@ -571,9 +583,18 @@ function heldBy(p: ReachPlan, now: number, sample: GoalieSample, ctx: AnimContex
     pocket(smooth((now - (T - 1)) / 7.5));
     return true;
   }
-  if (now <= p.tc) { pathAt(p.path, now, out); return true; }
   // The saving part as drawn: a hand, or for a pad or the butterfly the spot where the puck met it.
   const part = p.part === 'glove' ? v3(px, py, pz) : p.part === 'blocker' ? goalieWorld(sample, pose.blocker, tmp2, turn) : p.c;
+  if (now <= p.tc) {
+    // On its way to the contact: on its path once it has reached his plane, the plane the part meets it in (the contact
+    // plane, or a saving hand drawn out in front of it); until then the engine's.
+    pathAt(p.path, now, out);
+    if (now >= p.tc) return true;
+    const sp = Math.hypot(p.path.vx, p.path.vz);
+    if (sp < 1e-6 || (p.part !== 'glove' && p.part !== 'blocker')) return false;
+    const ahead = (q: Vec3): number => -((q.x - sample.pos.x) * p.path.vx + (q.z - sample.pos.y) * p.path.vz) / sp;
+    return ahead(out) <= ahead(part) + HAND_FACE;
+  }
   if (p.freeze) {
     // In the glove at once (it reached the puck), or from the part under the glove as he covers it.
     const at = p.part === 'glove' ? p.c : part;
