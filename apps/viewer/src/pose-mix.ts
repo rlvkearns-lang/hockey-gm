@@ -171,7 +171,10 @@ export function mixRaw(a: RawPose, b: RawPose, w: number): RawPose {
 
 /**
  * `raw` with its blade heel put at `target` (body frame, y its height above the ice, clamped to the ice): the fit then
- * solves the top hand back from the blade, within his reach, and aims the stick at it. Out of reach, the blade is put
+ * solves the top hand back from the blade, within his reach, and aims the stick at it. The target may be above his
+ * hands (a back-swing, a high finish): the shaft then rises from the top hand to it. Set `raw.top` too (from the
+ * pelvis) to say where the top hand should go when there is a choice (in front of his chest for a stick raised
+ * behind him, so the shaft passes outside his shoulder). Out of reach, the blade is put
  * as near the target as his arm and stick allow (the arm reaching straight toward it).
  */
 export function bladeAt(raw: RawPose, target: Vec3, _dims?: BodyDims): RawPose {
@@ -253,8 +256,11 @@ export function fitBody(raw: RawPose, d: BodyDims): SkaterPose {
     top = k >= 1 ? hand : within(lerp3(top, hand, k), sr, reach);
   }
   const stickAngle = Math.atan2(aim.z - top.z, aim.x - top.x);
-  const up = clamp(fin(raw.bladeUp ?? 0), 0, Math.max(0, top.y));
-  const sinT = Math.min(1, (top.y - up) / below), cosT = Math.sqrt(1 - sinT * sinT);
+  // The blade no higher than the top hand, except where a blade target asks for it (a back-swing or a high finish):
+  // then, as far over as bladeAtW says, up to almost a stick's length above the hand, the shaft rising to it.
+  const over = raw.bladeAt ? clamp01(fin(raw.bladeAtW ?? 1)) * 0.98 * below : 0;
+  const up = clamp(fin(raw.bladeUp ?? 0), 0, Math.max(0, top.y) + over);
+  const sinT = clamp((top.y - up) / below, -1, 1), cosT = Math.sqrt(1 - sinT * sinT);
   const shaft = v3(Math.cos(stickAngle) * cosT, -sinT, Math.sin(stickAngle) * cosT);
   const heel = add(top, mul(shaft, below));
   const onShaft = add(top, mul(shaft, shaftGrip(top, shaft, sl, reach, 0.36 * d.stick)));

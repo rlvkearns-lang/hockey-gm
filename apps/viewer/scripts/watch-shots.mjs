@@ -160,7 +160,11 @@ if (only && only.includes('actions')) {
   const { ctx: actx, p: ap } = await open({ viewport: { width: 1312, height: 1000 }, colorScheme: 'light', deviceScaleFactor: 2 });
   await ap.evaluate(() => window.__watch.setManual(true));
   const skip = Object.fromEntries((process.env.ACTION_SKIP ?? '').split(',').filter(Boolean).map((x) => x.split('=')).map(([k, v]) => [k, Number(v)]));
-  const acts = await ap.evaluate((skip) => {
+  // ACTION_KINDS (e.g. slap,oneTimer) limits the actions; ACTION_COUNT examples of each (default 1), each taken only
+  // where he skates along the rink (within 35 degrees of its length) so the broadcast camera sees him side-on.
+  const kinds = process.env.ACTION_KINDS ? process.env.ACTION_KINDS.split(',') : ['wrist', 'snap', 'slap', 'oneTimer', 'pass', 'dump'];
+  const count = Number(process.env.ACTION_COUNT ?? 1), alongOnly = Boolean(process.env.ACTION_COUNT);
+  const acts = await ap.evaluate(({ skip, kinds, count, alongOnly }) => {
     const w = window.__watch, ev = w.events();
     const rel = ev.filter((e) => e.type === 'release' && e.tick > 300);
     const at = (t) => { w.seekPlain(t - 1); return w.state(); }; // state() is the frame's later tick
@@ -176,31 +180,33 @@ if (only && only.includes('actions')) {
       return true;
     };
     const found = {}, n = {};
-    const take = (k, e) => { if (found[k]) return; n[k] = (n[k] ?? 0) + 1; if (n[k] > (skip[k] ?? 0)) found[k] = e; };
+    const full = (k) => !kinds.includes(k) || (found[k]?.length ?? 0) >= count;
+    const take = (k, e) => { if (full(k)) return; n[k] = (n[k] ?? 0) + 1; if (n[k] > (skip[k] ?? 0)) (found[k] ??= []).push(e); };
+    const along = (e) => { const me = at(e.tick - 6).skaters.find((x) => x.id === e.playerId); return !alongOnly || Math.abs(Math.cos(me.facing)) > Math.cos(35 * Math.PI / 180); };
     for (const e of rel) {
       const want = e.detail.kind === 'shot' ? ['wrist', 'snap', 'slap', 'oneTimer'] : e.detail.kind === 'pass' ? ['pass'] : ['dump'];
-      if (want.every((k) => found[k])) continue;
-      if (!clear(e)) continue;
+      if (want.every(full)) continue;
+      if (!along(e) || !clear(e)) continue;
       if (e.detail.kind === 'shot') {
         const s = at(e.tick - 1), net = s.attackDir[e.side] * 27.13, dist = Math.hypot(net - e.pos.x, e.pos.y), h = had(e);
         take(h <= 7 ? 'oneTimer' : h < 15 ? 'snap' : dist >= 10.5 ? 'slap' : 'wrist', e);
       } else if (e.detail.kind === 'pass' && e.detail.toId) {
         if (had(e) >= 10 && at(e.tick + 25).carrierId === e.detail.toId) take('pass', e);
       } else if (e.detail.kind === 'dump' && had(e) >= 10) take('dump', e);
-      if (['wrist', 'snap', 'slap', 'oneTimer', 'pass', 'dump'].every((k) => found[k])) break;
+      if (['wrist', 'snap', 'slap', 'oneTimer', 'pass', 'dump'].every(full)) break;
     }
     const out = {};
-    for (const [k, e] of Object.entries(found)) out[k] = { tick: e.tick, who: e.playerId, to: e.detail.toId };
+    for (const [k, es] of Object.entries(found)) es.forEach((e, i) => { out[count > 1 ? `${k}${i + 1}` : k] = { kind: k, tick: e.tick, who: e.playerId, to: e.detail.toId }; });
     return out;
-  }, skip);
+  }, { skip, kinds, count, alongOnly });
   console.log('actions', JSON.stringify(acts));
   log.actions = acts;
   // Each: from when (ticks before the release) and how far apart (ticks) the 8 frames are.
-  const plan = { wrist: [15, 3], snap: [11, 2], slap: [19, 4], oneTimer: [18, 3], pass: [11, 3], receive: [-6, 3], dump: [12, 3] };
+  const plan = { wrist: [15, 3], snap: [11, 2], slap: [19, 4], oneTimer: [17, 4], pass: [11, 3], receive: [-6, 3], dump: [12, 3] };
   const seqs = [];
   for (const [k, a] of Object.entries(acts)) {
-    seqs.push({ name: k, who: a.who, tick: a.tick, back: plan[k][0], step: plan[k][1] });
-    if (k === 'pass' && a.to) seqs.push({ name: 'receive', who: a.to, tick: a.tick, back: plan.receive[0], step: plan.receive[1] });
+    seqs.push({ name: k, who: a.who, tick: a.tick, back: plan[a.kind][0], step: plan[a.kind][1] });
+    if (a.kind === 'pass' && a.to) seqs.push({ name: k.replace('pass', 'receive'), who: a.to, tick: a.tick, back: plan.receive[0], step: plan.receive[1] });
   }
   for (const sq of seqs) {
     for (const camName of ['follow', 'iceLevel', 'broadcast']) {

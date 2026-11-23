@@ -48,7 +48,7 @@ export type StickAct = {
    * the blade, because it will not have settled there by the contact (a one-timer, a one-touch pass), and that spot
    * (body frame); both kept from the contact on.
    */
-  meet: number; mx: number; mz: number;
+  meet: number; mx: number; mz: number; mset: boolean;
   /**
    * A shot only: `far` (let go SLAP_DISTANCE or further from the net); `pending` while its type waits on whether he
    * gets the puck in time for anything but a one-timer (he did not have it when the shot was first seen).
@@ -101,6 +101,8 @@ export const SLAP_TIME_SECONDS = 0.5, SLAP_DISTANCE = 10.5;
  * stay); a pass or a dump has less time to turn.
  */
 export const TURN_MAX = { shot: 1.4, pass: 0.9, dump: 0.9 } as const;
+/** A full swing (a slapshot, a one-timer) turns less: its long arc must go round behind him in the time it has. */
+export const SWING_TURN_MAX = 0.7;
 /** Wind-up before the release event (s) by shot type. */
 export const SHOT_LEAD = { wrist: 0.4, snap: 0.3, slap: 0.55, oneTimer: 8 * DT } as const;
 /** A pass's wind-up (s): PASS_LEAD[0] at PASS_SPEED[0] m/s and slower, PASS_LEAD[1] at PASS_SPEED[1] and faster. */
@@ -135,6 +137,8 @@ type StyleDef = {
   /** Shoulder twist at the back and at the end of the follow-through (per radian of target direction), torso pitch
    * and pelvis height changes at the back and at the follow-through. */
   twistBack: number; twistFollow: number; pitchBack: number; pitchFollow: number; hipBack: number; hipFollow: number;
+  /** Hips turned (pelvis yaw) at the back and at the follow-through; 0 if absent. */
+  yawBack?: number; yawFollow?: number;
 };
 const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
 const STYLES: Record<StickStyle, StyleDef> = {
@@ -142,10 +146,14 @@ const STYLES: Record<StickStyle, StyleDef> = {
     twistBack: -0.35, twistFollow: 0.35, pitchBack: -0.04, pitchFollow: 0.12, hipBack: -0.03, hipFollow: -0.03 },
   snap: { back: v3(0.2, 0.05, -0.95), beta: 0.5, r: 1.2, y: 0.6, fp: 6, fh: 8, fe: 24, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
     twistBack: -0.25, twistFollow: 0.3, pitchBack: -0.02, pitchFollow: 0.12, hipBack: -0.03, hipFollow: -0.03 },
-  slap: { back: v3(-0.7, 0.9, -0.5), beta: 0.4, r: 1.3, y: 1.0, fp: 6, fh: 9, fe: 25, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
-    twistBack: -0.6, twistFollow: 0.45, pitchBack: -0.15, pitchFollow: 0.32, hipBack: -0.02, hipFollow: -0.09 },
-  oneTimer: { back: v3(-0.5, 0.65, -0.7), beta: 0.85, r: 1.25, y: 0.9, fp: 6, fh: 8, fe: 24, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
-    twistBack: -0.5, twistFollow: 0.4, pitchBack: -0.1, pitchFollow: 0.15, hipBack: -0.02, hipFollow: -0.05 },
+  // A slapshot: the stick back and up over his stick-side shoulder (the blade above his hands), hips and shoulders
+  // turned away and his weight back; down through the puck driving onto the front leg; a high finish at the net.
+  slap: { back: v3(-0.65, 1.5, -0.75), beta: 0.5, r: 1.3, y: 1.15, fp: 9, fh: 12, fe: 28, lo: -1.2, hi: 0.8, spot: STRIKE_SPOT,
+    twistBack: -0.75, twistFollow: 0.45, pitchBack: -0.2, pitchFollow: 0.4, hipBack: -0.03, hipFollow: -0.1, yawBack: -0.35, yawFollow: 0.25 },
+  // A one-timer: loaded back at about chest height as the pass comes (LOAD), the body open to it and the weight back,
+  // then swung low and long through the puck where it arrives (well out in front), and a high finish at the net.
+  oneTimer: { back: v3(-0.55, 1.05, -0.85), beta: 0.85, r: 1.3, y: 1.05, fp: 9, fh: 11, fe: 27, lo: -1.2, hi: 0.8, spot: { x: 0.9, z: -0.4 },
+    twistBack: -0.6, twistFollow: 0.45, pitchBack: -0.15, pitchFollow: 0.35, hipBack: -0.04, hipFollow: -0.08, yawBack: -0.3, yawFollow: 0.2 },
   forehand: { back: v3(0.35, 0.0, -0.95), beta: 0.5, r: 1.05, y: 0.08, fp: 5, fh: 6, fe: 22, lo: -1.0, hi: 1.1, spot: { x: 0.7, z: -0.3 },
     twistBack: -0.2, twistFollow: 0.4, pitchBack: 0, pitchFollow: 0.06, hipBack: -0.02, hipFollow: -0.02 },
   backhand: { back: v3(0.55, 0.0, -0.05), beta: 0.5, r: 1.0, y: 0.12, fp: 5, fh: 6, fe: 22, lo: -2.6, hi: -0.8, spot: { x: 0.65, z: -0.15 },
@@ -160,6 +168,8 @@ const STYLES: Record<StickStyle, StyleDef> = {
  * less for a pass or a dump (a quicker, shorter draw that stays on his stick side).
  */
 const BACK_TURN = { shot: 1, pass: 0.6, dump: 0.6 } as const;
+/** A full swing's back-swing turns half as far: it stays up behind his stick-side shoulder, within his reach. */
+const SWING_BACK_TURN = 0.5;
 /** How a turn toward the puck's way is shared: the shoulders turn this much of it, the hips this much. */
 const TURN_TWIST = 1, TURN_YAW = 0.3;
 /** About where the top hand is (x, z), for the heel that puts the puck on a spot. */
@@ -206,7 +216,7 @@ function classify(act: StickAct, e: GameEventOf<'release'>, s: SkaterSample, ctx
   const v = e.detail.vel, speed = Math.hypot(v.x, v.y);
   act.tick = e.tick; act.kind = e.detail.kind; act.vx = v.x; act.vy = v.y; act.vz = v.z;
   const heading = bodyHeading(s, v.x, v.y);
-  act.pending = false; act.loaded = false;
+  act.pending = false; act.loaded = false; act.mset = false;
   if (act.kind === 'shot') {
     const netX = ctx.state.attackDir[s.side] * ctx.rink.goalLineX;
     act.far = Math.hypot(netX - e.pos.x, e.pos.y) >= SLAP_DISTANCE;
@@ -240,7 +250,7 @@ function shotType(act: StickAct, had: number, slot: StickSlot): void {
   act.pending = false;
 }
 
-const newAct = (): StickAct => ({ tick: -1, kind: 'pass', style: 'forehand', lead: 0, vx: 0, vy: 0, vz: 0, aim: 0, meet: 0, mx: 0, mz: 0, far: false, pending: false, loaded: false, seen: 0 });
+const newAct = (): StickAct => ({ tick: -1, kind: 'pass', style: 'forehand', lead: 0, vx: 0, vy: 0, vz: 0, aim: 0, meet: 0, mx: 0, mz: 0, mset: false, far: false, pending: false, loaded: false, seen: 0 });
 function newSlot(): StickSlot {
   return {
     t: 0, give: 0, carrier: false, gotAt: -Infinity, contestAt: -Infinity, acts: [newAct(), newAct(), newAct()], around: [-1, -1, -1],
@@ -305,7 +315,7 @@ export const stickTrack: Overlay<StickSlot> = {
       if (ctx.state.tick >= a.tick || t > a.tick - 1) continue; // from the contact (the engine has let it go) on, kept
       a.aim = unwrap(bodyHeading(s, a.vx, a.vy), a.aim);
       a.meet = 1 - smooth((a.tick - 1 - receivedAt(sl, s, ctx)) / SETTLE_TICKS);
-      if (a.meet > 0) meetSpot(a, s, ctx);
+      if (a.meet > 0) meetSpot(a, s, ctx, dt);
     }
     trackReception(sl, s, ctx, t, fresh, dt);
     return sl;
@@ -361,6 +371,30 @@ const RAMP = 0.3;
 /** When (ticks after the contact) the blade is back where the skating pose has it, and the fade starts. */
 const fadeMid = (def: StyleDef): number => def.fh + 0.6 * (def.fe - def.fh);
 
+/** The centre of a full swing's arc (body frame of a left shot): in front of his chest on his stick side. */
+const SWING_PIVOT = v3(0.2, 1.0, -0.25);
+const pivot = v3(0, 0, 0);
+/**
+ * How a swing gathers speed into the contact and loses it after: the share of it at an even speed (the rest
+ * accelerating, or slowing); the blade meets the puck at 2 - SWING_EASE times its average speed.
+ */
+const SWING_EASE = 0.9;
+
+/**
+ * The point `e` (0..1) of the way from `a` to `b` round centre `c`: the direction from `c` turned along the great
+ * circle between them and the distance from `c` changed evenly. Into `o`.
+ */
+function arc(o: Vec3, c: Vec3, a: Vec3, b: Vec3, e: number): void {
+  const ax = a.x - c.x, ay = a.y - c.y, az = a.z - c.z, bx = b.x - c.x, by = b.y - c.y, bz = b.z - c.z;
+  const ra = Math.hypot(ax, ay, az) || 1e-9, rb = Math.hypot(bx, by, bz) || 1e-9;
+  const dot = clamp((ax * bx + ay * by + az * bz) / (ra * rb), -1, 1), th = Math.acos(dot), st = Math.sin(th);
+  const wa = st > 1e-6 ? Math.sin((1 - e) * th) / st : 1 - e, wb = st > 1e-6 ? Math.sin(e * th) / st : e;
+  const r = ra + (rb - ra) * e;
+  const dx = (ax / ra) * wa + (bx / rb) * wb, dy = (ay / ra) * wa + (by / rb) * wb, dz = (az / ra) * wa + (bz / rb) * wb;
+  const l = Math.hypot(dx, dy, dz) || 1;
+  o.x = c.x + (dx / l) * r; o.y = Math.max(0, c.y + (dy / l) * r); o.z = c.z + (dz / l) * r;
+}
+
 const scratch = { k0: v3(0, 0, 0), k1: v3(0, 0, 0), k2: v3(0, 0, 0), k3: v3(0, 0, 0), m: v3(0, 0, 0), out: v3(0, 0, 0) };
 
 /** Cubic Hermite from p0 (tangent m0) to p1 (tangent m1) over `h` ticks, at fraction `s`, into `o`. */
@@ -402,17 +436,25 @@ function receivedAt(sl: StickSlot, s: SkaterSample, ctx: AnimContext): number {
 /** How far (rad) action `a` turns his upper body toward the puck's way. */
 function turnOf(a: StickAct): number {
   const def = STYLES[a.style];
-  return clamp(a.aim - (def.lo + def.hi) / 2, -TURN_MAX[a.kind], TURN_MAX[a.kind]);
+  const max = a.style === 'slap' || a.style === 'oneTimer' ? SWING_TURN_MAX : TURN_MAX[a.kind];
+  return clamp(a.aim - (def.lo + def.hi) / 2, -max, max);
 }
 
 /** Where the stick meets the puck for action `a`: the drawn puck in his body frame, near the action's strike spot. */
-function meetSpot(a: StickAct, s: SkaterSample, ctx: AnimContext): void {
+function meetSpot(a: StickAct, s: SkaterSample, ctx: AnimContext, dt: number): void {
   const def = STYLES[a.style], sx = def.spot.x, sz = def.spot.z;
   const px = ctx.puck.drawn.x - s.pos.x, pz = ctx.puck.drawn.z - s.pos.y, f = s.facing;
   const bx = px * Math.cos(f) + pz * Math.sin(f), bz = (s.right ? -1 : 1) * (-px * Math.sin(f) + pz * Math.cos(f));
   const ox = bx - sx, oz = bz - sz, l = Math.hypot(ox, oz), q = l > MEET_REACH ? MEET_REACH / l : 1;
-  a.mx = sx + fin(ox * q); a.mz = sz + fin(oz * q);
+  const mx = sx + fin(ox * q), mz = sz + fin(oz * q);
+  // It follows the puck coming in no faster than MEET_SPEED, so the blade's target does not race about with it.
+  if (!a.mset) { a.mx = mx; a.mz = mz; a.mset = true; return; }
+  const dx = mx - a.mx, dz = mz - a.mz, l2 = Math.hypot(dx, dz), go = MEET_SPEED * Math.max(0, dt);
+  const k = l2 > go ? go / l2 : 1;
+  a.mx += dx * k; a.mz += dz * k;
 }
+/** How fast (m/s) the spot where the stick meets the puck may move. */
+const MEET_SPEED = 3;
 
 /**
  * The raw pose with action `a` fully on at display time `t`: the blade from where the skating pose (`raw`, fitted)
@@ -429,11 +471,13 @@ function actPose(raw: RawPose, a: StickAct, t: number, s: SkaterSample, ctx: Ani
   const plain = fitBody(raw, dims).blade, load = loadOf(a, t);
   k0.x = plain.x; k0.y = plain.y; k0.z = plain.z;
   // The draw-back stays mostly on his stick side (turned BACK_TURN as far as the rest of the action).
-  const bt = BACK_TURN[a.kind] * turn, cb = Math.cos(bt), sb = Math.sin(bt);
+  const bt = (a.style === 'slap' || a.style === 'oneTimer' ? SWING_BACK_TURN : BACK_TURN[a.kind]) * turn, cb = Math.cos(bt), sb = Math.sin(bt);
   k1.x = def.back.x * cb - def.back.z * sb; k1.y = def.back.y; k1.z = def.back.x * sb + def.back.z * cb;
   // A shot waiting on the puck starts from his stick loaded, turned the same way.
   if (load > 0) {
-    const lx = LOAD.x * cb - LOAD.z * sb, lz = LOAD.x * sb + LOAD.z * cb;
+    // Turned as a one-timer would be (the type may still be undecided), so the load does not move when it is decided.
+    const def1 = STYLES.oneTimer, lt = clamp(a.aim - (def1.lo + def1.hi) / 2, -SWING_TURN_MAX, SWING_TURN_MAX);
+    const cl = Math.cos(lt), sl = Math.sin(lt), lx = LOAD.x * cl - LOAD.z * sl, lz = LOAD.x * sl + LOAD.z * cl;
     k0.x += (lx - k0.x) * load; k0.y += (LOAD.y - k0.y) * load; k0.z += (lz - k0.z) * load;
   }
   {
@@ -451,10 +495,17 @@ function actPose(raw: RawPose, a: StickAct, t: number, s: SkaterSample, ctx: Ani
   // Through the contact at speed: its tangent runs from the back of the wind-up to the end of the follow-through.
   const h = def.beta * d, span = def.fp + h;
   m.x = (k3.x - k1.x) / span; m.y = (k3.y - k1.y) / span; m.z = (k3.z - k1.z) / span;
+  const swing = a.style === 'slap' || a.style === 'oneTimer';
+  if (swing) {
+    // A full swing goes round an arc about his chest (SWING_PIVOT, turned with the draw-back), as a stick held at
+    // arm's length does: back and up low beside him, down past his skates on his stick side, through and up. A straight
+    // line between the keys would bring the blade in close to his body, where the hands cannot hold it.
+    pivot.x = SWING_PIVOT.x * cb - SWING_PIVOT.z * sb; pivot.y = SWING_PIVOT.y; pivot.z = SWING_PIVOT.x * sb + SWING_PIVOT.z * cb;
+  }
   if (u <= -d) { out.x = k0.x; out.y = k0.y; out.z = k0.z; }
-  else if (u < -h) hermite(out, k0, null, k1, null, d - h, (u + d) / (d - h));
-  else if (u < 0) hermite(out, k1, null, k2, m, h, (u + h) / h);
-  else if (u < def.fp) hermite(out, k2, m, k3, null, def.fp, u / def.fp);
+  else if (u < -h) { const q = (u + d) / (d - h); if (swing) arc(out, pivot, k0, k1, smooth(q)); else hermite(out, k0, null, k1, null, d - h, q); }
+  else if (u < 0) { const q = (u + h) / h; if (swing) arc(out, pivot, k1, k2, SWING_EASE * q + (1 - SWING_EASE) * q * q); else hermite(out, k1, null, k2, m, h, q); }
+  else if (u < def.fp) { const q = u / def.fp; if (swing) arc(out, pivot, k2, k3, 1 - SWING_EASE * (1 - q) - (1 - SWING_EASE) * (1 - q) * (1 - q)); else hermite(out, k2, m, k3, null, def.fp, q); }
   else {
     // Held, then back to where the skating pose has the blade.
     const back = u <= def.fh ? 0 : smooth((u - def.fh) / (fadeMid(def) - def.fh));
@@ -468,7 +519,14 @@ function actPose(raw: RawPose, a: StickAct, t: number, s: SkaterSample, ctx: Ani
   // His free hand comes onto the stick as he draws it back.
   r.twoHands = raw.twoHands + (1 - raw.twoHands) * keep * smooth((u + d) / ((1 - def.beta) * d));
   r.twist = raw.twist + keep * (TURN_TWIST * turn * smooth((u + d) / ((1 - def.beta) * d)) + curve(u, d, def.beta, def.fp, 0, def.twistBack, clamp(def.twistFollow * (aim - turn), -0.5, 0.5)));
-  r.yaw = raw.yaw + keep * TURN_YAW * turn * smooth((u + d) / ((1 - def.beta) * d));
+  r.yaw = raw.yaw + keep * (TURN_YAW * turn * smooth((u + d) / ((1 - def.beta) * d)) + curve(u, d, def.beta, def.fp, 0, def.yawBack ?? 0, def.yawFollow ?? 0));
+  // A raised stick (a back-swing above the hands, a high finish) is held with the top hand up in front of his chest on
+  // his stick side, so the shaft passes outside his shoulder.
+  const raise = keep * smooth(out.y / RAISE_FULL);
+  if (raise > 0) {
+    const tx = TOP_UP.x * cb - TOP_UP.z * sb, tz = TOP_UP.x * sb + TOP_UP.z * cb;
+    r.top = { x: raw.top.x + (tx - raw.top.x) * raise, y: raw.top.y + (TOP_UP.y - raw.top.y) * raise, z: raw.top.z + (tz - raw.top.z) * raise };
+  }
   r.pitch = raw.pitch + keep * curve(u, d, def.beta, def.fp, 0, def.pitchBack, def.pitchFollow);
   r.hipY = raw.hipY + keep * curve(u, d, def.beta, def.fp, 0, def.hipBack, def.hipFollow);
   r.look = raw.look + keep * (clamp(aim - r.twist, -1, 1) - raw.look);
@@ -522,7 +580,9 @@ export const shotOverlay = releaseOverlay('shot', 'shot');
 export const dumpOverlay = releaseOverlay('dump', 'dump');
 
 /** Where a receiver loads his stick for a shot as the pass comes (blade heel, body frame of a left shot). */
-const LOAD = v3(-0.45, 0.6, -0.7);
+const LOAD = v3(-0.5, 1.0, -0.85);
+/** Where the top hand goes (from the pelvis) for a raised stick, and the blade height at which it is fully there. */
+const TOP_UP = v3(0.4, 0.32, -0.28), RAISE_FULL = 0.9;
 /**
  * How far (0..1) he has loaded his stick (drawn back and up, at LOAD) for shot `a`, which he had not got the puck for
  * when it was first seen (a one-timer, or a snap shot off a pass): from then over LOAD_TICKS, until the contact.

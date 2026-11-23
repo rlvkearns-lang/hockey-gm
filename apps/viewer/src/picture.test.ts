@@ -20,9 +20,12 @@ import { sharedPlayback } from './test/game';
 // Re-pinned again by Task 2's fix round 1 (the faceoff crouch's stick aim made continuous, the shot types and their
 // poses, the carried puck's catch-up speeds): 5: 12657c9df77f0d51 and 42: 01b183534ee12000 before, which the previous
 // faceoff.ts, overlays/stick.ts and carry.ts still give.
+// Re-pinned by Task 2's fix round 2 (a stick held above the hands in pose-mix.ts fitBody; the slapshot's and the
+// one-timer's swings in overlays/stick.ts): 5: 4942b8aaaf7560b6 and 42: 55d09213ba0e0c48 before, which the previous
+// pose-mix.ts and overlays/stick.ts still give.
 const PICTURE_HASH: Record<number, string> = {
-  5: '4942b8aaaf7560b6',
-  42: '55d09213ba0e0c48',
+  5: '073086cad08ddce8',
+  42: 'd7a3e1ad01ac907f',
 };
 
 /** Two 32-bit FNV-1a lanes over integers. */

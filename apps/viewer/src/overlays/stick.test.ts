@@ -207,13 +207,18 @@ describe('stick actions', () => {
       const shots = releases(g.rec).filter((e) => e.detail.kind === 'shot' && shoots.get(e.playerId!) === hand && offFacing(e) < 2.1).slice(0, 4);
       expect(shots.length).toBeGreaterThan(2);
       for (const rel of shots) {
-        const back = poseAtTick(g.rec, g.tl, rel.playerId!, rel.tick - 6), follow = poseAtTick(g.rec, g.tl, rel.playerId!, rel.tick + 4);
+        // At the back of the wind-up (a slapshot's comes earlier than a wrist shot's): the frame of 6, 9 or 12 ticks
+        // before the release where the blade is furthest back.
+        const follow = poseAtTick(g.rec, g.tl, rel.playerId!, rel.tick + 4);
+        const back = [6, 9, 12].map((k) => poseAtTick(g.rec, g.tl, rel.playerId!, rel.tick - k)).sort((x, y) => alongShoulders(x) - alongShoulders(y))[0]!;
         // To his left (a left shot) or his right (a right shot) of the way his shoulders face (in the world: his facing
         // plus the pose's twist, mirrored for a right shot), and behind them.
         const w = toWorld(back, back.blade), sh = back.facing + (back.right ? -1 : 1) * (back.twist ?? 0);
         const lateral = -Math.sin(sh) * w.x + Math.cos(sh) * w.z;
         expect(lateral * (hand === 'L' ? -1 : 1), `${hand} ${rel.tick} stick side`).toBeGreaterThan(0.2);
-        expect(bladeBehindBody(back), `${hand} ${rel.tick} behind ${alongShoulders(back)}`).toBe(true);
+        // Behind him: behind his shoulders, or (a one-timer opened to the pass, the shoulders turned well round) behind
+        // his hips.
+        expect(bladeBehindBody(back) || back.blade.x < -0.05, `${hand} ${rel.tick} behind ${alongShoulders(back)} ${back.blade.x}`).toBe(true);
         const f = toWorld(follow, follow.blade), l = Math.hypot(f.x, f.z), v = rel.detail.vel, lv = Math.hypot(v.x, v.y);
         expect((f.x * v.x + f.z * v.y) / (l * lv), `${hand} ${rel.tick} follow-through`).toBeGreaterThan(0.5);
       }
