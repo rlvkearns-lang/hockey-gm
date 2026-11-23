@@ -1,5 +1,5 @@
 // Headless screenshots of the skating test page (the single-file build), driven frame by frame through window.__viewer.
-// Usage: node apps/viewer/scripts/shots.mjs [outDir]   (build first: npm -w apps/viewer run build:single)
+// Usage: node apps/viewer/scripts/shots.mjs [outDir] [filePrefix]   (build first: npm -w apps/viewer run build:single)
 // Saves single frames, a contact sheet per sequence (the frames cropped round the figure), page shots at laptop and
 // phone widths in both colour schemes, and log.json (style per frame, measured frame rate, console errors).
 import { createRequire } from 'node:module';
@@ -13,6 +13,7 @@ const { chromium } = require('playwright');
 const here = dirname(fileURLToPath(import.meta.url));
 const page = resolve(here, '../dist-single/index.html');
 const out = resolve(process.argv[2] ?? join(process.cwd(), 'viewer-shots'));
+const prefix = process.argv[3] ?? '';
 if (!existsSync(page)) throw new Error(`build first: ${page} is missing`);
 mkdirSync(out, { recursive: true });
 
@@ -31,7 +32,7 @@ async function open(opts) {
   return { ctx, p };
 }
 
-const save = (name, dataUrl) => writeFileSync(join(out, name), Buffer.from(dataUrl.split(',')[1], 'base64'));
+const save = (name, dataUrl) => writeFileSync(join(out, prefix + name), Buffer.from(dataUrl.split(',')[1], 'base64'));
 
 // ---- Frame rate in real time (1x, follow camera) at a 1280 x 720 window.
 {
@@ -50,7 +51,7 @@ const save = (name, dataUrl) => writeFileSync(join(out, name), Buffer.from(dataU
 for (const [w, h, scheme] of [[1280, 900, 'light'], [1280, 900, 'dark'], [390, 844, 'light'], [390, 844, 'dark']]) {
   const { ctx, p } = await open({ viewport: { width: w, height: h }, colorScheme: scheme, deviceScaleFactor: w < 500 ? 2 : 1 });
   await p.evaluate(() => { window.__viewer.setManual(true); window.__viewer.setSpeed(0.5); window.__viewer.seek(window.__viewer.moments().find((m) => m.kind === 'sprint')?.tick ?? 4000); window.__viewer.step(1); window.__viewer.renderOnce(); });
-  const name = `page-${w}-${scheme}.png`;
+  const name = `${prefix}page-${w}-${scheme}.png`;
   await p.screenshot({ path: join(out, name), fullPage: true });
   const scroll = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   log.pages.push({ name, horizontalOverflowPx: scroll });
@@ -76,7 +77,7 @@ async function sequence(tag, kind, camera, tick, spacing) {
     }
     return shots;
   }, { camera, tick, spacing, n: FRAMES });
-  const names = frames.map((f, i) => { const n = `${tag}-${kind}-${camera}-${i + 1}.png`; save(n, f.url); return n; });
+  const names = frames.map((f, i) => { const n = `${tag}-${kind}-${camera}-${i + 1}.png`; save(n, f.url); return prefix + n; });
   log.sequences.push({ tag, kind, camera, tick, frames: frames.map((f, i) => ({ file: names[i], tick: f.info.tick, style: f.info.style, speed: +f.info.speed.toFixed(2), onIce: f.info.onIce })) });
   // Contact sheet: each frame cropped round the figure.
   const sheet = await ctx.newPage();
@@ -88,7 +89,7 @@ async function sequence(tag, kind, camera, tick, spacing) {
   await sheet.setContent(`<style>body{margin:0;background:#222;display:grid;grid-template-columns:repeat(4,${crop}px);gap:2px;width:${crop * 4 + 6}px}
     .c{position:relative;width:${crop}px;height:${crop}px;overflow:hidden}.c img{position:absolute;width:1100px;height:619px}
     .c b{position:absolute;left:4px;top:2px;font:13px system-ui;color:#fff;background:rgba(0,0,0,.6);padding:1px 4px}</style>${cells}`);
-  await sheet.screenshot({ path: join(out, `sheet-${tag}-${kind}-${camera}.png`), fullPage: true });
+  await sheet.screenshot({ path: join(out, `${prefix}sheet-${tag}-${kind}-${camera}.png`), fullPage: true });
   await sheet.close();
 }
 
@@ -108,5 +109,5 @@ for (const [tag, who] of [['d', null], ['f', forward]]) {
 }
 await ctx.close();
 await browser.close();
-writeFileSync(join(out, 'log.json'), JSON.stringify(log, null, 2));
+writeFileSync(join(out, `${prefix}log.json`), JSON.stringify(log, null, 2));
 console.log(JSON.stringify({ out, fps: log.fps, renderMs: log.renderMs, canvas: log.canvas, simulateMs: log.simulateMs, errors: log.errors, pages: log.pages }, null, 2));

@@ -41,6 +41,13 @@ sun.position.set(-8, 20, 12);
 scene.add(sun);
 scene.add(buildRink());
 
+/** A bright ring on the ice under the followed player, so he is easy to pick out among the markers. */
+const ring = new THREE.Mesh(
+  new THREE.RingGeometry(0.64, 0.72, 48).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0xffc928, transparent: true, opacity: 0.8, depthWrite: false }),
+);
+ring.renderOrder = 2;
+scene.add(ring);
 const others = new THREE.Group();
 scene.add(others);
 const puck = new THREE.Group();
@@ -83,6 +90,9 @@ let snapCamera = true;
 let lastStyle: Style = 'stand';
 let lastSpeed = 0;
 let lastOnIce = false;
+/** 0..1, eased: how far he is down in a faceoff crouch (at the dot while the faceoff is being set up). */
+let crouch = 0;
+const CROUCH_DOT = 1.3;
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
@@ -124,14 +134,13 @@ function buildMarkers(state: GameState): void {
   markers = new Map();
   for (const s of state.skaters) {
     const def = defs.get(s.id)!;
-    const m = createMarker(TEAM_COLORS[s.side].marker, bodyRadius(def.weightKg));
+    const m = createMarker(TEAM_COLORS[s.side].marker, bodyRadius(def.weightKg), def.number);
     markers.set(s.id, m);
     others.add(m);
   }
   for (const side of ['home', 'away'] as const) {
     const g = state.goalies[side];
-    const m = createMarker(TEAM_COLORS[side].marker, 0.55);
-    m.scale.y = 2.4;
+    const m = createMarker(TEAM_COLORS[side].marker, 0.55, defs.get(g.id)?.number);
     markers.set(g.id, m);
     others.add(m);
   }
@@ -297,18 +306,24 @@ function update(gameDt: number, displayDt = gameDt): void {
     if (!rig) continue;
     if (!s.onIce) {
       rig.root.visible = false;
+      ring.visible = false;
       if (lastOnIce) resetGait();
       lastOnIce = false;
       continue;
     }
     lastOnIce = true;
     const m = handedMotion(followDef, blendedMotion(p, s, a));
+    const fresh = gaitFresh;
     if (gaitFresh) {
       // Settle a fresh gait on the motion he has now without a turn-rate or acceleration spike from the jump.
       gait = stepGait(initialGait(), { ...m, accelAlong: 0, turnRate: 0 }, 0);
       gaitFresh = false;
     } else if (gameDt > 0) gait = stepGait(gait, m, gameDt);
-    rig.apply(poseOf(gait, m, dims), x, z, facing);
+    const atDot = f.next.phase === 'faceoffSetup' && Math.hypot(s.pos.x - f.next.faceoffSpot.x, s.pos.y - f.next.faceoffSpot.y) < CROUCH_DOT && m.speed < 0.5;
+    crouch = fresh ? (atDot ? 1 : 0) : crouch + ((atDot ? 1 : 0) - crouch) * (1 - Math.exp(-Math.max(gameDt, 0) / 0.35));
+    rig.apply(poseOf(gait, m, dims, { crouch }), x, z, facing);
+    ring.position.set(x, 0.006, z);
+    ring.visible = true;
     rig.root.visible = true;
     lastStyle = gait.style;
     lastSpeed = m.speed;

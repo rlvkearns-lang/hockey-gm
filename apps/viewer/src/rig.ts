@@ -45,7 +45,7 @@ export function mirrorPose(p: Pose): Pose {
   const mz = (v: Vec3): Vec3 => v3(v.x, v.y, -v.z);
   const leg = (l: Pose['legs'][number]): Pose['legs'][number] => ({ foot: mz(l.foot), footYaw: -l.footYaw, lifted: l.lifted });
   return {
-    hipY: p.hipY, pitch: p.pitch, roll: -p.roll, yaw: -p.yaw,
+    hipY: p.hipY, pitch: p.pitch, roll: -p.roll, yaw: -p.yaw, twist: -(p.twist ?? 0), look: -(p.look ?? 0),
     legs: [leg(p.legs[1]), leg(p.legs[0])],
     arms: [{ hand: mz(p.arms[1].hand) }, { hand: mz(p.arms[0].hand) }],
     stickAngle: -p.stickAngle,
@@ -201,7 +201,7 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors): SkaterRig {
   mats.push(numMat);
   const numSize = torsoW * 0.62;
   const number = mesh(new THREE.PlaneGeometry(numSize, numSize), numMat, 'number');
-  number.position.set(-torsoD / 2 - 0.006, d.torso * 0.58, 0);
+  number.position.set(-torsoD / 2 - 0.006, d.torso * 0.5, 0);
   number.rotation.y = -Math.PI / 2; // faces -x (his back), reading left to right for someone behind him
   torso.add(number);
   root.add(torso);
@@ -291,12 +291,14 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors): SkaterRig {
     pelvis.position.set(0, p.hipY, 0);
     pelvis.rotation.set(0, -p.yaw, 0);
     torso.position.set(0, p.hipY, 0);
-    torso.rotation.copy(scratch.set(p.roll, 0, -p.pitch, 'XYZ')); // Rx(roll) * Rz(-pitch), as torsoRotate
+    const twist = p.twist ?? 0;
+    torso.rotation.copy(scratch.set(p.roll, -twist, -p.pitch, 'XZY')); // Rx(roll) * Rz(-pitch) * Ry(-twist), as torsoRotate
 
     // Head: above the shoulders along the torso, kept more upright than the torso so he looks ahead.
-    const neck = add(v3(0, p.hipY, 0), torsoRotate(v3(0.04 * k, d.torso + hr * 1.25 + 0.04 * k, 0), p.pitch, p.roll));
+    const neck = add(v3(0, p.hipY, 0), torsoRotate(v3(0.04 * k, d.torso + hr * 1.25 + 0.04 * k, 0), p.pitch, p.roll, twist));
     head.position.set(neck.x, neck.y, neck.z);
-    head.rotation.set(p.roll * 0.5, 0, -p.pitch * 0.25, 'XYZ');
+    // Turned toward where he looks, kept more upright than the torso so his eyes are up the ice.
+    head.rotation.set(p.roll * 0.5, -(p.look ?? 0), -p.pitch * 0.25, 'YXZ');
 
     // Legs: solve each knee in a frame turned to the skate's heading so the knee bends over the toe.
     let fx = 0, fz = 0;
@@ -359,17 +361,41 @@ export function createSkaterRig(def: PlayerDef, colors: RigColors): SkaterRig {
   return { root, apply, dispose };
 }
 
-/** A simple marker for every other skater: a short cylinder with a notch pointing along +x (his facing). */
-export function createMarker(color: number, radius: number): THREE.Object3D {
+/**
+ * A marker for every other skater: a low, puck-like disc in his team colour with a pointed notch along +x (his facing)
+ * and his number on top (read from behind him). Flat, so it reads as a token on the ice, not an obstacle.
+ */
+export function createMarker(color: number, radius: number, number?: number, numberColor = 0xffffff): THREE.Object3D {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.35, 20).translate(0, 0.175, 0), new THREE.MeshLambertMaterial({ color }));
+  const h = 0.07;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, h, 28).translate(0, h / 2 + 0.005, 0), new THREE.MeshLambertMaterial({ color }));
   body.name = 'marker';
-  const notch = new THREE.Mesh(new THREE.BoxGeometry(radius * 0.7, 0.12, radius * 0.35).translate(radius + radius * 0.25, 0.29, 0), new THREE.MeshLambertMaterial({ color: 0x1b2330 }));
+  // Notch: a flat wedge pointing out of the disc along +x.
+  const wedge = new THREE.Shape([new THREE.Vector2(radius * 0.85, -radius * 0.32), new THREE.Vector2(radius * 1.45, 0), new THREE.Vector2(radius * 0.85, radius * 0.32)]);
+  const notchGeo = new THREE.ExtrudeGeometry(wedge, { depth: h * 0.8, bevelEnabled: false }).rotateX(-Math.PI / 2).translate(0, 0.005, 0);
+  const notch = new THREE.Mesh(notchGeo, new THREE.MeshLambertMaterial({ color }));
   notch.name = 'notch';
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.92, radius * 0.92, 0.02, 20).translate(0, 0.36, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }));
-  top.name = 'markerTop';
+  g.add(body, notch);
+  if (number !== undefined && hasDom()) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const x = c.getContext('2d')!;
+    x.font = `bold ${number >= 10 ? 76 : 92}px system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    x.fillStyle = css(numberColor);
+    x.fillText(String(number), 64, 70);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(radius * 1.5, radius * 1.5), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false }));
+    // Lying on top of the disc, upright when seen from behind him (text up = his forward, +x).
+    label.rotation.set(-Math.PI / 2, 0, -Math.PI / 2);
+    label.position.y = h + 0.008;
+    label.name = 'markerNumber';
+    g.add(label);
+  }
   const shadow = createShadowBlob();
-  shadow.scale.setScalar(radius * 1.5);
-  g.add(shadow, body, notch, top);
+  shadow.scale.setScalar(radius * 1.25);
+  g.add(shadow);
   return g;
 }
