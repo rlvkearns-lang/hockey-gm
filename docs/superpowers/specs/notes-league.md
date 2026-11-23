@@ -52,3 +52,16 @@ Proposed shape **[my call, not yet agreed]**:
 - Starting as an expansion GM: design the team, hire staff, go through the expansion draft and entry draft, with patient owner expectations for the first years.
 - Designing a look is choosing, not drawing: pick colours, pick a crest from several generated from the name and city, pick a jersey pattern.
 - Expansion drafts (owner, 2026-11-23): the player's team submits a protected list and can lose a player, like the real thing. The assistant GM can handle it if the player chooses to hand it off.
+
+## In-depth and underlying stats (owner, 2026-11-23)
+
+- The owner wants the option to see in-depth, underlying stats.
+
+Proposed shape **[my call, not yet agreed]**:
+
+- The engine plays every shift, so these are measured, not invented: shot attempts for and against while a player is on the ice (Corsi, Fenwick), expected goals from where and how each shot was taken, scoring-chance counts, on-ice shooting and save percentage (luck), zone starts, zone entries and exits, quality of teammates and opponents, with-or-without-you between linemates, per-60 rates, and by game situation.
+- Engine-only extras real leagues do not have: battles won by kind, races won, passes completed under pressure.
+- Shot maps and heat maps per player, line and team; game-by-game rolling charts.
+- For goalies: goals saved above expected, by shot location and type, rebound control.
+- Basic view by default; an "advanced" switch reveals the rest. Scouts and the assistant GM can cite these in reports.
+- Requires the engine to record a position on every event (being added in the current fix round) and the league stage to store per-game on-ice data.
