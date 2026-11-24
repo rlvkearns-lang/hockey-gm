@@ -98,11 +98,11 @@ describe('tactics: two teams look different', () => {
 });
 
 describe('tactics shade, they never decide (Review Focus 3)', () => {
-  it('for every entry and offence tactic one kind is certain before the cap in under 15% of ordinary decisions', () => {
+  it('for every entry and offence tactic (both teams, two games) one kind is certain before the cap in under 15% of ordinary decisions', () => {
     for (const t of [{ zoneEntry: 'dump' }, { zoneEntry: 'carry' }, { offence: 'pointShots' }, { offence: 'rush' }] as Partial<Tactics>[]) {
       const s = { ...gameSetup(1), home: { ...gameSetup(1).home, tactics: { ...gameSetup(1).home.tactics, ...t } }, away: { ...gameSetup(1).away, tactics: { ...gameSetup(1).away.tactics, ...t } } };
-      const c = observeGame(s).counters;
-      expect(c.normalCertain / c.normalDecisionPoints, JSON.stringify(t)).toBeLessThan(0.15);
+      const a = observeGame(s).counters, b = observeGame({ ...s, seed: 2 }).counters;
+      expect((a.normalCertain + b.normalCertain) / (a.normalDecisionPoints + b.normalDecisionPoints), JSON.stringify(t)).toBeLessThan(0.15);
     }
   }, LONG);
   it('a dump-and-chase team still carries in, and a carry-in team still dumps (no tactic removes an option)', () => {

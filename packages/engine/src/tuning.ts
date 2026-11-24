@@ -323,7 +323,8 @@ export const TUNING = deepFreeze({
    *   carrier behind the net goes round after him at once. 'collapse': one man has the carrier (pressing below the dots,
    *   containing above), the wingers cover at TUNING.cover's gap; with the carrier behind the net the man who has him
    *   waits at the post (job-targets.ts BEHIND_CHASE_SECONDS) and the others hold in front of the goal line.
-   * - pinch (m): a point man goes down the wall for a loose or contested puck on his side within this far of him, and
+   * - pinch (m): a point man goes down the wall for a loose or contested puck on his side within this far of him (and
+   *   more than pinchDepth m deeper than him: one nearer the line is his to keep in, as before tactics), and
    *   only while a teammate with job highForward is above the puck (nearer the blue line than it). pinchEager (m): one
    *   who may goes as if that much nearer the puck than he is (negative: further), against the other men for it.
    * - natural: generateTeam's rules (naturalTactics), from the roster alone (the brief's numbers).
@@ -344,6 +345,7 @@ export const TUNING = deepFreeze({
     pressure: { gap: 1.2, second: 2.2 },
     pinch: { often: 9, sometimes: 6, rarely: 3 },
     pinchEager: { often: 5, sometimes: 0, rarely: -4 },
+    pinchDepth: 3,
     natural: {
       entry: { carry: 0.15, dump: -0.05 },
       pointShots: { shootingPower: 74, shoot: 0.35 },

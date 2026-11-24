@@ -1013,7 +1013,8 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
     }
     case 'f2': {
       const fc = tactics.forecheck;
-      if (fc === 'passive' || opp === null) { if (opp === null) setRel(p, pr - 3, ps * 7, dir); else { p.x = a.x; p.y = a.y; } return out; }
+      // (Task 11: in a passive forecheck he gets back to his spot in the neutral zone flat out: the trap sets up at once.)
+      if (fc === 'passive' || opp === null) { if (opp === null) setRel(p, pr - 3, ps * 7, dir); else { p.x = a.x; p.y = a.y; out.effort = 'sprint'; } return out; }
       if (fc === 'aggressive') {
         const side = opp.pos.y >= 0 ? 1 : -1;
         p.x = opp.pos.x; p.y = opp.pos.y + side * 3;
@@ -1034,6 +1035,7 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
     }
     case 'f3': case 'dLineStrong': case 'dLineWeak':
       p.x = a.x; p.y = a.y;
+      if (job === 'f3' && tactics.forecheck === 'passive') out.effort = 'sprint';
       return out;
     case 'dGapStrong': case 'dGapWeak': {
       const ball = opp;

@@ -56,8 +56,8 @@ const joinRushMin = (t: Tactics): number => ((t.offence ?? 'cycle') === 'rush' ?
 const BLUE = RINK.blueLineX;
 
 /**
- * Pinching (Task 11): with the puck loose in the zone `side` attacks, a defenceman at the point (inside the blue line,
- * or within a metre of it) may go down the wall for it only when it is on his side of the ice, within his team's pinch
+ * Pinching (Task 11): with the puck loose in the zone `side` attacks and more than TUNING.tactics.pinchDepth m deeper
+ * than him, a defenceman at the point (inside the blue line, or within a metre of it) may go down the wall for it only when it is on his side of the ice, within his team's pinch
  * distance of him (TUNING.tactics.pinch by tactics.pinch) and a teammate with job highForward is above it (nearer the
  * blue line than the puck): otherwise he holds the line and someone else goes. True when `d` may not go.
  */
@@ -71,6 +71,8 @@ function heldAtPoint(state: GameState, side: Side, d: SkaterState, tactics: Tact
   if (!atPoint(state, side, d)) return false;
   const dir = state.attackDir[side], p = state.puck.pos;
   const prx = p.x * dir;
+  // A puck no deeper than TUNING.tactics.pinchDepth below him is his to keep in at the line: no pinch.
+  if (prx <= d.pos.x * dir + TUNING.tactics.pinchDepth) return false;
   const reach = TUNING.tactics.pinch[tactics.pinch ?? 'sometimes'];
   if (hyp(p.x - d.pos.x, p.y - d.pos.y) > reach || (p.y >= 0) !== (d.pos.y >= 0)) return true;
   for (let k = 0; k < state.skaters.length; k++) {

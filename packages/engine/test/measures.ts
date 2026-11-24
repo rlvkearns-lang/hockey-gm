@@ -776,7 +776,8 @@ export function countGames(seeds: number[]): PlayCounters {
  *   1 s, or chased sooner; behindChased: of those, one of its skaters who was in front of the goal line when the
  *   spell began came behind it within 3 m of him in its first second (he went round after him; holding the post, a
  *   man stays in front of the goal line; a man who was back there already, following him or tied up, is no chase).
- * - pinches: one of its defencemen, standing in the offensive zone (rx > 6.62) with the puck loose there, is given the
+ * - pinches: one of its defencemen, standing in the offensive zone (rx > 6.62) with the puck loose there and more than
+ *   TUNING.tactics.pinchDepth (3 m) deeper than him, is given the
  *   loose-puck job (chase or battleSupport) he did not hold; pinchesWithoutCover: of those, with no teammate holding job
  *   highForward nearer the blue line than the puck (each read from the tick before, when the jobs were handed out).
  */
@@ -880,7 +881,7 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
       // pinches, against the tick before (when this tick's jobs were handed out)
       if (live && prev !== null && prev.live && prev.carrier === null && prev.puckRx > BLUE) {
         st.skaters.forEach((s, i) => {
-          if (s.side !== side || !isDslot(s) || !prev!.onIce[i] || prev!.down[i] || prev!.rx[i]! <= BLUE - 1) return;
+          if (s.side !== side || !isDslot(s) || !prev!.onIce[i] || prev!.down[i] || prev!.rx[i]! <= BLUE - 1 || prev!.puckRx <= prev!.rx[i]! + TUNING.tactics.pinchDepth) return;
           const job = st.plans[i]!.job;
           if ((job !== 'chase' && job !== 'battleSupport') || PUCK_JOBS.has(prev!.jobs[i]!)) return;
           c.pinches++;
