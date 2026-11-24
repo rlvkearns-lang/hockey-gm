@@ -3,7 +3,7 @@ import { assignJobs, phaseFor, sitBack } from '../src/team-play';
 import { DT } from '../src/constants';
 import { resolveNets } from '../src/rink';
 import { movementOf, stepSkater } from '../src/skating';
-import { defs, onIce, skater, spotName, stateWith, tactics, wingerAheadOnRush } from './helpers';
+import { defs, onIce, skater, stateWith, tactics, wingerAheadOnRush } from './helpers';
 
 describe('team play', () => {
   it('phases track the puck', () => {
@@ -38,7 +38,7 @@ describe('team play', () => {
     const w = skater(rush, 'home', 'LW'); w.pos = { x: 5, y: 8 }; w.vel = { x: 8, y: 0 }; assignJobs(rush, defs, tactics);
     const plan = (s: { id: string }) => rush.plans[rush.skaters.findIndex((k) => k.id === s.id)]!;
     expect(plan(w)).toMatchObject({ slow: 'stop', through: false });
-    expect(plan(skater(rush, 'away', 'C'))).toMatchObject({ slow: 'coast', through: false });
+    expect(plan(skater(rush, 'away', 'LD'))).toMatchObject({ slow: 'coast', through: false });   // the gap defenceman (away C is f1 now: he skates through the carrier)
   });
   it('a back-checker skating fast away from his blue line is not stopped hard', () => {
     const rush = stateWith({ carrier: 'home', puckX: 0 });
@@ -48,7 +48,7 @@ describe('team play', () => {
   it('the chaser keeps the puck unless a teammate is clearly closer, and a held spot waits out its hold', () => {
     const st = stateWith({ carrier: null, puckX: 0 }); assignJobs(st, defs, tactics);
     const chaser = (side: 'home' | 'away') => st.skaters.find((s, i) => s.side === side && st.plans[i]!.job === 'chase')!;
-    const first = chaser('home'); const other = onIce(st, 'home').find((s) => s !== first && st.plans[st.skaters.indexOf(s)]!.job === 'shape')!;
+    const first = chaser('home'); const other = onIce(st, 'home').find((s) => s !== first && st.plans[st.skaters.indexOf(s)]!.job !== 'chase')!;
     const dFirst = Math.hypot(first.pos.x, first.pos.y);
     other.pos = { x: (dFirst - 0.5) / Math.SQRT2, y: (dFirst - 0.5) / Math.SQRT2 }; st.tick++; assignJobs(st, defs, tactics);
     expect(chaser('home')).toBe(first);                                          // closer by 0.5 m: no hand-over
@@ -72,10 +72,5 @@ describe('team play', () => {
     expect(sitBack(st, 'home')).toBeLessThan(1); expect(sitBack(st, 'home')).toBeGreaterThanOrEqual(0.8); expect(sitBack(st, 'away')).toBe(1);
     st.score = { home: 2, away: 0 }; expect(sitBack(st, 'home')).toBe(1);
     st.period = 3; expect(sitBack(st, 'home')).toBeLessThan(1);
-  });
-  it('forwards rotate in the offensive zone', () => {
-    const spots = new Set<string>(); const st = stateWith({ carrier: 'home', puckX: 22 });
-    for (let t = 0; t < 30 * 40; t++) { st.tick++; assignJobs(st, defs, tactics); spots.add(spotName(st, 'home', 'C')); }
-    expect(spots.size).toBeGreaterThanOrEqual(3);
   });
 });

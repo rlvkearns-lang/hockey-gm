@@ -114,6 +114,21 @@ export const TUNING = deepFreeze({
    * sprintFrom (m) away and glides within glideWithin, else skates. Below sprintMinEnergy only the puck jobs sprint.
    */
   effort: { glide: 0.55, skate: 0.8, sprint: 1, sprintFrom: 8, glideWithin: 3, sprintMinEnergy: 0.2 },
+  /**
+   * Jobs (jobs.ts): a man holding a job is keep (m) nearer its anchor than anyone else when the jobs are handed out.
+   * openRadius (m): a skater getting open looks at 8 spots this far round his job's anchor (officeRadius behind the net).
+   */
+  jobs: { keep: 3, openRadius: 3, officeRadius: 1.2 },
+  /**
+   * Passing lanes (lanes.ts): a lane is open with `open` (m) of clear ice round it and no opponent within `space` (m) of
+   * its end; a skater has a clear path to the net with no opponent ahead within clearPath (m) of his line to it.
+   */
+  lanes: { open: 1.0, space: 1.5, clearPath: 2.5 },
+  /**
+   * Covering a man (job-targets.ts coverSpot): `gap` (m) goal-side of him, moved laneWeight of the way toward the lane
+   * from the carrier to him; a lane is shadowed from a cover spot within shadowReach (m) of it.
+   */
+  cover: { gap: 1.2, laneWeight: 0.5, shadowReach: 3 },
   /** A goalie's body (bodies.ts resolveGoalies): skaters are kept this far (m) plus their own radius from his centre. */
   goalieBody: { radius: 0.55 },
 

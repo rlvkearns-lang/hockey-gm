@@ -85,12 +85,15 @@ export type Job =
   | 'backcheckA' | 'backcheckB' | 'dGapStrong' | 'dGapWeak'                                      // without it, neutral zone
   | 'dCorner' | 'dNet' | 'dzCentre' | 'wingStrong' | 'wingWeak'                                  // without it, own zone
   | 'chase' | 'receive' | 'battleSupport'                                                        // the puck is loose or on its way
-  | 'press' | 'shape'                                                                            // Task 3 only; Task 4 removes both
   | 'change' | 'lineUp' | 'tagUp' | 'contest' | 'down';                                          // utility
 /** How hard he skates: the share of his top speed he wants (TUNING.effort). */
 export type Effort = 'glide' | 'skate' | 'sprint';
-/** Why a target was last issued. `review` is the routine one (minimum hold passed and the spot moved enough); the rest are triggers. */
-export type ReplanReason = 'start' | 'possession' | 'passToMe' | 'loosePuckMine' | 'phase' | 'whistle' | 'contestEnd' | 'gotUp' | 'steppedOn' | 'offside' | 'review';
+/**
+ * Why a target was last issued. `review` is the routine one (minimum hold passed and the spot moved enough); the rest
+ * are triggers. `newJob`: team play gave him another job (a job changes inside the hold only on another trigger, or
+ * when the job he holds is gone from his team's list).
+ */
+export type ReplanReason = 'start' | 'possession' | 'passToMe' | 'loosePuckMine' | 'phase' | 'whistle' | 'contestEnd' | 'gotUp' | 'steppedOn' | 'offside' | 'newJob' | 'review';
 /** What a skater has committed to (commit.ts). `state.plans[i]` belongs to `state.skaters[i]`. */
 export type SkaterPlan = {
   job: Job; jobTick: number;

@@ -115,9 +115,9 @@ export function setTeamPhase(state: GameState): void {
 export type Want = { job: Job; pos: Vec2; face: Vec2 | null; follow: SkaterPlan['follow']; markId: string | null; effort: Effort; slow: SlowMode; through: boolean };
 
 /** Jobs that may sprint on empty legs: the puck is at stake. */
-const ALWAYS_SPRINT: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'f1', 'press']);
+const ALWAYS_SPRINT: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'f1']);
 
-/** speedCap for an effort and energy: TUNING.effort.glide / skate / sprint; a sprint needs energy >= sprintMinEnergy unless the job is chase, receive, f1 or press. */
+/** speedCap for an effort and energy: TUNING.effort.glide / skate / sprint; a sprint needs energy >= sprintMinEnergy unless the job is chase, receive or f1. */
 export function speedFor(effort: Effort, job: Job, energy: number): number {
   if (effort === 'glide') return E.glide;
   if (effort === 'skate') return E.skate;
@@ -151,7 +151,8 @@ export function commitTo(state: GameState, i: number, want: Want, trigger: Repla
   if (!issue && tick - plan.targetTick >= HOLD_TICKS) {
     // A puck or man he no longer follows holds him to nothing once the hold has passed.
     const dx = want.pos.x - s.target.x, dy = want.pos.y - s.target.y;
-    issue = dx * dx + dy * dy > C.moveEnough * C.moveEnough || (plan.follow !== 'spot' && plan.job !== want.job);
+    // So does a job that now follows something else (a spot, the puck, a man).
+    issue = dx * dx + dy * dy > C.moveEnough * C.moveEnough || (plan.follow !== 'spot' && plan.job !== want.job) || plan.follow !== want.follow;
   }
   if (issue) {
     if (plan.job !== want.job) { plan.job = want.job; plan.jobTick = tick; }
@@ -197,7 +198,14 @@ export function triggerFor(state: GameState, i: number, wantJob: Job): ReplanRea
   if (wantJob === 'receive' && plan.job !== 'receive' && state.pendingPass?.toId === s.id) return 'passToMe';
   if (wantJob === 'chase' && plan.job !== 'chase') return 'loosePuckMine';
   if (state.teamPhase[s.side].sinceTick > plan.targetTick) return 'phase';
+  // Team play has given him another job (the job lists are unique and respect the hold: jobs.ts).
+  if (wantJob !== plan.job) return 'newJob';
   return null;
+}
+
+/** True while skater i is inside the hold of the target he was last issued (TUNING.commit.holdSeconds). */
+export function inHold(state: GameState, i: number): boolean {
+  return state.tick - state.plans[i]!.targetTick < HOLD_TICKS;
 }
 
 /**
