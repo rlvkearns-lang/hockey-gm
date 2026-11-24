@@ -152,8 +152,11 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
  * clock). He draws a pick (decideCarrier, the full-temperature draw) when he gains the puck; when his situation changes
  * (readKey: breakaway, odd-man, behind the net; the zone; into the slot); when pressure arrives (pressureArrives, Task
  * 8b: once per checker, with hysteresis and a cooldown; pressure leaving is no decision point); when his carry's target is reached (within
- * decide.arrive m); when the minimum hold of his plan (CarrierPlan.until) runs out; or when an option he sees is worth
- * more than his plan by decide.margin (or his plan is gone from his list). He looks for these every `lookTicks` ticks
+ * decide.arrive m); when carrying on would put his team offside; when the minimum hold of his plan (CarrierPlan.until)
+ * has run out and he sees something worth decide.marginHeld more than it, or it is as old as one read of the play
+ * (Task 8b: a hold that runs out is reviewed, not drawn again; while his plan is still the best he sees he keeps at it);
+ * or when an option he sees is worth more than his plan by decide.margin (or his plan is gone from his list). What made
+ * the decision is kept in CarrierPlan.why. He looks for these every `lookTicks` ticks
  * (BRAIN_INTERVAL_TICKS); between them he carries out his plan. Writes state.carrierPlan (cleared while nobody carries).
  * Its events (release, and pass) go into `out` (a shot's own event comes when it ends). A carrier steered by a contest
  * (being hit, from impact on) may still pass, shoot, rim, dump or clear, but his skating belongs to the contest, so a

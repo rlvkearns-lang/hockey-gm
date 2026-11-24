@@ -14,6 +14,12 @@
  * ahead; pressured below the dots he protects, cycles (rims) or shoots and never throws it to the point; behind the
  * net he holds it there, passes out front or wraps it round. And never an option that puts his own team offside.
  *
+ * Task 8b. Patience (TUNING.patience, patienceOf): in the zone he attacks the puck is worth at least his patience times
+ * the best look the possession can still produce, where he is and wherever an option leads, so a shot that does not
+ * score gives up part of a possession worth that much and he waits for a good enough look. A pass or a carry is worth
+ * the look it leads to (worthAt, lookLeft). A shot with a checker in stick reach is rushed (actions.ts shotRush) and
+ * valued so. Pressured low he may also carry it wide to the corner; on an odd-man rush he may also shield it.
+ *
  * Positions here are attack-relative for the carrier's side: rx toward the net he attacks (goal line 27.13, blue line
  * 7.62), ly to his left.
  */
