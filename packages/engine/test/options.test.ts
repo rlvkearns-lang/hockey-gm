@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chooseOption, listOptions, readSituation, threat, type Option } from '../src/options';
+import { chooseOption, listOptions, readSituation, threat, topKindShare, type Option } from '../src/options';
 import { decideCarrier, type Decision } from '../src/brain';
 import { contestTick } from '../src/contests/core';
 import { executeRim } from '../src/actions';
@@ -7,7 +7,7 @@ import { crossesEndBox } from '../src/lanes';
 import { DT } from '../src/constants';
 import { createRng } from '../src/rng';
 import type { GameState, PlayerDef, SkaterState } from '../src/types';
-import { def, defs, place, playmaker, skater, sniper, stateWith, tactics } from './helpers';
+import { def, defs, place, playmaker, skater, slotState, sniper, stateWith, tactics } from './helpers';
 
 /** decideCarrier for seeds 1..n with `d` (given the carrier's id and slot) as the carrier in `st`. */
 function decisions(st: GameState, d: PlayerDef, n: number): Decision[] {
@@ -95,18 +95,49 @@ describe('the carrier values his options', () => {
     for (let i = 0; i < 20_000; i++) listOptions(st, me, defs, tactics.home, out);
     expect((performance.now() - t) / 20_000).toBeLessThan(0.15);
   });
-  it('the pick is the best value as he sees it: a clearly better option wins almost always, the committed one is favoured', () => {
+  it('the pick is a draw weighted by value: a clearly better option wins most of the time, never always; the committed one is favoured', () => {
     const st = oneBestPass();
     const me = { ...def({}), id: 'home-RW', position: 'RW' as const };
     const sit = readSituation(st, skater(st, 'home', 'RW'));
     const opts: Option[] = [{ kind: 'protect', value: 0 }, { kind: 'shoot', value: 0.05 }];
     let shots = 0;
-    for (let seed = 1; seed <= 500; seed++) if (chooseOption(opts, me, sit, null, createRng(seed)).kind === 'shoot') shots++;
-    expect(shots).toBeGreaterThan(490);
+    for (let seed = 1; seed <= 2000; seed++) if (chooseOption(opts, me, sit, null, createRng(seed)).kind === 'shoot') shots++;
+    expect(shots / 2000).toBeGreaterThan(0.8); expect(shots / 2000).toBeLessThanOrEqual(0.97 + 0.01);
     const close: Option[] = [{ kind: 'protect', value: 0 }, { kind: 'shoot', value: 0 }];
     let kept = 0;
     for (let seed = 1; seed <= 2000; seed++) if (chooseOption(close, me, sit, { id: 'home-RW', kind: 'protect', lane: null, toId: null, to: null, tick: 0 }, createRng(seed)).kind === 'protect') kept++;
     expect(kept / 2000).toBeGreaterThan(0.55);
+  });
+  it('no kind of option is certain: a far better one gets at most 97% of the draw, even for an elite player', () => {
+    const st = oneBestPass();
+    const me = { ...def({ iq: 99, poise: 99 }), id: 'home-RW', position: 'RW' as const };
+    const sit = readSituation(st, skater(st, 'home', 'RW'));
+    const opts: Option[] = [{ kind: 'protect', value: 0 }, { kind: 'carry', lane: 'net', to: { x: 0, y: 0 }, value: 0.5 }, { kind: 'carry', lane: 'wide', to: { x: 0, y: 0 }, value: 0.4 }];
+    expect(topKindShare(opts, me, sit, null)).toBeCloseTo(0.97, 9);
+    let protect = 0;
+    for (let seed = 1; seed <= 4000; seed++) if (chooseOption(opts, me, sit, null, createRng(seed)).kind === 'protect') protect++;
+    expect(protect / 4000).toBeGreaterThan(0.02); expect(protect / 4000).toBeLessThan(0.04);
+  });
+  it('in the slot an elite carrier still mixes his options: no kind above 90% (Task 5 review)', () => {
+    const elite = def({ iq: 97, poise: 97, vision: 97 });
+    const ds = decisions(slotState, elite, 2000);
+    for (const k of ['shoot', 'pass', 'carry', 'protect']) expect(ds.filter((d) => d.kind === k).length / 2000).toBeLessThan(0.90);
+  });
+  it('a breakaway shoots 25% to 85% of the time once in range, more often closer in, and never passes backward (Task 5 review)', () => {
+    const shoots = (x: number): number => {
+      const st = breakaway(x); const ds = decisions(st, def({}), 2000);
+      for (const d of ds) if (d.kind === 'pass') expect(skaterById(st, d.toId).pos.x).toBeGreaterThanOrEqual(x - 0.6 - 1);
+      return ds.filter((d) => d.kind === 'shoot').length / 2000;
+    };
+    // 9 m and 6 m out (the review named x = 12 and 21: at x = 12 the puck is 15 m out, beyond the 12 m a breakaway shoots from).
+    const far = shoots(18), near = shoots(21);
+    for (const v of [far, near]) { expect(v).toBeGreaterThan(0.25); expect(v).toBeLessThan(0.85); }
+    expect(near).toBeGreaterThan(far);
+  });
+  it('pressured down low he does not just protect: protect under 75%, cycle and shoot each over 5% (Task 5 review)', () => {
+    const st = stateWith({ carrier: 'home', puckX: 24, puckY: 10, carrierSlot: 'LW' }); place(st, 'away:LD', 24.4, 9.2); place(st, 'home:LD', 9.1, 8.5); place(st, 'home:RD', 9.1, -4);
+    const ds = decisions(st, def({}), 2000); const share = (k: string): number => ds.filter((d) => d.kind === k).length / 2000;
+    expect(share('protect')).toBeLessThan(0.75); expect(share('rim')).toBeGreaterThan(0.05); expect(share('shoot')).toBeGreaterThan(0.05);
   });
 });
 

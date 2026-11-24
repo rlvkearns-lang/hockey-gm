@@ -45,7 +45,10 @@ export const TUNING = deepFreeze({
     openNetShade: 0.6,
     /** Shoot weight is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
     shootPressure: 3.6,
-    /** Largest share any one kind of option (all passing lanes together count as one kind) may have of the draw. */
+    /**
+     * Largest share any one kind of option (all passing lanes together count as one kind, all carry lanes another) may
+     * have of the carrier's draw when another kind is on his list (options.ts chooseOption).
+     */
     maxShare: 0.97,
     /** Passes shorter or longer than this (m) are not considered. */
     passRange: [2.5, 35] as [number, number],
@@ -137,9 +140,11 @@ export const TUNING = deepFreeze({
   /**
    * The carrier's option values (options.ts). An option's value is chance it works * (threat it leads to - threat here)
    * - (1 - chance) * what losing the puck here costs (the threat here plus turnoverCost * the other side's threat from
-   * here). He sees each value with an error of sd noise.base + noise.perPoint * (100 - iq) + noise.pressure * pressure
-   * - noise.perPoise * poise (`persist` of that error stays with him while he has the puck, keyed by his plan's seed;
-   * builder's addition); the option he is committed to gets `stick` more. A pass lane under TUNING.lanes.open is
+   * here). He picks by a draw weighted by exp(value / T), with temperature T = pick.base + pick.perPoint * (100 - iq) +
+   * pick.pressure * pressure - pick.perPoise * poise (at least pick.min): a smart, poised player usually takes the best
+   * option. A judging error of noise.persist * T stays with him while he has the puck (keyed by his plan's seed;
+   * builder's addition); the option he is committed to gets `stick` more. On a breakaway a carry that ends in a deke
+   * near the net is worth `deke` of a shot from there. A pass lane under TUNING.lanes.open is
    * worth `shadowed` of an open one. `hold`: each second he has had the puck adds this much to shooting and passing and
    * takes it off carrying and protecting (at most holdCap seconds).
    * Builder's additions: `goal` scales a shot's chance to score (shotQuality * skill * goal), and a shot that does not
@@ -150,9 +155,11 @@ export const TUNING = deepFreeze({
    * most raceMax.
    */
   value: {
-    noise: { base: 0.004, perPoint: 0.0002, pressure: 0.006, perPoise: 0.00004, persist: 0.85 },
-    stick: 0.004, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
-    goal: 0.13, shotKeep: 0.05, habitShift: 0.03, offside: 0.03, icing: 0.03, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
+    noise: { persist: 0.85 },
+    deke: 0.6,
+    pick: { base: 0.0137, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
+    stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
+    goal: 0.13, shotKeep: 0.05, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
 
   /**

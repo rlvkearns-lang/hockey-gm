@@ -56,7 +56,7 @@ const dpow = dpow_;
 
 export type Situation = {
   rx: number; ly: number; zone: 'D' | 'N' | 'O'; pressure: number;
-  /** Nobody between him and the net (clearPathToNet) once he is past his own blue line. */
+  /** Nobody between him and the net (clearPathToNet), and no opponent skater nearer the net than he is, once he is past his own blue line. */
   breakaway: boolean;
   /** Attackers level with or ahead of the puck (within 5 m behind it) outnumber the defenders goal-side of it, two or fewer of them. */
   oddMan: boolean;
@@ -192,7 +192,7 @@ function readInto(state: GameState, s: SkaterState, out: Situation): Situation {
   out.pressure = pressureOn(state, s);
   const srx = s.pos.x * dir;
   // A clear path with a man right on him (within BREAKAWAY_ALONE, from any side) is no breakaway: he is caught.
-  out.breakaway = srx > -BLUE && srx < GOAL && clearPathToNet(state, s) && spaceAt(state, s.side, s.pos) > BREAKAWAY_ALONE;
+  out.breakaway = srx > -BLUE && srx < GOAL && clearPathToNet(state, s) && spaceAt(state, s.side, s.pos) > BREAKAWAY_ALONE && !defenderGoalSide(state, s);
   let att = 0, def = 0;
   if (!out.breakaway && srx > -BLUE) {
     // Goal-side: nearer the net centre than the puck (down low, the men in front of the net are goal-side of a puck on the wall).
@@ -209,6 +209,14 @@ function readInto(state: GameState, s: SkaterState, out: Situation): Situation {
   out.pressuredLow = out.pressure >= 0.5 && rx > DOTS;
   out.behindNet = rx > GOAL && Math.abs(ly) < BEHIND_Y;
   return out;
+}
+
+/** Whether a standing opponent skater is nearer the net `s` attacks than he is (goal-side of him, in or out of his path). */
+function defenderGoalSide(state: GameState, s: SkaterState): boolean {
+  const dir = state.attackDir[s.side];
+  const me = hyp(GOAL - s.pos.x * dir, s.pos.y);
+  for (const o of state.skaters) if (o.onIce && o.side !== s.side && o.downT === 0 && hyp(GOAL - o.pos.x * dir, o.pos.y) < me) return true;
+  return false;
 }
 
 /** The carrier's situation now (a new object). */
@@ -375,7 +383,13 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     const w = laneWidth(state, side, s.pos, tw);
     const block = w < 2.5 ? ((2.5 - w) / 2.5) * 0.5 : 0;
     const chance = clamp(0.95 - pressure * (0.35 - 0.002 * ph) - block, 0.03, 0.97);
-    let v = valueOf(chance, threat(trx, tly) * openAt(spaceAt(state, side, tw)));
+    // On a breakaway a carry at the net leads to the shot or deke at its end: worth that chance to score (the goalie
+    // square to him), not the threat of the spot.
+    // A carry that ends inside DEKE_FROM of the net ends in a deke, with the goalie to beat at close range: V.deke of it.
+    const to = mode === 'break'
+      ? V.goal * shotQuality(trx, tly) * shootSkill * B.openNetWeight[0] * (hyp(GOAL - trx, tly) < DEKE_FROM ? V.deke : 1)
+      : threat(trx, tly) * openAt(spaceAt(state, side, tw));
+    let v = valueOf(chance, to);
     v = habit(v, tend.carry) - moveOn;
     out.push({ kind: 'carry', lane, to: { x: tw.x + 0, y: tw.y + 0 }, value: v });
   };
@@ -508,6 +522,9 @@ function race(state: GameState, s: SkaterState, to: Vec2, named: SkaterState | n
   return clamp(V.raceBase + V.racePerMetre * (opp - mate), 0.03, V.raceMax);
 }
 
+/** The standard deviation of the softmax draw's implied (Gumbel) error, in units of its temperature: pi / sqrt(6). */
+const GUMBEL_SD = 1.2825498301618641;
+/** The share of the temperature left fresh at each look once he has his read. */
 const FRESH = Math.sqrt(1 - V.noise.persist * V.noise.persist);
 const LANE_KEY: Record<CarryLane, number> = { net: 1, wide: 2, middle: 3, office: 4, wrap: 5, hold: 6 };
 const KIND_KEY: Record<Option['kind'], number> = { shoot: 1, pass: 2, carry: 3, rim: 4, dump: 5, protect: 6, clear: 7 };
@@ -538,17 +555,78 @@ function committed(o: Option, plan: CarrierPlan | null): boolean {
   return true;
 }
 
-/** His pick: each value is seen with an error (TUNING.value.noise: base + perPoint * (100 - iq), more under pressure, less with poise), then the best seen is taken. */
+/** Scratch for chooseOption: each option's weight and each kind's total. */
+const pickW: number[] = [];
+const kindW: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
+
+/**
+ * His pick, a draw weighted by value: option i is taken with weight exp(seen_i / T), where seen_i is its value, plus
+ * TUNING.value.stick when it is what he is committed to, plus the part of his judging error that stays with him for the
+ * possession (persist * a fixed normal error * T, keyed by his plan's seed). The temperature T (TUNING.value.pick: base +
+ * perPoint * (100 - iq) + pressure * his pressure - perPoise * poise, at least `min`) is lower for a smart, poised player,
+ * who usually takes the best option, and higher for a limited one. No kind of option is taken more than
+ * TUNING.brain.maxShare of the time when there is another kind on the list: the rest goes to the other kinds by weight.
+ */
 export function chooseOption(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null, rng: Rng): Option {
-  const N = V.noise, a = me.attrs;
-  const sd = Math.max(0.001, N.base + N.perPoint * (100 - a.iq) + N.pressure * sit.pressure - N.perPoise * a.poise);
-  let best = options[0]!, bestV = -Infinity;
-  for (const o of options) {
-    // Most of his error in judging an option stays with him while he has the puck (keyed by the plan's seed and the
-    // option); the rest is fresh at every look. Without a plan (his first look) it is all fresh.
-    const z = plan !== null && plan.seed !== undefined ? N.persist * seenError(plan.seed, o) + FRESH * rng.gauss() : rng.gauss();
-    const v = o.value + (committed(o, plan) ? V.stick : 0) + z * sd;
-    if (v > bestV) { bestV = v; best = o; }
+  const n = options.length;
+  if (n === 1) return options[0]!;
+  const total = weigh(options, me, sit, plan);
+  let r = rng.next() * total;
+  for (let i = 0; i < n; i++) {
+    const w = pickW[i]!;
+    if (r < w) return options[i]!;
+    r -= w;
   }
-  return best;
+  return options[n - 1]!;
+}
+
+/** The share of chooseOption's draw that goes to its most likely kind of option (1 with a single kind on the list). */
+export function topKindShare(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null): number {
+  if (options.length <= 1) return 1;
+  const total = weigh(options, me, sit, plan);
+  for (let k = 0; k < kindW.length; k++) kindW[k] = 0;
+  for (let i = 0; i < options.length; i++) kindW[KIND_KEY[options[i]!.kind]]! += pickW[i]!;
+  let top = 0;
+  for (let k = 1; k < kindW.length; k++) if (kindW[k]! > top) top = kindW[k]!;
+  return top / total;
+}
+
+/** Fills pickW with each option's weight in the draw (the kind cap applied); returns their total. */
+function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null): number {
+  const P = V.pick, a = me.attrs;
+  const T0 = Math.max(P.min, P.base + P.perPoint * (100 - a.iq) + P.pressure * sit.pressure - P.perPoise * a.poise);
+  // Once he has a read of the play (his plan's seed), most of his error is that read, fixed for the possession (an
+  // error of persist * T0 * GUMBEL_SD on each option), and the draw at each look is cooler (FRESH * T0).
+  const seeded = plan !== null && plan.seed !== undefined;
+  const T = seeded ? T0 * FRESH : T0;
+  const n = options.length;
+  let vmax = -Infinity;
+  pickW.length = n;
+  for (let i = 0; i < n; i++) {
+    const o = options[i]!;
+    const z = seeded ? V.noise.persist * GUMBEL_SD * seenError(plan.seed!, o) * T0 : 0;
+    const v = o.value + (committed(o, plan) ? V.stick : 0) + z;
+    pickW[i] = v;
+    if (v > vmax) vmax = v;
+  }
+  for (let k = 0; k < kindW.length; k++) kindW[k] = 0;
+  let total = 0, kinds = 0;
+  for (let i = 0; i < n; i++) {
+    const w = dexp((pickW[i]! - vmax) / T);
+    pickW[i] = w;
+    const k = KIND_KEY[options[i]!.kind];
+    if (kindW[k] === 0) kinds++;
+    kindW[k]! += w;
+    total += w;
+  }
+  // The parity cap: with more than one kind on the list, no kind gets more than maxShare of the draw.
+  let top = 0;
+  for (let k = 1; k < kindW.length; k++) if (kindW[k]! > kindW[top]!) top = k;
+  if (kinds > 1 && kindW[top]! > B.maxShare * total) {
+    let rest = 0;
+    for (let k = 1; k < kindW.length; k++) if (k !== top) rest += kindW[k]!;
+    const topScale = (B.maxShare * total) / kindW[top]!, restScale = ((1 - B.maxShare) * total) / rest;
+    for (let i = 0; i < n; i++) pickW[i]! *= KIND_KEY[options[i]!.kind] === top ? topScale : restScale;
+  }
+  return total;
 }

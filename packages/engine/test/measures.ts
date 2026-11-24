@@ -14,7 +14,8 @@
 import { createGame } from '../src/game';
 import { movementOf, bodyRadius } from '../src/skating';
 import { RINK } from '../src/rink';
-import { readSituation } from '../src/options';
+import { listOptions, readSituation, topKindShare, type Option } from '../src/options';
+import { BRAIN_INTERVAL_TICKS } from '../src/constants';
 import { DT } from '../src/constants';
 import type { GameEvent, GameSetup, GameState, PlayerDef, Side, SkaterState } from '../src/types';
 import { gameSetup } from './helpers';
@@ -34,7 +35,7 @@ export type PlayCounterKey =
   | 'goalieOverlapTicks' | 'raceJumpTicks'
   | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
-  | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips';
+  | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -49,7 +50,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'goalieOverlapTicks', 'raceJumpTicks',
   'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderInside',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
-  'breakawayBackPasses', 'carrierDecisions', 'carrierFlips',
+  'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain',
 ];
 
 export type PlayMeasures = {
@@ -150,6 +151,7 @@ export function createObserver(setup: GameSetup): Observer {
   let prevPuck: { x: number; y: number; speed: number; live: boolean } | null = null;
   /** The carrier at the end of the last tick, and whether he was on a breakaway then. */
   let prevBreakaway: { id: string; rx: number; clear: boolean; mates: Map<string, number> } | null = null;
+  const optionScratch: Option[] = [];
   /** The carrier's plan at the end of the last tick. */
   let prevPlan: { id: string; kind: string; lane: string | null } | null = null;
 
@@ -388,7 +390,16 @@ export function createObserver(setup: GameSetup): Observer {
     const cs = st.phase === 'live' ? skaterById(st, st.carrierId) : undefined;
     if (cs === undefined) { prevBreakaway = null; return; }
     const rx = rxOf(st, cs.side, cs.pos.x);
-    const clear = readSituation(st, cs).breakaway;
+    const sit = readSituation(st, cs);
+    const clear = sit.breakaway;
+    // A decision point in normal mode (no situation rule applies), sampled on the brain's cadence: the share of the
+    // draw its most likely kind of option gets.
+    if (st.tick % BRAIN_INTERVAL_TICKS === 0 && !sit.breakaway && !sit.oddMan && !sit.behindNet && !sit.pressuredLow) {
+      const me = defs.get(cs.id)!;
+      listOptions(st, me, defs, setup[cs.side].tactics, optionScratch);
+      c.normalDecisionPoints++;
+      if (topKindShare(optionScratch, me, sit, st.carrierPlan) > 0.97 + 1e-9) c.normalCertain++;
+    }
     const mates = new Map<string, number>();
     if (clear) for (const m of st.skaters) if (m.onIce && m.side === cs.side && m !== cs) mates.set(m.id, rxOf(st, m.side, m.pos.x));
     prevBreakaway = { id: cs.id, rx, clear, mates };
