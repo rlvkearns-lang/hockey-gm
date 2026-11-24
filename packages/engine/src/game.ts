@@ -285,7 +285,10 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
       if (nearNet) {
         routeAroundNets(s.pos, t, onIceMoves[i]!.radius + ROUTE_SLACK, ROUTE_ROUND, waypoint);
         // Against his own goalie's body he goes round it too (else the goalie and the frame can pin him in the crease).
-        if (waypoint.x === t.x && waypoint.y === t.y) routeAroundGoalies(s.pos, t, onIceMoves[i]!.radius, goaliePair, waypoint);
+        if (waypoint.x === t.x && waypoint.y === t.y) {
+          goaliePair[0] = state.goalies.home; goaliePair[1] = state.goalies.away;
+          routeAroundGoalies(s.pos, t, onIceMoves[i]!.radius, goaliePair, waypoint);
+        }
       }
       if (!nearNet || (waypoint.x === t.x && waypoint.y === t.y)) stepSkater(s, onIceMoves[i]!, DT, driveOf(state, s, onIceIdx[i]!));
       else {
@@ -305,7 +308,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
   }
 
   const waypoint = { x: 0, y: 0 };
-  const goaliePair = [state.goalies.home, state.goalies.away];
+  /** The two goalies, read from the state on every use (a restored or reset state holds new goalie objects). */
+  const goaliePair: GoalieState[] = [];
   const routed: Drive = { slow: 'coast', through: true };
   /** On the way round a net he skates through the corner, slowing only as his plan says. */
   const routeDrive = (d: Drive): Drive => { routed.slow = d.slow; return routed; };
