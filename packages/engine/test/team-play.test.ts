@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { assignJobs, phaseFor, sitBack } from '../src/team-play';
+import { assignJobs, driveFor, phaseFor, sitBack } from '../src/team-play';
+import type { Drive } from '../src/skating';
 import { DT } from '../src/constants';
 import { resolveNets } from '../src/rink';
 import { movementOf, stepSkater } from '../src/skating';
@@ -29,6 +30,15 @@ describe('team play', () => {
       reached = Math.hypot(d.pos.x - st.puck.pos.x, d.pos.y - st.puck.pos.y) < 0.9;
     }
     expect(reached).toBe(true);
+  });
+  it('stopgap drives: the loose-puck chaser skates through the puck, a winger held at the blue line stops hard, the rest coast', () => {
+    const loose = stateWith({ carrier: null, puckX: 0 }); const drives = new Map<string, Drive>(); assignJobs(loose, defs, tactics, drives);
+    const through = loose.skaters.filter((s) => s.onIce && driveFor(loose, s, drives).through);
+    expect(through.length).toBeGreaterThanOrEqual(1); expect(through.length).toBeLessThanOrEqual(2);
+    const rush = stateWith({ carrier: 'home', puckX: 0 }); const d2 = new Map<string, Drive>();
+    const w = skater(rush, 'home', 'LW'); w.pos = { x: 5, y: 8 }; w.vel = { x: 8, y: 0 }; assignJobs(rush, defs, tactics, d2);
+    expect(driveFor(rush, w, d2)).toEqual({ slow: 'stop', through: false });
+    expect(driveFor(rush, skater(rush, 'away', 'C'), d2)).toEqual({ slow: 'coast', through: false });
   });
   it('a winger flying up ice with the carrier eases up in time to stay onside', () => {
     expect(wingerAheadOnRush()).toBeLessThan(0);

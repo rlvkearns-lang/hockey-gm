@@ -82,6 +82,10 @@ describe('skating', () => {
   it('backward is clearly slower than forward and under 6.6 m/s', () => {
     expect(backwardSpeedAfter(4)).toBeLessThan(speedAfter(def({}), 4) * 0.75); expect(backwardSpeedAfter(4)).toBeLessThan(6.6);
   });
+  it('told to stop with his target behind him, he stops and turns instead of carving round', () => {
+    const runOn = (slow: SlowMode): number => { const s = movingAt(8, 0); s.target = { x: -10, y: 1 }; let far = 0; for (let t = 0; t < 90; t++) { stepFor(s, DT, fresh, { slow, through: false }); far = Math.max(far, s.pos.x); } return far; };
+    expect(runOn('stop')).toBeLessThan(5); expect(runOn('coast')).toBeGreaterThan(runOn('stop') + 2);
+  });
   it('never NaN: on his target, at rest, with no speed cap', () => { const s = at(0, 0); s.speedCap = 0; stepFor(s, 1); expect(Number.isFinite(s.pos.x + s.vel.x + s.facing)).toBe(true); });
   it('retreating defencemen face the puck (final review measure, two whole games)', () => {
     const m = retreatMeasure([1, 2]);

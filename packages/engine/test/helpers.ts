@@ -8,7 +8,7 @@ import type { ContestState, ContestStateOf, GameEvent, GameEventOf, GameEventTyp
 import { PLAYER_TYPES } from '../src/player-types';
 import { RINK, resolveBoards } from '../src/rink';
 import { createRng, type Rng } from '../src/rng';
-import { OZONE_SPOTS, ozoneSpotPos, supportTarget } from '../src/team-play';
+import { driveFor, OZONE_SPOTS, ozoneSpotPos, supportTarget } from '../src/team-play';
 import { canReceivePass, decideCarrier, type Decision } from '../src/brain';
 import { blockPickup, executeDump, executePass, recordTouch, tryIntercept } from '../src/actions';
 import { resolveBodies } from '../src/bodies';
@@ -612,7 +612,7 @@ function duelStep(h: Duel): void {
   s.tick++;
   contestTick(s, h.ds, h.rng, DT, h.events);
   const on = s.skaters.filter((k) => k.onIce);
-  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT); }
+  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT, driveFor(s, k)); }
   resolveBodies(on, (id) => h.moves.get(id)!);
   const c = on.find((k) => k.id === s.carrierId);
   if (c) {
@@ -834,7 +834,7 @@ function harnessStep(h: Harness, beforeContests?: () => void): void {
   beforeContests?.();
   contestTick(s, h.ds, h.rng, DT, h.events);
   const on = s.skaters.filter((k) => k.onIce);
-  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT); }
+  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT, driveFor(s, k)); }
   resolveBodies(on, (id) => h.moves.get(id)!);
   const c = on.find((k) => k.id === s.carrierId);
   if (c) {
@@ -1242,8 +1242,9 @@ export function wingerAheadOnRush(): number {
     st.tick++;
     c.pos.x += 8 * DT; c.vel = { x: 8, y: 0 };
     st.puck.pos = { x: c.pos.x + 0.6, y: c.pos.y };
-    assignJobs(st, defs, tactics);
-    stepSkater(lw, harnessMoves.get(lw.id)!, DT);
+    const drives = new Map<string, Drive>();
+    assignJobs(st, defs, tactics, drives);
+    stepSkater(lw, harnessMoves.get(lw.id)!, DT, driveFor(st, lw, drives));
     worst = Math.max(worst, lw.pos.x - RINK.blueLineX - harnessMoves.get(lw.id)!.radius);
   }
   return worst;

@@ -12,10 +12,10 @@ import { refereeTick } from './referee';
 import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './rink';
 import { createRng, restoreRng, type Rng } from './rng';
 import { TUNING } from './tuning';
-import { DEFAULT_DRIVE, movementOf, stepSkater, type Movement } from './skating';
+import { movementOf, stepSkater, type Drive, type Movement } from './skating';
 import { buildResult } from './stats';
 import { confirmTurnover } from './turnovers';
-import { assignJobs, isTiedUp, steeredByContest } from './team-play';
+import { assignJobs, driveFor, isTiedUp, steeredByContest } from './team-play';
 import type {
   ContestState, GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
 } from './types';
@@ -200,13 +200,17 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     return m;
   };
 
+  /** How each skater drives this tick, as assignJobs left it (derived each live tick, emptied after use). */
+  const drives = new Map<string, Drive>();
+
   /** Movement, body separation, boards and net frames for the on-ice skaters (onIceSkaters(), with onIceMoves). */
   function moveSkaters(skaters: SkaterState[]): void {
     for (let i = 0; i < skaters.length; i++) {
       const s = skaters[i]!;
       if (s.downT > 0) s.downT = Math.max(0, s.downT - DT);
-      stepSkater(s, onIceMoves[i]!, DT, DEFAULT_DRIVE);
+      stepSkater(s, onIceMoves[i]!, DT, driveFor(state, s, drives));
     }
+    drives.clear();
     resolveBodies(skaters, move, onIceMoves);
     for (let i = 0; i < skaters.length; i++) {
       const s = skaters[i]!;
@@ -272,7 +276,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     if (state.pickupBlock !== null && state.tick >= state.pickupBlock.untilTick) state.pickupBlock = null;
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
     benchTick(state, setup, DT, events);
-    assignJobs(state, defs, tactics);
+    drives.clear();
+    assignJobs(state, defs, tactics, drives);
     brainTick(state, defs, rng, events);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
 

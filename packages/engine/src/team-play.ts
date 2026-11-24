@@ -7,6 +7,7 @@ import type { ContestStateOf, GameState, PlayerDef, Position, Side, SkaterState,
 export type { TeamPhase } from './types';
 import { dist, hypot2, type Vec2 } from './vec';
 import { carrierOf, clamp } from './util';
+import { DEFAULT_DRIVE, type Drive } from './skating';
 
 
 /** Named offensive-zone spots: the three the forwards cycle through, and the two points the defencemen hold. */
@@ -272,23 +273,44 @@ function chase(state: GameState, s: SkaterState): void {
 }
 
 const scratchVel: Vec2 = { x: 0, y: 0 };
+/** A skater held short of a line (onside, tag-up), or caught beyond it, stops hard and turns rather than coasting or carving over it. */
+const HARD_LIMIT: Drive = { slow: 'stop', through: false };
+/** A chaser skates through the puck's spot rather than easing off to arrive on it. */
+const CHASE_THROUGH: Drive = { slow: 'coast', through: true };
+
+/**
+ * How `s` drives this tick: what assignJobs recorded in `drives`, else through the puck's spot while he races for it
+ * (a loose-puck race), else DEFAULT_DRIVE.
+ */
+export function driveFor(state: GameState, s: SkaterState, drives?: Map<string, Drive>): Drive { // Task 2 stopgap: Task 3's effort-by-need replaces this
+  const d = drives?.get(s.id);
+  if (d) return d;
+  if (s.contestId !== null) for (const c of state.contests) if (c.id === s.contestId) return c.kind === 'looseRace' ? CHASE_THROUGH : DEFAULT_DRIVE;
+  return DEFAULT_DRIVE;
+}
 
 /**
  * Keep the target onside (an attacker without the puck never goes into the offensive zone ahead of it, and eases up
  * so he does not coast over the line; a chaser may follow the puck itself up to the line; under a delayed offside
  * against his team he heads out over the blue line to tag up), inside the boards and clear of the net frames.
  */
-function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boolean, tagUp: boolean): void {
+function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boolean, tagUp: boolean, drives?: Map<string, Drive>): void {
   const pr = state.puck.pos.x * dir;
   if (tagUp) {
     if (s.target.x * dir > BLUE - TAG_UP_MARGIN) s.target.x = (BLUE - TAG_UP_MARGIN) * dir;
     s.speedCap = 1;
+    drives?.set(s.id, HARD_LIMIT); // Task 2 stopgap: Task 3's effort-by-need replaces this
   } else if (pr < BLUE) {
     const limit = chasing ? Math.max(BLUE - ONSIDE_MARGIN, Math.min(pr, BLUE)) : BLUE - ONSIDE_MARGIN;
     if (s.target.x * dir > limit) s.target.x = limit * dir;
     // Heading for the line (his target at it or just short of it), he eases up in time to stop short of it.
     const room = limit - s.pos.x * dir;
-    if (room > 0 && limit - s.target.x * dir < ONSIDE_EASE_FROM) s.speedCap = Math.min(s.speedCap, Math.max(0.15, Math.sqrt(2 * ONSIDE_BRAKE * room) / TYPICAL_TOP_SPEED));
+    const atLine = limit - s.target.x * dir < ONSIDE_EASE_FROM;
+    if (room > 0 && atLine) s.speedCap = Math.min(s.speedCap, Math.max(0.15, Math.sqrt(2 * ONSIDE_BRAKE * room) / TYPICAL_TOP_SPEED));
+    // Task 2 stopgap: Task 3's effort-by-need replaces this. Held at the line, caught beyond it, or going too fast to
+    // stop short of it by easing off, he stops hard.
+    const toward = s.vel.x * dir;
+    if (atLine || room < 0 || toward * toward > 2 * TUNING.skating.easeDecel * room) drives?.set(s.id, HARD_LIMIT);
   }
   scratchVel.x = 0;
   scratchVel.y = 0;
@@ -304,8 +326,9 @@ function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boole
  * of the side that last had the puck. While a board battle holds the puck, each side's would-be chaser goes to support
  * it (supportTarget) instead, or keeps his shape once his side has its supporting player. Under a delayed offside the
  * offending team neither presses nor chases: all of it skates out of the zone.
+ * With `drives`, it also records how each skater it moves should drive this tick (absent: DEFAULT_DRIVE).
  */
-export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tactics: Record<Side, Tactics>): void {
+export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tactics: Record<Side, Tactics>, drives?: Map<string, Drive>): void {
   const puck = state.puck.pos;
   const carrier = carrierOf(state);
   const shapeSide: Side | null = carrier ? carrier.side : state.possession;
@@ -359,8 +382,11 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
       s.target.y = support.y;
       facePuck(s, puck);
       s.speedCap = 1;
-    } else if (chasing && !battle) chase(state, s);
+    } else if (chasing && !battle) {
+      chase(state, s);
+      drives?.set(s.id, CHASE_THROUGH); // Task 2 stopgap: Task 3's effort-by-need replaces this
+    }
     else shape(state, s, d, phase, tactic, dir);
-    keepLegal(state, s, dir, chasing, s.side === tagUp);
+    keepLegal(state, s, dir, chasing, s.side === tagUp, drives);
   }
 }
