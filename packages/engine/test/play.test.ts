@@ -90,7 +90,9 @@ describe('A2: every player has a job (Task 4)', () => {
   it('A2: the side with the puck skates forward: under 3% of its time backward (seeds 1-8)', () => { expect(m8().backwardShareWithPuck).toBeLessThan(0.03); }, 240_000);
   // Task 4 review, Important 1 (0.564 before the fix, 0.657 after it). The coordinator asked for 0.75; with the carrier's
   // own decisions (Task 5) it reads about 0.61: see task-5-report.md.
-  it('A2: someone has the carrier: a defender within 3 m of a carrier in the zone he attacks on over 58% of its ticks', () => { expect(m().carrierPressedShare).toBeGreaterThan(0.58); }, 60_000);
+  // Task 10: with engagements (a checker riding the carrier is held on him) it reads 0.803 on seeds 1-3 (0.761 before); the
+  // bar is set just under that. The design wanted 0.75.
+  it('A2: someone has the carrier: a defender within 3 m of a carrier in the zone he attacks on over 78% of its ticks', () => { expect(m().carrierPressedShare).toBeGreaterThan(0.78); }, 60_000);
 });
 
 describe('A3: decisions with the puck (Task 5)', () => {
