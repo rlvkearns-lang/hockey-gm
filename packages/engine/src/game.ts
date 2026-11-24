@@ -21,7 +21,7 @@ import type {
   ContestState, GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
 } from './types';
 import { validateSetup } from './validate';
-import { dist, hypot2, segDistXY } from './vec';
+import { dist, hypot2, segDistXY, type Vec2 } from './vec';
 import { dcos, dsin } from './dmath';
 import { PUCK_RADIUS, SIDES } from './util';
 
@@ -49,6 +49,9 @@ const ROUTE_SLACK = 0.05;
 const ROUTE_ROUND = 0.4;
 /** Nobody whose position and target are both nearer centre ice than this (m) can have a net frame in his way. */
 const ROUTE_CLEAR_X = RINK.goalLineX - 1;
+/** A skater within GOALIE_NEAR (m) of a goalie's body with it on his line skates round it, GOALIE_ROUND (m) clear of it. */
+const GOALIE_NEAR = 1;
+const GOALIE_ROUND = 0.3;
 
 /**
  * The energy his Movement is built from: 1 at 0.5 and above (where energy does not affect skating), else energy to the
@@ -222,7 +225,11 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
       // With a net frame in his way he skates for its corner; his target itself stays what it is.
       const t = s.target;
       const nearNet = s.pos.x >= ROUTE_CLEAR_X || s.pos.x <= -ROUTE_CLEAR_X || t.x >= ROUTE_CLEAR_X || t.x <= -ROUTE_CLEAR_X;
-      if (nearNet) routeAroundNets(s.pos, t, onIceMoves[i]!.radius + ROUTE_SLACK, ROUTE_ROUND, waypoint);
+      if (nearNet) {
+        routeAroundNets(s.pos, t, onIceMoves[i]!.radius + ROUTE_SLACK, ROUTE_ROUND, waypoint);
+        // Against his own goalie's body he goes round it too (else the goalie and the frame can pin him in the crease).
+        if (waypoint.x === t.x && waypoint.y === t.y) roundGoalie(s.pos, t, onIceMoves[i]!.radius, waypoint);
+      }
       if (!nearNet || (waypoint.x === t.x && waypoint.y === t.y)) stepSkater(s, onIceMoves[i]!, DT, driveOf(state, s, onIceIdx[i]!));
       else {
         const tx = t.x, ty = t.y;
@@ -241,6 +248,28 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
   }
 
   const waypoint = { x: 0, y: 0 };
+  /**
+   * With a goalie's body (grown by `radius`) on the straight line from `from` to `to` and close ahead of him, a
+   * waypoint beside that goalie on `from`'s side of the line (GOALIE_ROUND m clear); else `to`. Writes `out`.
+   */
+  function roundGoalie(from: Vec2, to: Vec2, radius: number, out: Vec2): void {
+    const reach = TUNING.goalieBody.radius + radius;
+    for (const g of [state.goalies.home, state.goalies.away]) {
+      const gx = g.pos.x - from.x, gy = g.pos.y - from.y;
+      if (gx * gx + gy * gy > (reach + GOALIE_NEAR) * (reach + GOALIE_NEAR)) continue;
+      const dx = to.x - from.x, dy = to.y - from.y, l = hypot2(dx, dy);
+      if (l < 1e-6) continue;
+      const along = (gx * dx + gy * dy) / l;
+      if (along <= 0 || along >= l) continue;
+      const across = (gx * dy - gy * dx) / l;          // > 0: the goalie is to the right of his line
+      if (Math.abs(across) >= reach) continue;
+      const side = across > 0 ? 1 : -1;                  // he passes on the left of the goalie when it is to his right
+      const ux = -dy / l * side, uy = dx / l * side;
+      out.x = g.pos.x + ux * (reach + GOALIE_ROUND);
+      out.y = g.pos.y + uy * (reach + GOALIE_ROUND);
+      return;
+    }
+  }
   const routed: Drive = { slow: 'coast', through: true };
   /** On the way round a net he skates through the corner, slowing only as his plan says. */
   const routeDrive = (d: Drive): Drive => { routed.slow = d.slow; return routed; };

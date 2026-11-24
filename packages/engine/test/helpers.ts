@@ -8,7 +8,8 @@ import type { ContestState, ContestStateOf, GameEvent, GameEventOf, GameEventTyp
 import { PLAYER_TYPES } from '../src/player-types';
 import { RINK, resolveBoards } from '../src/rink';
 import { createRng, type Rng } from '../src/rng';
-import { driveOf, OZONE_SPOTS, ozoneSpotPos, supportTarget } from '../src/team-play';
+import { driveOf, supportTarget } from '../src/team-play';
+import { netFrontSpot } from '../src/job-targets';
 import { initialPlans, initialTeamPhase, setTeamPhase } from '../src/commit';
 import { canReceivePass, decideCarrier, type Decision } from '../src/brain';
 import { blockPickup, executeDump, executePass, recordTouch, tryIntercept } from '../src/actions';
@@ -240,10 +241,11 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     plans: initialPlans(skaters.length), teamPhase: initialTeamPhase(),
     seed: 1, rng: [1, 2, 3, 4],
   };
-  // Everyone has been in his place a while: plans issued long ago for the side in possession, the phase committed.
-  for (const p of state.plans) { p.job = 'shape'; p.possession = o.carrier; p.targetTick = -1000; p.jobTick = -1000; }
+  // Everyone has been in his place a while: plans issued long ago for the side in possession, the phase committed. No
+  // one holds a team-play job yet (utility `change`): the first assignJobs hands them out (trigger `newJob`).
   setTeamPhase(state);
   state.teamPhase.home.sinceTick = state.teamPhase.away.sinceTick = -1000;
+  for (const p of state.plans) { p.job = 'change'; p.possession = o.carrier; p.targetTick = -1000; p.jobTick = -1000; }
   return state;
 }
 
@@ -254,18 +256,6 @@ export function skater(state: GameState, side: Side, slot: SkaterSlot): SkaterSt
 }
 
 export const onIce = (state: GameState, side: Side): SkaterState[] => state.skaters.filter((s) => s.onIce && s.side === side);
-
-/** Which offensive-zone spot (corner, netFront, highSlot, point) the skater's target is nearest to. */
-export function spotName(state: GameState, side: Side, slot: SkaterSlot): string {
-  const t = skater(state, side, slot).target;
-  let best = '', bestD = Infinity;
-  for (const spot of OZONE_SPOTS) {
-    const p = ozoneSpotPos(state, side, spot, { x: 0, y: 0 });
-    const d = Math.hypot(p.x - t.x, p.y - t.y);
-    if (d < bestD) { bestD = d; best = spot === 'leftPoint' || spot === 'rightPoint' ? 'point' : spot; }
-  }
-  return best;
-}
 
 /** A shoot-first winger: Sniper tendencies and shooting attributes. */
 export const sniper: PlayerDef = def({
@@ -1003,7 +993,7 @@ function netFrontStart(att: PlayerDef = even, dfn: PlayerDef = even): NetFront {
   const h = harness(['home-LD', 'home-C', 'away-LD'], { 'home-C': att, 'away-LD': dfn }, { carrier: 'home', puckX: 9.8, puckY: 8.5, carrierSlot: 'LD' });
   const st = h.st;
   place2(st, 'home-LD', 9.2, 8.5, 0);
-  const spot = ozoneSpotPos(st, 'home', 'netFront', { x: 0, y: 0 });
+  const spot = netFrontSpot(st, 'home', { x: 0, y: 0 });
   place2(st, 'home-C', spot.x, spot.y, Math.PI);
   place2(st, 'away-LD', spot.x + 0.8, spot.y, Math.PI);
   const c = startContest(st, h.ds, h.rng, netFrontContest, ['home-C', 'away-LD'], h.events);

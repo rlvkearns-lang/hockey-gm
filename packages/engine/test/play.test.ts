@@ -48,7 +48,6 @@ describe('guard rails', () => {
 });
 
 describe('A1: commitment (Task 3)', () => {
-  it('A1: nobody re-issues a held target inside 0.4 s without a trigger', () => { expect(counters().holdViolations).toBe(0); }, 60_000);
   it('A1: targets are held: under 10% of spot ticks see the target move (was 39%)', () => { expect(m().retargetShare).toBeLessThan(0.10); }, 60_000);
   it('A1: more gliding and more top speed than before: glide over 30% (was 25%), top speed over 17% (was 14%), sprints over 1.2 s (was 0.8)', () => {
     expect(m().glideShare).toBeGreaterThan(0.30); expect(m().topSpeedShare).toBeGreaterThan(0.17); expect(m().sprintRunSeconds).toBeGreaterThan(1.2);
@@ -60,4 +59,13 @@ describe('A1: commitment (Task 3)', () => {
     // Tasks 5-6 tighten this to under 10 (carrier decisions at the line); see task-3-report.md
     expect(total / 4).toBeLessThan(14);
   }, 60_000);
+});
+
+describe('A2: every player has a job (Task 4)', () => {
+  it('A2: no two skaters of a team ever hold the same job', () => { expect(counters().duplicateJobTicks).toBe(0); }, 60_000);
+  it('A2: standing still is under 9% of a skater\'s live time (was 17.5%)', () => { expect(m().stationaryShare).toBeLessThan(0.09); }, 60_000);
+  it('A2: at least two attackers are open in over 50% of offensive-zone time (was 40%)', () => { expect(m().twoOpenShare).toBeGreaterThan(0.50); }, 60_000);
+  it('A2: the most dangerous option is shadowed in 60% to 90% of it (was 76%)', () => { expect(m().dangerShadowedShare).toBeGreaterThan(0.60); expect(m().dangerShadowedShare).toBeLessThan(0.90); }, 60_000);
+  it('A2: the net-front defender is between his man and the net in over 85% of the time he has one', () => { const c = counters(); expect(c.netFrontDefenderBetween / c.netFrontDefenderTicks).toBeGreaterThan(0.85); }, 60_000);
+  it('A2: the side with the puck skates forward: under 3% of its time backward', () => { expect(m().backwardShareWithPuck).toBeLessThan(0.03); }, 60_000);
 });

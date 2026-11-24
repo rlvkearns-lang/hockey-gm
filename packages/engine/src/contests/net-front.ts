@@ -1,7 +1,8 @@
 import { DT } from '../constants';
 import { RINK, zoneOf } from '../rink';
 import { movementOf } from '../skating';
-import { ozoneSpotPos } from '../team-play';
+import { planOf } from '../commit';
+import { netFrontSpot } from '../job-targets';
 import { TUNING } from '../tuning';
 import type { ContestStateOf, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
@@ -55,7 +56,8 @@ export const netFrontContest: Contest<'netFront'> = {
     const carrier = carrierNow(ctx);
     if (!carrier || carrier.side !== s.side || carrier === s || s.slot === null || !FORWARDS.includes(s.slot)) return null;
     if (zoneOf(state.puck.pos.x, state.attackDir[s.side]) !== 'O' || onCooldown(state, s.id, KIND)) return null;
-    if (dist(s.pos, ozoneSpotPos(state, s.side, 'netFront', spotScratch)) > T.spotRange) return null;
+    // Only the man whose job is the net front, there (within spotRange of his target).
+    if (planOf(state, s.id).job !== 'netFront' || dist(s.pos, s.target) > T.spotRange) return null;
     let o: SkaterState | null = null, od = T.triggerRange;
     for (const t of state.skaters) {
       if (t.side === s.side || !isFree(t) || onCooldown(state, t.id, KIND)) continue;
@@ -84,7 +86,7 @@ export const netFrontContest: Contest<'netFront'> = {
     const over = carrier === att || (carrier !== null && carrier.side !== att.side)
       || (carrier === null && state.pendingPass === null)
       || zoneOf(state.puck.pos.x, state.attackDir[att.side]) !== 'O'
-      || (c.stage !== 'tied' && dist(att.pos, ozoneSpotPos(state, att.side, 'netFront', spotScratch)) > LEAVE_RANGE);
+      || (c.stage !== 'tied' && dist(att.pos, netFrontSpot(state, att.side, spotScratch)) > LEAVE_RANGE);
     if (over) {
       setCooldown(state, att.id, KIND, T.cooldownSeconds);
       setCooldown(state, def.id, KIND, T.cooldownSeconds);

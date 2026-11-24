@@ -268,5 +268,5 @@ function stepOn(state: GameState, on: SkaterState, slot: Position, door: Vec2, n
   on.shiftStart = now;
   state.onIce[on.side].push(on.id);
   // His plan starts afresh: a job from team play at once if play is live, else his place in the line-up.
-  holdJob(state, indexOf(state, on.id), state.phase === 'live' ? 'shape' : 'lineUp', 'steppedOn');
+  holdJob(state, indexOf(state, on.id), state.phase === 'live' ? 'change' : 'lineUp', 'steppedOn');
 }

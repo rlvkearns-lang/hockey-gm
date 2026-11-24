@@ -19,6 +19,8 @@ const TRIGGERS: [ReplanReason, (st: GameState) => string][] = [
   ['gotUp', (st) => { st.plans[idx(st, 'home-LD')]!.job = 'down'; return 'home-LD'; }],
   ['steppedOn', (st) => { holdJob(st, idx(st, 'home-LD'), st.plans[idx(st, 'home-LD')]!.job, 'steppedOn'); return 'home-LD'; }],
   ['offside', (st) => { st.delayedOffside = { side: 'home', y: 0 }; return 'home-LD'; }],
+  // A job his team no longer has (a defensive-zone job while it rushes) is handed in at once, hold or not.
+  ['newJob', (st) => { st.plans[idx(st, 'home-LD')]!.job = 'dCorner'; return 'home-LD'; }],
 ];
 const idx = (st: GameState, id: string): number => st.skaters.findIndex((s) => s.id === id);
 
@@ -36,7 +38,7 @@ describe('commitment', () => {
   });
   it('a held spot is not re-issued inside 0.4 s when the wanted spot drifts, and is after it once it has moved 1.5 m', () => {
     const st = stateWith({ carrier: 'home', puckX: 20 }); const i = st.skaters.findIndex((s) => s.id === 'home-LD');
-    const want = (x: number): Want => ({ job: 'shape', pos: { x, y: 8 }, face: null, follow: 'spot', markId: null, effort: 'skate', slow: 'coast', through: false });
+    const want = (x: number): Want => ({ job: 'pointStrong', pos: { x, y: 8 }, face: null, follow: 'spot', markId: null, effort: 'skate', slow: 'coast', through: false });
     commitTo(st, i, want(9), 'start');
     for (let t = 1; t <= 11; t++) { st.tick++; expect(commitTo(st, i, want(9 + t), null)).toBe(false); expect(st.skaters[i]!.target.x).toBe(9); }
     st.tick++; expect(commitTo(st, i, want(9.8), null)).toBe(false);                 // 0.4 s passed, moved 0.8 m: kept
@@ -58,7 +60,7 @@ describe('commitment', () => {
   });
   it('effort is chosen by need: a sprint to a far spot, a glide near it, and no sprint on empty legs', () => {
     expect(effortToReach(12)).toBe('sprint'); expect(effortToReach(5)).toBe('skate'); expect(effortToReach(2)).toBe('glide');
-    expect(speedFor('sprint', 'shape', 0.1)).toBeLessThan(1); expect(speedFor('sprint', 'chase', 0.1)).toBe(1);
+    expect(speedFor('sprint', 'f3', 0.1)).toBeLessThan(1); expect(speedFor('sprint', 'chase', 0.1)).toBe(1);
   });
   it('a skater is pushed out of the goalie', () => {
     const st = stateWith({ carrier: null, puckX: 0 }); const s = skater(st, 'away', 'C'); s.pos = { x: -26.4, y: 0.1 }; s.vel = { x: -3, y: 0 };
