@@ -484,7 +484,9 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         const d = bodyById.get(s.id)!.def;
         const b = bladePos(s.pos, s.facing, d.shoots, bladeScratch);
         const tie = state.engagements.length > 0 ? tieOf(state, s.id) : 0;
-        if (segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y) > PICKUP_REACH * (1 - TUNING.engage.limits.reach * tie)) break;
+        // (A tied-up receiver's reach is not cut, Task 10 review Important 2: the shorter reach is for loose pucks; his
+        // catch is cut by receiveChance below, the chance the carrier's valuation sees.)
+        if (segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y) > PICKUP_REACH) break;
         if (!pass.bobbled) {
           const speed = hypot2(p.vel.x, p.vel.y);
           // An opponent on him as it arrives contests the catch.
