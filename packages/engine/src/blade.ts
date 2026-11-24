@@ -41,11 +41,27 @@ export function bladePos(pos: Vec2, facing: number, shoots: 'L' | 'R', out: Vec2
  * forehand for -110 to +40 degrees, backhand for +40 to +140, behind for the rest.
  */
 export function handFor(pos: Vec2, facing: number, shoots: 'L' | 'R', to: Vec2): PassHand {
-  const c = dcos(facing), s = dsin(facing);
-  const dx = to.x - pos.x, dy = to.y - pos.y;
-  // Angle off his facing, counter-clockwise (toward his left) positive; flipped for a right shot.
-  const phi = datan2(c * dy - s * dx, c * dx + s * dy) * (shoots === 'L' ? 1 : -1);
+  const phi = bladeSideAngle(pos, facing, shoots, to);
   if (phi >= FORE_MIN && phi <= FORE_MAX) return 'forehand';
   if (phi > FORE_MAX && phi <= BACK_MAX) return 'backhand';
   return 'behind';
+}
+
+/** The angle (rad, -PI to PI) from his facing to `to`, positive toward his blade side. */
+export function bladeSideAngle(pos: Vec2, facing: number, shoots: 'L' | 'R', to: Vec2): number {
+  const c = dcos(facing), s = dsin(facing);
+  const dx = to.x - pos.x, dy = to.y - pos.y;
+  // Angle off his facing, counter-clockwise (toward his left) positive; flipped for a right shot.
+  return datan2(c * dy - s * dx, c * dx + s * dy) * (shoots === 'L' ? 1 : -1);
+}
+
+/**
+ * Whether he can play a puck toward `to` off the forehand once he has turned his body up to `open` rad toward it (a
+ * shooter opens his hips or turns as he winds up): the forehand range (-110 to +40 degrees) widened by `open` each way.
+ */
+export function forehandWithin(pos: Vec2, facing: number, shoots: 'L' | 'R', to: Vec2, open: number): boolean {
+  if (FORE_MAX - FORE_MIN + 2 * open >= 2 * Math.PI) return true;
+  const phi = bladeSideAngle(pos, facing, shoots, to);
+  const lo = FORE_MIN - open, hi = FORE_MAX + open;
+  return (phi >= lo && phi <= hi) || (phi - 2 * Math.PI >= lo && phi - 2 * Math.PI <= hi) || (phi + 2 * Math.PI >= lo && phi + 2 * Math.PI <= hi);
 }

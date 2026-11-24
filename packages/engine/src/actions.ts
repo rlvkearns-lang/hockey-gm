@@ -1,5 +1,5 @@
 import { DT as DT_ } from './constants';
-import { bladePos as bladePos_, handFor as handFor_ } from './blade';
+import { bladePos as bladePos_, forehandWithin as forehandWithin_ } from './blade';
 import { forcedPass as forcedPass_, HAND_ERROR as HAND_ERROR_, interceptChance as interceptChance_, laneReach as laneReach_, planPass as planPass_, stickInterceptChance as stickInterceptChance_, type PassPlan } from './passing';
 import { crossesEndBox as crossesEndBox_ } from './lanes';
 import { boardsNormal as boardsNormal_, distToBoards as distToBoards_, RINK as RINK_ } from './rink';
@@ -32,7 +32,7 @@ const TUNING = TUNING_;
 const watchTurnover = watchTurnover_;
 const gameEvent = gameEvent_;
 const threat = threat_;
-const handFor = handFor_;
+const forehandWithin = forehandWithin_;
 const hypot2 = hypot2_;
 const segDistXY = segDistXY_;
 const datan2 = datan2_;
@@ -181,8 +181,8 @@ const netScratch: Vec2 = { x: 0, y: 0 };
 /**
  * The type of a shot `s` lets go now, when none is given: `wraparound` (within TUNING.shot.types.wrapPost of a post off a
  * wrap: his carrierPlan's lane is `wrap`), `oneTimer` (he took a one-timer pass at most oneTimerTicks ago), `slap` (slapFrom
- * m or more out, pressure under slapPressure), `backhand` (the net centre is not on his forehand: blade.ts handFor), else
- * `wrist`.
+ * m or more out, pressure under slapPressure), `backhand` (the net centre is not on his forehand even once
+ * he has turned TUNING.shot.types.setTurn per metre out toward it: blade.ts forehandWithin), else `wrist`.
  */
 export function shotTypeFor(state: GameState, s: SkaterState, shoots: 'L' | 'R', d: number, pressure: number): ShotType {
   const T = SHOT.types;
@@ -195,7 +195,9 @@ export function shotTypeFor(state: GameState, s: SkaterState, shoots: 'L' | 'R',
   if (ot !== null && ot.id === s.id && state.tick - ot.tick <= T.oneTimerTicks) return 'oneTimer';
   if (d >= T.slapFrom && pressure < T.slapPressure) return 'slap';
   netScratch.x = dir * RINK.goalLineX; netScratch.y = 0;
-  if (handFor(s.pos, s.facing, shoots, netScratch) !== 'forehand') return 'backhand';
+  // He turns toward his forehand as he winds up, more the more room he has (setTurn per metre out): only a shooter in
+  // tight with the net off his forehand, or one turned well away from it, shoots off the backhand.
+  if (!forehandWithin(s.pos, s.facing, shoots, netScratch, Math.min(Math.PI, T.setTurn * d))) return 'backhand';
   return 'wrist';
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { executePass, executeShot } from '../src/actions';
+import { executePass, executeShot, shotTypeFor } from '../src/actions';
 import { createGame, restoreGame } from '../src/game';
 import { trackShot, tryBlock } from '../src/shots';
 import { stepPuck, type Puck } from '../src/puck';
@@ -201,6 +201,19 @@ describe('shots (Task 7)', () => {
   it('a pass across the slot to a man in a scoring area is one-timed more often than not', () => {
     expect(oneTimerShare(600)).toBeGreaterThan(0.5); expect(oneTimerShare(600)).toBeLessThanOrEqual(0.97);
   }, 120_000);
+  // Task 8: a shooter turns his body toward his forehand as he winds up, more the more room he has (TUNING.shot.types.setTurn
+  // per metre out). With the net 70 degrees to his blade side, 12 m out he opens up to a forehand; 2.5 m out he has no time.
+  it('shot types: a shooter facing across the ice shoots off the forehand from distance, a backhand in tight', () => {
+    const typeAt = (dx: number, facingDeg: number): ShotType => {
+      const st = stateWith({ carrier: 'home', puckX: 27.13 - dx, puckY: 0, carrierSlot: 'C' });
+      const c = skater(st, 'home', 'C'); c.pos = { x: 27.13 - dx, y: 0 }; c.facing = (facingDeg * Math.PI) / 180;
+      return shotTypeFor(st, c, 'R', dx, 0.5);
+    };
+    // A right shot facing +y (net 90 degrees to his right, his blade side): a backhand in tight, a forehand from 12 m.
+    expect(typeAt(2.5, 90)).toBe('backhand'); expect(typeAt(12, 90)).toBe('wrist');
+    // Facing straight at the net it is a forehand anywhere.
+    expect(typeAt(2.5, 0)).toBe('wrist');
+  });
   it('shot types: a slapshot is harder and wilder than a wrist shot, a backhand softer', () => {
     expect(shotSpeed('slap')).toBeGreaterThan(shotSpeed('wrist') * 1.08); expect(shotSpread('slap')).toBeGreaterThan(shotSpread('wrist')); expect(shotSpeed('backhand')).toBeLessThan(shotSpeed('wrist') * 0.8);
   });

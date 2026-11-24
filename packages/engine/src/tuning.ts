@@ -288,6 +288,11 @@ export const TUNING = deepFreeze({
       backhand: { speed: 0.75, spread: 1.4 },
       wraparound: { speed: 9 },
       slapFrom: 11, slapPressure: 0.3, oneTimerTicks: 2, wrapPost: 1.2,
+      /**
+       * A shooter turns his body up to setTurn rad per metre out toward his forehand as he winds up (Task 8: a
+       * backhand is a shot in tight with the net off his forehand, or with it well behind him).
+       */
+      setTurn: (10 * Math.PI) / 180,
     },
   },
 
