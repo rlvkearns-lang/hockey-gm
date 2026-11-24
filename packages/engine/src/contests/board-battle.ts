@@ -1,6 +1,7 @@
 import { blockPickup, recordTouch } from '../actions';
 import { stopPlay } from '../faceoff';
-import { boardsNormal, distToBoards, FACEOFF_DOTS, resolveBoards, RINK } from '../rink';
+import { boardsNormal, distToBoards, FACEOFF_DOTS, resolveBoards, resolveNets, RINK } from '../rink';
+import { crossesNet } from '../lanes';
 import { movementOf } from '../skating';
 import { TUNING } from '../tuning';
 import { heldSeconds, watchTurnover } from '../turnovers';
@@ -193,6 +194,9 @@ function intoFeet(c: Battle, ctx: ContestCtx): void {
   scratchVel.x = 0;
   scratchVel.y = 0;
   resolveBoards(c.spot, scratchVel, PUCK_RADIUS, 0);
+  // Never inside a net frame (Task 8b close-out: a puck sliding goalward put the spot in the net; the winner in front of
+  // it then had a puck that came out through the back of the frame, 2.4 m from his blade, seed 12).
+  resolveNets(c.spot, scratchVel, PUCK_RADIUS);
   p.vel.x = 0;
   p.vel.y = 0;
   c.data.holdsPuck = true;
@@ -372,14 +376,18 @@ function finish(c: Battle, ctx: ContestCtx): ContestResult {
   const support = w === 0 ? r.supportA : r.supportB;
   const outnumbered = (l === 0 ? r.supportA : r.supportB) === null;
   const how = support !== null && outnumbered ? 'support' : r.pinned === null ? 'scramble' : r.pinned === loserId ? 'pinned' : 'stick';
+  // No hand-over through a net (Task 8b close-out: a man in the crease won a battle for a puck pinned against the back of
+  // the net and had it 2.4 m from his blade, the frame between them): then it squirts loose instead.
+  const taker = support !== null ? support : winner.id;
+  const clean = d.clean && !crossesNet(skaterById(state, taker).pos, state.puck.pos);
   ctx.emit(contestEvent(state, { type: 'battle', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot, detail: { how, contestId: c.id } }));
   // Won off the man who was carrying it: a turnover, clean (`battle`) or squirting loose (`battleLoose`).
   const stripped = r.stripped === loserId;
-  if (stripped) ctx.emit(contestEvent(state, { type: 'turnover', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot, detail: { how: d.clean ? 'battle' : 'battleLoose' } }));
+  if (stripped) ctx.emit(contestEvent(state, { type: 'turnover', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot, detail: { how: clean ? 'battle' : 'battleLoose' } }));
   for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
   setCooldown(state, loserId, 'pokeCheck', T.loserPokeCooldown);
-  if (d.clean) {
-    const to = support !== null ? support : winner.id;
+  if (clean) {
+    const to = taker;
     if (stripped) watchTurnover(state, winner.side, winner.id, loserId, 'battle', { held: d.held });
     return { winnerId: to, puck: 'toWinner', outcome: how };
   }
