@@ -84,8 +84,8 @@ describe('A2: every player has a job (Task 4)', () => {
     const share = m16().dangerShadowedShare;
     expect(share).toBeGreaterThan(0.60); expect(share).toBeLessThan(0.90);
   }, 240_000);
-  // Task 10 (engagements, box-outs) tightens this to over 85%.
-  it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 50% of the time he has one (Task 10 tightens this to 85%)', () => { const c = counters(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.5); }, 60_000);
+  // Task 10 (engagements, box-outs) tightens this from 50% to over 85%.
+  it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 85% of the time he has one', () => { const c = counters(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.85); }, 60_000);
   // Close-out: pooled over seeds 1-8 (it read 0.030 to 0.033 on three seeds); the bar is unchanged.
   it('A2: the side with the puck skates forward: under 3% of its time backward (seeds 1-8)', () => { expect(m8().backwardShareWithPuck).toBeLessThan(0.03); }, 240_000);
   // Task 4 review, Important 1 (0.564 before the fix, 0.657 after it). The coordinator asked for 0.75; with the carrier's
@@ -256,8 +256,9 @@ describe('A3: decisions at decision points (Task 8 fix round 2)', () => {
 describe('A2/A4: the net front (Task 8 fix round 2)', () => {
   // Close-out ruling 4: pooled over seeds 1-8, and 45% for now (it reads 48 to 49%: a quarter of the spells end with a pass
   // to the net-front man). Task 10 (engagements at the net) restores the 50% bar.
-  it('A2: the net-front man holds his job: at least 45% of his spells in the zone last 2.5 s or more, seeds 1-8 (Task 10 restores 50%)', () => {
-    const c = counters8(); expect(c.netFrontHolds).toBeGreaterThan(100); expect(c.netFrontHoldsLong / c.netFrontHolds).toBeGreaterThanOrEqual(0.45);
+  // Task 10: restored to 50% (an attacker boxed out fights for the spot).
+  it('A2: the net-front man holds his job: at least 50% of his spells in the zone last 2.5 s or more, seeds 1-8', () => {
+    const c = counters8(); expect(c.netFrontHolds).toBeGreaterThan(100); expect(c.netFrontHoldsLong / c.netFrontHolds).toBeGreaterThanOrEqual(0.50);
   }, 240_000);
   it('A4: an attacker is within 4 m of the net on at least 40% of saves of shots from 11 m or more', () => {
     const c = counters(); expect(c.pointShotSaves).toBeGreaterThan(30); expect(c.pointShotSavesNear / c.pointShotSaves).toBeGreaterThanOrEqual(0.4);
@@ -269,9 +270,9 @@ describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
   // Close-out ruling 1: under 35% for now, pooled over seeds 1-8. 47% of the decisions made in the zone are made with a
   // checker within 1.8 m, and a poor option still takes 3 to 7% of a draw, so the share of attempts follows the share of
   // decisions. Task 10 (engagements: a tied-up man cannot get a shot off) must bring it under 20%.
-  it('A4: a pressured shot is a poor shot: under 35% of attempts are let go with a checker in stick reach (was 49%; Task 10: under 20%)', () => {
-    // Task 9 close-out ruling 5: pooled over seeds 1-16 (0.349 on seeds 1-8 and 0.302 on 9-16 after Task 9); bar unchanged.
-    const c = counters16(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.35);
+  it('A4: a pressured shot is a poor shot: under 20% of attempts are let go with a checker in stick reach (was 49%; 35% until Task 10)', () => {
+    // Task 9 close-out ruling 5: pooled over seeds 1-16 (0.349 on seeds 1-8 and 0.302 on 9-16 after Task 9).
+    const c = counters16(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.20);
   }, 240_000);
   // Close-out ruling 2: the far shots of normal play that count are the UNSCREENED ones (no teammate at the net or in the
   // goalie's sight line: measures.ts attemptsNormalFarBare); the screened ones are what "long shots wait for traffic"
@@ -282,6 +283,14 @@ describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
     // The sources are reported whole: every attempt has one.
     expect(c.attemptsOddManFar + c.attemptsOddManClose + c.attemptsLowClose + c.attemptsLowFar + c.attemptsNormalFar + c.attemptsNormalClose + c.attemptsBreakaway + c.attemptsOther).toBe(c.attempts);
   }, 240_000);
+});
+
+describe('A5: battling for position (Task 10)', () => {
+  it('A5: battling is constant: some pair is engaged in over 30% of live time', () => { expect(counters().engagedTicks / counters().liveTicks).toBeGreaterThan(0.30); }, 60_000);
+  it('A5: opponents in contact for over 0.3 s are engaged, not separated, in over 80% of cases', () => {
+    const c = counters(); expect(c.contactOver03Free).toBeGreaterThan(500); expect(c.contactOver03Engaged / c.contactOver03Free).toBeGreaterThan(0.80);
+  }, 60_000);
+  it('A5: 250 to 1,500 engagements a game', () => { const n = sum(games().map((r) => r.events.filter((e) => e.type === 'engagement').length)) / 3; expect(n).toBeGreaterThan(250); expect(n).toBeLessThan(1500); }, 60_000);
 });
 
 describe('A5: battles the winner wins (Task 9)', () => {

@@ -20,7 +20,9 @@ const scratch: (Movement | null)[] = [];
  * Single pass; the caller clamps to the boards afterwards.
  * Push overlapping on-ice bodies apart, the lighter one giving more.
  * Engaged pairs (`engaged`, the first `engagedCount` of them; Task 10) are held at contact: their overlap is removed as
- * any other's, but a man moving away from the other keeps only 1 - his tie of his velocity away from him (and of this
+ * any other's, two men leaning into each other stop each other along the line between them (the heavier giving less), and
+ * a tied-up man does not slide round the other (he keeps 1 - his tie of his speed across the line relative to the other),
+ * and a man moving away from the other keeps only 1 - his tie of his velocity away from him (and of this
  * tick's step away, while they are beyond contact), so a tied-up man cannot simply skate off. Pairs that are not engaged
  * separate as before.
  * Returns each contact with the closing speed along the line between centres (0 if already parting).
@@ -66,7 +68,7 @@ export function resolveBodies(
     const e = engaged![k]!;
     const ma = scratch[e.i], mb = scratch[e.j];
     if (!ma || !mb) continue;
-    hold(skaters[e.i]!, skaters[e.j]!, ma.radius + mb.radius, e.tieI, e.tieJ);
+    hold(skaters[e.i]!, skaters[e.j]!, ma.radius + mb.radius, ma.mass, mb.mass, e.tieI, e.tieJ);
   }
   return contacts;
 }
@@ -76,12 +78,29 @@ export function resolveBodies(
  * Holds engaged `a` and `b` together: each keeps only 1 - his tie of his velocity away from the other, and, while they are
  * beyond contact (`min`, their radii), gives back that share of this tick's step away (never closer than contact).
  */
-function hold(a: SkaterState, b: SkaterState, min: number, tieA: number, tieB: number): void {
+function hold(a: SkaterState, b: SkaterState, min: number, massA: number, massB: number, tieA: number, tieB: number): void {
   const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
   const d = hypot2(dx, dy);
   if (d < 1e-9) return;
   const nx = dx / d, ny = dy / d;
   let gap = d - min;
+  // Leaning into each other they stop each other (no bounce, no sliding through): along the line between them, while
+  // closing, both move at their common (mass-weighted) speed; the heavier man gives less.
+  const va = a.vel.x * nx + a.vel.y * ny, vb = b.vel.x * nx + b.vel.y * ny;
+  if (gap <= 0 && va > vb) {
+    const v = (va * massA + vb * massB) / (massA + massB);
+    a.vel.x += nx * (v - va); a.vel.y += ny * (v - va);
+    b.vel.x += nx * (v - vb); b.vel.y += ny * (v - vb);
+  }
+  // Nor does a tied-up man slide round the other: each keeps only 1 - his tie of his speed across the line relative to
+  // the other's (both move toward their common, mass-weighted speed across it, by his tie).
+  if (gap <= 0) {
+    const ta = -a.vel.x * ny + a.vel.y * nx, tb = -b.vel.x * ny + b.vel.y * nx;
+    const t = (ta * massA + tb * massB) / (massA + massB);
+    const da = (t - ta) * tieA, db = (t - tb) * tieB;
+    a.vel.x += -ny * da; a.vel.y += nx * da;
+    b.vel.x += -ny * db; b.vel.y += nx * db;
+  }
   const awayA = -(a.vel.x * nx + a.vel.y * ny);
   if (awayA > 0 && tieA > 0) {
     const cut = awayA * tieA;

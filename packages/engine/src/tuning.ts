@@ -713,7 +713,7 @@ export const TUNING = deepFreeze({
   engage: {
     contact: 0.15, drawSeconds: 0.4, slow: 0.5, massPerPoint: 4, insideEdge: 5, tieUp: 0.3, tieDown: 0.2,
     weights: { strength: 0.35, balance: 0.3, compete: 0.35 },
-    startTie: 0.4, maxRelSpeed: 4, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
+    startTie: 0.3, maxRelSpeed: 3.5, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
     limits: { receive: 0.6, spread: 1, shootValue: 0.5, tip: 0.6, reach: 0.5 },
   },
 
