@@ -262,11 +262,12 @@ const GO_AT_PUCK: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'f1', 'ta
 
 /**
  * A defenceman of the side without the puck (by the raw phase: he reads a turnover at once, before his team's phase
- * commits) faces the puck, so he backs up facing it, unless his job sends him at the puck or its carrier.
+ * commits) faces the puck, so he backs up facing it (pressing a carrier in his corner, he faces him), unless his job
+ * sends him at a loose puck or a carrier out of his zone.
  */
 function defenceFace(state: GameState, s: SkaterState, plan: SkaterPlan, raw: ShapePhase): void {
   if (s.faceTarget !== null || (s.slot !== 'LD' && s.slot !== 'RD') || raw === 'breakout' || raw === 'rush' || raw === 'ozone') return;
-  if (GO_AT_PUCK.has(plan.job) || (plan.job === 'dCorner' && plan.follow === 'man')) return;
+  if (GO_AT_PUCK.has(plan.job)) return;
   setFace(s, state.puck.pos);
 }
 
