@@ -253,9 +253,10 @@ describe('the passer\'s checker (Task 8 review)', () => {
     }
     return at;
   }
-  it('gets no try as it leaves the blade (the release tick and the two after), and the same draw as anyone after that', () => {
+  // Close-out: after those ticks he tries at TUNING.pass.checkerTry (0.4) of anyone's chance (he was tied up with the passer).
+  it('gets no try as it leaves the blade (the release tick and the two after), and a reduced draw after that: 8% to 30% of such passes', () => {
     const at = checkerTakes(400);
-    expect(at.length / 400).toBeGreaterThan(0.2); expect(at.length / 400).toBeLessThanOrEqual(0.97);
+    expect(at.length / 400).toBeGreaterThan(0.08); expect(at.length / 400).toBeLessThan(0.30);
     expect(Math.min(...at)).toBe(3);
   });
 });

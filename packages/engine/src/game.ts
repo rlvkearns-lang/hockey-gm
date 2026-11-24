@@ -433,6 +433,9 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
   function tryPickup(skaters: SkaterState[], prev: { x: number; y: number }): void {
     if (puckHeldByContest(state)) return;
     const p = state.puck;
+    // A puck over or inside a net frame (a shot over the bar coming down on the netting) is nobody's to take until it is
+    // out: taken there, the carried puck was pushed out of the frame, a 1.1 m jump (close-out, seed 2).
+    if (inFrame(p.pos)) return;
     const block = state.pickupBlock;
     const blocked = block !== null && state.tick < block.untilTick ? block.ids : NO_IDS;
     let best: SkaterState | null = null;

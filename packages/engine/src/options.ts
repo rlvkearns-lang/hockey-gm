@@ -457,7 +457,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // Settled on it, and the chance he handles it (passing.ts receiveChance, against the best there is).
     chance *= settled * (pp.chance / RECEIVE_BEST) * O.pass.hand[pp.hand];
     // A lane an opponent can get his stick into first (pp.cover) is riskier, the less so the better he passes.
-    chance *= 1 - Math.sqrt(pp.cover) * clamp(O.pass.cover - O.pass.coverPerPoint * passSkill, 0, 1);
+    // (Or the stick of the checker beside him: pp.checker.)
+    chance *= 1 - Math.sqrt(pp.cover > pp.checker ? pp.cover : pp.checker) * clamp(O.pass.cover - O.pass.coverPerPoint * passSkill, 0, 1);
     // A man on the receiver as it arrives (pp.contest) can take it off him or knock it loose as he gets it.
     chance *= 1 - pp.contest * O.pass.contest;
     // The goalie and the net frames are in the way of a pass as much as a skater is (passLaneWidth, to the aim).
@@ -508,7 +509,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     tw.x = trx * dir; tw.y = tly * dir;
     const w = laneWidth(state, side, s.pos, tw);
     const block = w < O.carry.laneFrom ? ((O.carry.laneFrom - w) / O.carry.laneFrom) * O.carry.laneCost : 0;
-    const chance = clamp(O.carry.base - V.skill.carry * (100 - ph) - pressure * (O.carry.pressure - O.carry.pressurePerPoint * ph) - block, 0.03, 0.97);
+    const chance = clamp(O.carry.base - V.skill.carry * (100 - ph) - pressure * ((outside ? O.carry.pressureOut : O.carry.pressure) - O.carry.pressurePerPoint * ph) - block, 0.03, 0.97);
     // On a breakaway a carry at the net leads to the shot or deke at its end: worth that chance to score (the goalie
     // square to him), not the threat of the spot.
     // A carry that ends inside DEKE_FROM of the net ends in a deke, with the goalie to beat at close range: V.deke of it.
@@ -625,7 +626,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   // ---- protect ----
   // (Task 8b: on an odd-man rush too. With a man on him he can shield it and wait for help; it was shoot or carry on.)
   if (mode === 'normal' || mode === 'low' || mode === 'odd') {
-    const keep = clamp(O.protect.base - pressure * (O.protect.loss - O.protect.lossPerPoint * composite(a, PROTECTING)), 0.03, 0.97);
+    const keep = clamp(O.protect.base - pressure * ((outside ? O.protect.lossOut : O.protect.loss) - O.protect.lossPerPoint * composite(a, PROTECTING)), 0.03, 0.97);
     // Unpressured, shielding the puck only stands still: it costs O.protect.idle * (1 - pressure).
     out.push({ kind: 'protect', value: valueOf(keep, here) - moveOn - O.protect.idle * (1 - pressure) });
   }

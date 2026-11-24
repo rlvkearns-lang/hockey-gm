@@ -39,7 +39,9 @@ const steeredByContest = steeredByContest_;
  * `contest` (0 to 1): how closely an opponent can be on the receiver as it arrives (receiverContest); `chance` (the
  * receiver handles it) already counts it.
  */
-export type PassPlan = { toId: string; aim: Vec2; speed: number; hand: PassHand; arriveSeconds: number; arriveSpeed: number; lane: number; chance: number; cover: number; contest: number };
+export type PassPlan = { toId: string; aim: Vec2; speed: number; hand: PassHand; arriveSeconds: number; arriveSpeed: number; lane: number; chance: number; cover: number; contest: number;
+  /** Close-out: PASS.checkerCover when the stick of a man level with or behind the puck is in the lane (valued like cover; he tries for it once it is off the blade), else 0. */
+  checker: number };
 
 const PASS = TUNING.pass;
 const K = ICE_DECAY;
@@ -150,6 +152,7 @@ const HAND_RANGE: Record<PassHand, number> = { forehand: TUNING.brain.passRange[
 export const HAND_ERROR: Record<PassHand, number> = { forehand: 1, backhand: PASS.backhand.error, behind: PASS.behind.error };
 
 const futScratch: Vec2 = { x: 0, y: 0 };
+const bladeScratch2: Vec2 = { x: 0, y: 0 };
 
 /**
  * Fills `out` with the pass from the puck (on `from`'s blade) to `to`: aimed at his blade where he will be when it
@@ -202,14 +205,23 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
     // gets there covers it (`cover`, the best of them): the pass is riskier, not impossible.
     const ax = aim.x - p.x, ay = aim.y - p.y, l2 = d * d;
     // A man at or beyond the receiver is not in the lane: he contests the catch (receiverContest).
-    let cover = 0, contest = 0;
+    let cover = 0, contest = 0, checker = 0;
     for (const o of state.skaters) {
       if (!o.onIce || o.side === from.side || o.downT > 0) continue;
       const c = receiverContest(hyp(o.pos.x - aim.x, o.pos.y - aim.y), t);
       if (c > contest) contest = c;
       const u = l2 === 0 ? 0 : ((o.pos.x - p.x) * ax + (o.pos.y - p.y) * ay) / l2;
-      // A man behind the puck (or level with it) harries the passer; the lane is ahead of it.
-      if (u <= 0 || u >= 1) continue;
+      // A man behind the puck (or level with it) harries the passer; the lane is ahead of it. But his stick may be in
+      // it (close-out: since the Task 8 review fix the passer's checker tries for the pass once it is off the blade, 21
+      // picked off a game; the passer now sees that stick as cover).
+      if (u <= 0) {
+        const od = defs.get(o.id);
+        const ob = bladePos(o.pos, o.facing, od ? od.shoots : 'L', bladeScratch2);
+        const ub = l2 === 0 ? 0 : ((ob.x - p.x) * ax + (ob.y - p.y) * ay) / l2;
+        if (ub > 0 && ub < 1 && hyp(ob.x - (p.x + ax * ub), ob.y - (p.y + ay * ub)) < PASS.stickLane) checker = PASS.checkerCover;
+        continue;
+      }
+      if (u >= 1) continue;
       const off = hyp(o.pos.x - (p.x + ax * u), o.pos.y - (p.y + ay * u));
       if (off < BODY_IN_LANE) return null;
       const r = laneReach(off, slideSeconds(u * d, speed));
@@ -217,7 +229,8 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
     }
     out.cover = cover;
     out.contest = contest;
-  } else { out.cover = 0; out.contest = 0; }
+    out.checker = checker;
+  } else { out.cover = 0; out.contest = 0; out.checker = 0; }
   out.toId = to.id;
   out.speed = speed;
   out.hand = hand;

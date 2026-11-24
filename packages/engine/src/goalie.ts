@@ -102,7 +102,7 @@ export function saveChance(input: SaveInput): number {
   const per = skill >= 70 ? G.save.perPointAbove : G.save.perPoint;
   const skillTerm = per * G.save.skillSpan * dtanh((skill - 70) / G.save.skillSpan);
   const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0)
-    + Math.min(G.save.slowMax, G.save.perSlowSpeed * Math.max(0, G.save.slowFrom - input.shotSpeed))
+    + Math.min(G.save.slowMax, G.save.perSlowSpeed * Math.max(0, G.save.slowFrom - input.shotSpeed)) * clamp(input.distance / G.save.slowFull, 0, 1)
     - (input.screened ? G.save.screened : 0)
     - (input.tipped ? G.save.tipped : 0)
     - G.save.recovering * clamp(input.recovering ?? 0, 0, 1)

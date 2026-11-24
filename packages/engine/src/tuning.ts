@@ -32,9 +32,11 @@ export const TUNING = deepFreeze({
      * while his plan is still the best he sees he keeps at it); the slot is rx slotRx or more within
      * slotLy m of the middle. Pressure (Task 8b): a checker is on him once within pressIn m and until beyond pressOut m
      * (hysteresis); his arrival is a decision point once, and no other arrival is one for pressCooldown s after it; a
-     * change of his situation is not a decision point within readGap s of his last decision.
+     * change of his situation is not a decision point within readGap s of his last decision. Outside the zone he attacks,
+     * arriveLead s (plus one look) before he would reach a carry's target, he carries on up the same lane unless he sees
+     * better. Inside a hold he weighs his plan against the rest once per betterEvery s.
      */
-    decide: { holdZone: 1.5, hold: 1.0, holdPressure: 0.3, pressed: 0.5, arrive: 1.5, margin: 0.08, marginHeld: 0.035, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 3, readGap: 0.8 },
+    decide: { holdZone: 1.5, hold: 1.0, holdPressure: 0.3, pressed: 0.5, arrive: 1.5, margin: 0.08, marginHeld: 0.035, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 3, readGap: 0.8, arriveLead: 0.3, betterEvery: 0.4 },
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
     shotDistanceScale: 9,
     maxShotDistance: 25,
@@ -251,12 +253,13 @@ export const TUNING = deepFreeze({
     /**
      * Task 8b, set from play (seeds 1-6, decisions in the zone he attacks; the other side has the puck within 2 s): after
      * a carry 0.11 with nobody within 5 m and 0.18 with a checker in stick reach (it was valued 0.08 and 0.29); after a
-     * protect 0.04 and 0.13 (valued 0.03 and 0.255). carry.pressure was 0.35, protect.loss 0.4.
+     * protect 0.04 and 0.13 (valued 0.03 and 0.255). carry.pressure was 0.35, protect.loss 0.4; outside that zone, where
+     * it was not measured, they still are (pressureOut, lossOut).
      */
-    carry: { base: 0.95, pressure: 0.24, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
+    carry: { base: 0.95, pressure: 0.24, pressureOut: 0.35, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
     hold: { base: 0.97, pressure: 0.1, keep: 0.8 },
     wrap: { base: 0.9, pressure: 0.2, laneFrom: 1.5, laneCost: 0.3, goal: 0.55, open: 1.2 },
-    protect: { base: 0.97, loss: 0.275, lossPerPoint: 0.0025, idle: 0.01 },
+    protect: { base: 0.97, loss: 0.275, lossOut: 0.4, lossPerPoint: 0.0025, idle: 0.01 },
     clearIdle: 0.04,
     blindRim: 0.6,
     /** A rim's chance is rimFit.base + rimFit.slope * its race chance (Task 8b close-out, set from play: see options.ts). */
@@ -284,7 +287,7 @@ export const TUNING = deepFreeze({
    *   rush least).
    * Set once so Task 8b's guards pass; Task 14 tunes it to NHL attempt numbers (see task-8b-report.md).
    */
-  patience: { base: 1.25, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, tacticFactor: 1, max: 2 },
+  patience: { base: 1.3, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, tacticFactor: 1, max: 2 },
 
   /**
    * Score effects (team-play.ts scoreMargin, brain, poke checks), kept to real-hockey size. A margin is comfortable from
@@ -320,6 +323,8 @@ export const TUNING = deepFreeze({
      * and the clearTicks ticks after it (their pressure is in its error); after that they try like anyone (Task 8 review).
      */
     clearOfPasser: 1.5, clearTicks: 2,
+    /** After those ticks the passer's checker tries for the pass at this share of the chance (he was tied up with the passer; Task 8b close-out). */
+    checkerTry: 0.4,
     /** Share of interceptions that are clean takes; the rest are deflections that leave the puck loose. */
     interceptTake: 0.6,
     /** A deflected pass keeps this share of its speed and turns by a random angle in this range (rad), either way. */
@@ -351,6 +356,8 @@ export const TUNING = deepFreeze({
      * the centre of his own net.
      */
     netBeyond: 4.5, netCone: 0.06, ownNetClear: 3.5,
+    /** The cover (0 to 1) a pass has when the stick blade of a man level with or behind the puck is within stickLane of its lane (Task 8b close-out). */
+    checkerCover: 0.8,
     backhand: { speed: 0.75, error: 1.6, range: 15 },
     behind: { speed: 0.6, error: 2.2, range: 8 },
   },
@@ -479,9 +486,10 @@ export const TUNING = deepFreeze({
       tipped: 0.9, recovering: 0.8,
       /**
        * A slow shot is easier to read (Task 8b close-out, controller ruling 7): perSlowSpeed per m/s under slowFrom, at
-       * most slowMax. A rushed shot (TUNING.shot.rushed) is slow, so the ones that get on net score clearly less often.
+       * most slowMax, in full from slowFull m out and in proportion closer in (in tight he has no time to read anything).
+       * A rushed shot (TUNING.shot.rushed) is slow, so the ones that get on net score clearly less often.
        */
-      slowFrom: 34, perSlowSpeed: 0.1, slowMax: 1.2,
+      slowFrom: 31, perSlowSpeed: 0.22, slowMax: 1.8, slowFull: 6,
     },
     /** Goalie skill for the save: weights of his attributes. */
     saveSkill: { reflexes: 0.35, positioning: 0.25, glove: 0.1, blocker: 0.1, lateral: 0.1, poise: 0.1 } as Partial<Record<keyof GoalieAttrs, number>>,

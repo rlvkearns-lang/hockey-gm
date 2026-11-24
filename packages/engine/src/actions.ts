@@ -472,6 +472,9 @@ export function tryIntercept(
         chance = clamp(interceptChance(d, speed) * PASS.reach * reach, 0.03, 0.97);
       }
     }
+    // The passer's checker, tied up with him as he let it go, reaches for it at PASS.checkerTry of the chance (close-out:
+    // at the full chance he picked off 22 passes a game and completion fell under its band; with none he was a loophole).
+    if (pass.clear !== undefined && pass.clear.includes(s.id)) chance = clamp(chance * PASS.checkerTry, 0.03, 0.97);
     pass.tried.push(s.id);
     if (!rng.chance(chance)) continue;
     const take = rng.chance(PASS.interceptTake) && stick;

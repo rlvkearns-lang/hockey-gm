@@ -136,6 +136,8 @@ export type CarrierPlan = {
    */
   checker?: string | null;
   pressUntil?: number;
+  /** Close-out: the last TUNING.brain.decide.betterEvery window (counted from `tick`) in which he weighed his plan against the rest inside its hold. */
+  looked?: number;
 };
 /** A team's committed phase (commit.ts): it follows the raw phase only once that has differed for TUNING.commit.phaseDelay (`pending` since `pendingTick`). */
 export type TeamPhaseState = { phase: TeamPhase; sinceTick: number; pending: TeamPhase | null; pendingTick: number };

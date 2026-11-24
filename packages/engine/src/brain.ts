@@ -62,6 +62,7 @@ function readKey(sit: Situation): string {
 
 const D = TUNING.brain.decide;
 const READ_GAP_TICKS = Math.round(D.readGap / DT_);
+const BETTER_TICKS = Math.round(D.betterEvery / DT_);
 /** A plan is chosen afresh once it is this old (ticks): TUNING.value.noise.readSeconds, how long one read of the play lasts. */
 const READ_TICKS = Math.round(TUNING.value.noise.readSeconds / DT_);
 const decideScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
@@ -105,7 +106,7 @@ function holdTicks(sit: Situation): number {
 }
 
 /** The decision point the carrier `s`, carrying out `plan`, has reached, or null (brainTick). */
-function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, plan: CarrierPlan): CarrierPlan['why'] | null {
+function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, plan: CarrierPlan, lookTicks: number): CarrierPlan['why'] | null {
   // (Always run: it keeps the checker on him up to date.)
   const pressure = pressureArrives(state, s, plan);
   const sit = readSituationInto(state, s, decideScratch);
@@ -114,13 +115,38 @@ function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Ma
   if ((plan.kind === 'carry' && plan.to !== null && carryOffside(state, s, defs, plan.to)) || (plan.kind === 'protect' && carryOffside(state, s, defs, s.target))) return 'read';
   if (plan.until === undefined) return 'hold';
   if (pressure) return 'pressure';
-  if (plan.kind === 'carry' && plan.to !== null && hypot2(plan.to.x - s.pos.x, plan.to.y - s.pos.y) <= D.arrive) return 'arrive';
+  const toGo = plan.kind === 'carry' && plan.to !== null ? hypot2(plan.to.x - s.pos.x, plan.to.y - s.pos.y) : Infinity;
+  if (toGo <= D.arrive) return 'arrive';
   const opts = listOptions(state, me, defs, optionScratch, sit);
   // Inside his plan's minimum hold only a clearly better option (D.margin) makes him choose again. Once it has run out
   // (Task 8b) he chooses again when he sees anything worth D.marginHeld more than what he is doing, or it is gone from
   // his list; while his plan is still the best he sees he keeps at it, and the hold starts again. (An expiry that
   // always drew again was a clock: 1,900 of 5,300 decisions a game.)
+  // Outside the zone he attacks, D.arriveLead s before he would reach his carry's target, he looks again: with nothing
+  // better in sight he carries on up the same lane (its target moves on ahead of him, no new pick), so he does not
+  // brake for each target (close-out: with decisions no longer on a clock he slowed every 8 m; a carrier's sprint
+  // lasted 0.54 s against 0.86 s).
+  // (The lead includes one look interval, so that how often he looks does not decide whether he sees it in time.)
+  if (sit.zone !== 'O' && plan.lane !== null && toGo <= D.arrive + hypot2(s.vel.x, s.vel.y) * (D.arriveLead + lookTicks * DT)) {
+    if (planBeaten(opts, me, sit, plan, D.marginHeld)) return 'arrive';
+    for (const o of opts) {
+      if (o.kind !== 'carry' || o.lane !== plan.lane) continue;
+      plan.to = { x: o.to.x, y: o.to.y };
+      if (!steeredByContest(state, s)) { s.target.x = o.to.x; s.target.y = o.to.y; }
+      break;
+    }
+    plan.until = state.tick + holdTicks(sit);
+    return null;
+  }
   const expired = state.tick >= plan.until;
+  // Inside the hold he weighs his plan against the rest once per D.betterEvery s (CarrierPlan.looked), however often he
+  // looks: otherwise how often "something clearly better" was noticed, and so how often he chose, followed the look
+  // interval (close-out: 3,190 / 3,030 / 2,810 decisions a game at 3 / 6 / 12 ticks).
+  if (!expired) {
+    const win = Math.floor((state.tick - plan.tick) / BETTER_TICKS);
+    if (plan.looked === win) return null;
+    plan.looked = win;
+  }
   // He never keeps at one plan longer than he trusts one read of the play (TUNING.value.noise.readSeconds): then he
   // chooses afresh, whatever he sees (no plan is held for ever: a carrier shielding the puck with nobody coming for it).
   if (expired && state.tick - plan.tick >= READ_TICKS) return 'hold';
@@ -169,7 +195,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   if (!fresh && state.tick % lookTicks !== 0) return;
   const s = findSkater(state, state.carrierId);
   if (!s || !s.onIce || s.downT > 0) return;
-  const why = fresh ? 'gain' : decisionPoint(state, s, defs.get(s.id)!, defs, prev);
+  const why = fresh ? 'gain' : decisionPoint(state, s, defs.get(s.id)!, defs, prev, lookTicks);
   if (why === null) return;
   const busy = steeredByContest(state, s);
   const me = defs.get(s.id)!;
@@ -195,6 +221,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   plan.read = readKey(sit);
   plan.pressed = sit.pressure >= D.pressed;
   plan.why = why;
+  plan.looked = 0;
   plan.until = state.tick + holdTicks(sit);
   state.carrierPlan = plan;
   switch (d.kind) {
