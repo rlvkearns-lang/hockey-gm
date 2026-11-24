@@ -143,3 +143,18 @@ The owner asked whether real NHL measurements can go into the engine: the rink t
 - Not true yet (checked in tuning.ts): top skating speed runs 7.6 to 9.2 m/s (17 to 20.6 mph) against roughly 20 to 25 mph in the NHL; shot speed is 29 to 39 m/s (65 to 87 mph) for every shot type, against wrist shots of roughly 70 to 90 mph and slapshots of 90 to 100+ mph. NHL figures here are from memory and need checking.
 - **[my call]** Re-tune A (Task 14) moves skating and shot speeds to real values (top speed by rating spanning about 20 to 24.5 mph; shot speed by shot type and shooting power), adds them to the NHL scorecard (top speed, bursts over 20 and 22 mph per game, shot speeds), and re-balances the totals.
 - **[my call]** League stage: the real-roster importer sets each player's speed and shot power from the NHL's published tracking data (top speed, hardest shot) where available, so a real player's engine top speed equals his measured one. Needs the stats hosts reachable or the data supplied.
+
+## Referees, challenges and special-teams control (owner, 2026-11-24)
+
+- Referees: normal, fixed strictness (about the NHL's rate of power plays); no referee crews with different standards.
+- Missed and bad calls: "absolutely". Refs sometimes miss an obvious one or make a soft call.
+- Coach's challenge and video review: "yes absolutely, if possible".
+- Power-play and penalty-kill units: the same three levels as line-ups (coach decides by default; the GM can ask; the GM can set them himself).
+- Goalies: the same as line-ups. The default is that the coach chooses the rotation, who starts, and when to pull or swap a goalie.
+
+Proposed shape **[my call]**:
+
+- Missed and bad calls: every infraction the engine produces is real; the referee then sees it or not (a chance by how obvious it was, how far from the puck, and how many players screened it). A small share of calls are soft: contact that was not an infraction gets called. Missed and soft calls are marked in the event so the viewer's replay, the post-game and the media layer can use them ("the hook on the winning goal went uncalled"). Rates are tuned so they are noticed a few times a season per team, not every night, and they do not favour either team.
+- Coach's challenge: for offside on a goal and goalie interference on a goal, as in the NHL (a failed challenge is a minor penalty for delay of game). The engine already knows the truth: whether the entry before the goal was really offside (a missed offside can now happen, within a small margin at the line) and whether a skater impeded the goalie. The coach challenges by his own judgement of how clear it was and how much the goal matters; under manual control the GM gets a short prompt with the replay. Video review of whether the puck crossed the line, high sticks and kicked-in goals is automatic.
+- Goalie management: workload (a starter tires over a heavy schedule and back-to-backs), form streaks, the coach's choice of starter by form, opponent and rest, and pulling a goalie having a bad night; the GM's three levels apply.
+- All of this belongs to engine round 2 Part B (penalties) except goalie workload over a schedule, which needs the league stage.
