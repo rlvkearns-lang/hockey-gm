@@ -13,6 +13,9 @@ const hypot2 = hypot2_;
  */
 export type EngagedPair = { i: number; j: number; tieI: number; tieJ: number };
 
+/** Two bodies whose gap is under this (m) are in contact: far above float rounding at rink scale, far below any real gap. */
+const CONTACT_EPS = 1e-6;
+
 /** Reused per call so the pair loop looks movement up once per skater, not once per pair. */
 const scratch: (Movement | null)[] = [];
 
@@ -84,17 +87,20 @@ function hold(a: SkaterState, b: SkaterState, min: number, massA: number, massB:
   if (d < 1e-9) return;
   const nx = dx / d, ny = dy / d;
   let gap = d - min;
+  // At contact: the overlap was just removed, so the gap is zero only up to rounding (one ulp either way; Task 10
+  // review, Important 1: a test of gap <= 0 skipped the hold on about 45% of contact ticks).
+  const touching = gap <= CONTACT_EPS;
   // Leaning into each other they stop each other (no bounce, no sliding through): along the line between them, while
   // closing, both move at their common (mass-weighted) speed; the heavier man gives less.
   const va = a.vel.x * nx + a.vel.y * ny, vb = b.vel.x * nx + b.vel.y * ny;
-  if (gap <= 0 && va > vb) {
+  if (touching && va > vb) {
     const v = (va * massA + vb * massB) / (massA + massB);
     a.vel.x += nx * (v - va); a.vel.y += ny * (v - va);
     b.vel.x += nx * (v - vb); b.vel.y += ny * (v - vb);
   }
   // Nor does a tied-up man slide round the other: each keeps only 1 - his tie of his speed across the line relative to
   // the other's (both move toward their common, mass-weighted speed across it, by his tie).
-  if (gap <= 0) {
+  if (touching) {
     const ta = -a.vel.x * ny + a.vel.y * nx, tb = -b.vel.x * ny + b.vel.y * nx;
     const t = (ta * massA + tb * massB) / (massA + massB);
     const da = (t - ta) * tieA, db = (t - tb) * tieB;

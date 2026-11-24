@@ -43,4 +43,29 @@ describe('bodies', () => {
     }
     expect(out).toBe(true);
   });
+  it('an engaged pair in contact is held on every tick: neither slides round the other (Task 10 review, Important 1)', () => {
+    // Pressed together at many angles, one man skating across the line between them: with ties of 1 the pair moves
+    // together across it on every contact tick (the rounding left after the overlap is removed must not skip the hold).
+    let held = 0, ticks = 0;
+    for (let k = 0; k < 200; k++) {
+      const th = k * 0.0317 + 0.01, a = at(0, 0), b = at(0, 0), m = mv(90);
+      const min = 2 * m.radius;
+      b.pos.x = Math.cos(th) * min * 0.97; b.pos.y = Math.sin(th) * min * 0.97;
+      for (let t = 0; t < 5; t++) {
+        // He leans into the other and skates across the line between them (as it is now).
+        const l = Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y), nx = (b.pos.x - a.pos.x) / l, ny = (b.pos.y - a.pos.y) / l;
+        a.vel.x = nx * 1 - ny * 3; a.vel.y = ny * 1 + nx * 3; b.vel.x = -nx * 0.5; b.vel.y = -ny * 0.5;
+        a.pos.x += a.vel.x * DT; a.pos.y += a.vel.y * DT; b.pos.x += b.vel.x * DT; b.pos.y += b.vel.y * DT;
+        const pressed = Math.hypot(b.pos.x - a.pos.x, b.pos.y - a.pos.y) < min;
+        resolveBodies([a, b], () => m, undefined, [{ i: 0, j: 1, tieI: 1, tieJ: 1 }]);
+        const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y, d = Math.hypot(dx, dy);
+        const across = (-(a.vel.x - b.vel.x) * dy + (a.vel.y - b.vel.y) * dx) / d;
+        if (!pressed) continue;
+        ticks++;
+        if (Math.abs(across) < 1e-9) held++;
+      }
+    }
+    expect(ticks).toBeGreaterThan(900);
+    expect(held).toBe(ticks);
+  });
 });
