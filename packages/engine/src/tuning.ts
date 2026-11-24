@@ -516,7 +516,7 @@ export const TUNING = deepFreeze({
      */
     rebound: {
       heldFrom: 25, heldPerSpeed: 0.004, heldScreened: 0.08, heldTipped: 0.12,
-      steered: { base: 0.35, perPoint: 0.005, tipped: 0.1 },
+      steered: { base: 0.3, perPoint: 0.005, tipped: 0.1 },
       steeredSpeed: [6, 9] as [number, number],
       steeredAngle: [(55 * Math.PI) / 180, (80 * Math.PI) / 180] as [number, number],
       speed: [2.5, 6] as [number, number],

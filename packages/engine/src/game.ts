@@ -104,6 +104,8 @@ export type Game = {
 
 const PERIOD_TICKS = Math.round(PERIOD_SECONDS / DT);
 const STOPPED_SECONDS = 1.5;
+/** While play is stopped a skater in a goalie's way is moved out at most this far (m) a tick (bodies.ts resolveGoalies). */
+const STOPPED_PUSH = 0.4;
 /** A loose puck is taken with the blade within TUNING.blade.pickupReach (m) of it, or in his feet: his centre within IN_FEET (m). */
 const PICKUP_REACH = TUNING_.blade.pickupReach;
 const IN_FEET = 0.45;
@@ -354,7 +356,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
    * goalie pushed inside the boards and out of the net frames again.
    */
   function settle(skaters: SkaterState[]): void {
-    if (resolveGoalies(skaters, onIceMoves, goalieList()) === 0) return;
+    if (resolveGoalies(skaters, onIceMoves, goalieList(), state.phase === 'live' ? Infinity : STOPPED_PUSH) === 0) return;
     for (let i = 0; i < skaters.length; i++) {
       const s = skaters[i]!;
       const r = onIceMoves[i]!.radius;

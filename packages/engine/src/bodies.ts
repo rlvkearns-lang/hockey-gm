@@ -55,10 +55,11 @@ export function resolveBodies(
 /**
  * Goalies are solid: each on-ice skater is pushed out to TUNING.goalieBody.radius plus his own radius from each
  * goalie's centre (only the skater moves; one between the goalie and his net is pushed out sideways, so the net frame
- * does not push him back in), and loses the parts of his velocity (along x, along y) toward that goalie. Returns how
- * many pushes there were.
+ * does not push him back in), and loses the parts of his velocity (along x, along y) toward that goalie. With `maxMove`
+ * a push moves him at most that far (Task 8b close-out: at a change of ends a goalie landed on a skater, who jumped
+ * 0.66 m in a tick). Returns how many pushes there were.
  */
-export function resolveGoalies(skaters: SkaterState[], moves: readonly Movement[], goalies: readonly GoalieState[]): number {
+export function resolveGoalies(skaters: SkaterState[], moves: readonly Movement[], goalies: readonly GoalieState[], maxMove = Infinity): number {
   const gr = TUNING.goalieBody.radius;
   let pushed = 0;
   for (let i = 0; i < skaters.length; i++) {
@@ -69,6 +70,7 @@ export function resolveGoalies(skaters: SkaterState[], moves: readonly Movement[
       const dx = s.pos.x - g.pos.x, dy = s.pos.y - g.pos.y;
       if (dx >= min || dx <= -min || dx * dx + dy * dy >= min * min) continue;
       pushed++;
+      const x0 = s.pos.x, y0 = s.pos.y;
       const d = hypot2(dx, dy);
       let nx: number, ny: number;
       if (dx * (g.pos.x >= 0 ? 1 : -1) > 0) {
@@ -84,6 +86,10 @@ export function resolveGoalies(skaters: SkaterState[], moves: readonly Movement[
         s.pos.x = g.pos.x + nx * min;
         s.pos.y = g.pos.y + ny * min;
       }
+      // With `maxMove` (play stopped: the goalies have changed ends and one has come to stand where a skater was), he
+      // is moved out at most that far a tick.
+      const mv = hypot2(s.pos.x - x0, s.pos.y - y0);
+      if (mv > maxMove) { s.pos.x = x0 + ((s.pos.x - x0) / mv) * maxMove; s.pos.y = y0 + ((s.pos.y - y0) / mv) * maxMove; }
       // He loses whatever of his velocity, along x and along y, heads toward the goalie: he stops on him, not slides round.
       if (s.vel.x * nx < 0) s.vel.x = 0;
       if (s.vel.y * ny < 0) s.vel.y = 0;
