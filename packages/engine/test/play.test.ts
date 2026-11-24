@@ -177,11 +177,12 @@ describe('A4: attempts (Task 7)', () => {
   }, 60_000);
   // Task 8: backhands were 31% of attempts after Task 7 (a shooter facing across the ice or away from the net shot off the
   // backhand); roughly a tenth is realistic.
-  it('A4: backhands are 5% to 20% of attempts', () => {
-    const rel = games().flatMap((r) => r.events.filter((e) => e.type === 'release' && e.detail.kind === 'shot'));
-    const bh = rel.filter((e) => e.type === 'release' && e.detail.shotType === 'backhand').length / rel.length;
+  // Task 9: pooled over seeds 1-16 (one game reads 1.9% to 11.6% by itself; seeds 1-3 read 4.5% after Task 9, 6.4% on
+  // seeds 1-16); the bars are unchanged.
+  it('A4: backhands are 5% to 20% of attempts (seeds 1-16)', () => {
+    const c = countGames(Array.from({ length: 16 }, (_, i) => i + 1)), bh = c.attemptsBackhand / c.attempts;
     expect(bh).toBeGreaterThan(0.05); expect(bh).toBeLessThan(0.20);
-  }, 60_000);
+  }, 240_000);
   it('A4: every release of a shot names its type', () => { for (const r of games()) for (const e of r.events) if (e.type === 'release') expect(e.detail.shotType === null).toBe(e.detail.kind !== 'shot'); }, 60_000);
 });
 

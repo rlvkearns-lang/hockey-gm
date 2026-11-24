@@ -41,7 +41,7 @@ export type PlayCounterKey =
   | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals'
   | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
   | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear'
-  | 'attemptsInReach' | 'attemptsOddManFar' | 'attemptsOddManClose' | 'attemptsLowClose' | 'attemptsLowFar' | 'attemptsNormalFar' | 'attemptsNormalFarBare' | 'attemptsNormalClose' | 'attemptsBreakaway' | 'attemptsOther';
+  | 'attemptsBackhand' | 'attemptsInReach' | 'attemptsOddManFar' | 'attemptsOddManClose' | 'attemptsLowClose' | 'attemptsLowFar' | 'attemptsNormalFar' | 'attemptsNormalFarBare' | 'attemptsNormalClose' | 'attemptsBreakaway' | 'attemptsOther';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -60,7 +60,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
   'netFrontHolds', 'netFrontHoldsLong', 'pointShotSaves', 'pointShotSavesNear',
-  'attemptsInReach', 'attemptsOddManFar', 'attemptsOddManClose', 'attemptsLowClose', 'attemptsLowFar', 'attemptsNormalFar', 'attemptsNormalFarBare', 'attemptsNormalClose', 'attemptsBreakaway', 'attemptsOther',
+  'attemptsBackhand', 'attemptsInReach', 'attemptsOddManFar', 'attemptsOddManClose', 'attemptsLowClose', 'attemptsLowFar', 'attemptsNormalFar', 'attemptsNormalFarBare', 'attemptsNormalClose', 'attemptsBreakaway', 'attemptsOther',
 ];
 
 /** Counters that hold a largest value, not a sum: games combine by taking the largest. */
@@ -256,6 +256,7 @@ export function createObserver(setup: GameSetup): Observer {
           lastRel = { side: e.side, kind: e.detail.kind };
           if (e.detail.kind !== 'shot' || e.playerId === null) break;
           c.attempts++;
+          if (e.detail.shotType === 'backhand') c.attemptsBackhand++;
           // Task 8b: its source (the shooter's situation on the tick before he let it go: carrierMind) and whether a checker
           // was within stick reach of him then.
           if (prevShooter !== null && prevShooter.id === e.playerId) {

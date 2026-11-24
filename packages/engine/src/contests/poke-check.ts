@@ -16,6 +16,8 @@ const KIND = 'pokeCheck';
 const T = TUNING.poke;
 /** Stage lengths (s): the stick goes out, then the outcome shows before the puck moves. */
 const REACH_SECONDS = 0.25;
+/** The stick is far enough out to poke from REACH_MIN_SECONDS (s): from then to REACH_SECONDS he pokes as soon as the puck is a stick length away. */
+const REACH_MIN_SECONDS = 0.15;
 const RESOLVE_SECONDS = 0.1;
 /** A badly beaten defender loses a step: his speedCap is halved for this long. */
 const BEATEN_SECONDS = 0.7;
@@ -52,7 +54,8 @@ function steerReach(ctx: ContestCtx, checker: SkaterState): void {
 }
 
 /**
- * Poke check, stages `reach` (REACH_SECONDS: the stick goes out), `resolve` (RESOLVE_SECONDS: `leader` is the
+ * Poke check, stages `reach` (the stick goes out: he pokes from REACH_MIN_SECONDS on, as soon as the puck is a stick
+ * length away, and at REACH_SECONDS at the latest), `resolve` (RESOLVE_SECONDS: `leader` is the
  * winner) and, after a failure by a wide margin, `beaten` (the checker alone, a step behind). Participants: the
  * checker, then the carrier (in `freeIds`: only the checker is steered). The carrier letting the puck go before it
  * resolves, or the checker not a stick length from the puck when the reach ends (T.minReach to T.stickReach), ends it
@@ -122,10 +125,14 @@ export const pokeCheckContest: Contest<'pokeCheck'> = {
     c.spot.y = state.puck.pos.y;
 
     if (c.stage === 'reach') {
-      if (c.stageT < REACH_SECONDS - STAGE_EPS) return null;
-      // From a stick length only: too far, the stick cannot get there; too close, he is on top of it (Task 9).
+      if (c.stageT < REACH_MIN_SECONDS - STAGE_EPS) return null;
+      // From a stick length only: too far, the stick cannot get there; too close, he is on top of it (Task 9). Once the
+      // stick is most of the way out he pokes as the puck comes into that window; still outside it when the reach ends,
+      // nothing comes of it.
       const reach = dist(checker.pos, state.puck.pos);
-      if (reach > T.stickReach || reach < T.minReach) return { winnerId: null, puck: 'unchanged', outcome: 'outOfReach' };
+      const inWindow = reach <= T.stickReach && reach >= T.minReach;
+      if (!inWindow && c.stageT < REACH_SECONDS - STAGE_EPS) return null;
+      if (!inWindow) return { winnerId: null, puck: 'unchanged', outcome: 'outOfReach' };
       c.data.outcome = roll(c, ctx, checker, carrier);
       c.leader = c.data.outcome === 'take' || c.data.outcome === 'loose' ? checker.id : carrier.id;
       enterStage(c, 'resolve');

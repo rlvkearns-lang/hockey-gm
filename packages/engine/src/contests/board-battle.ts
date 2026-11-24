@@ -47,6 +47,10 @@ const RESOLVE_SECONDS = 0.3;
 /** The puck on the winner's blade as he comes away moves at most his own travel plus BLADE_TURN (m) a tick, at most BLADE_STEP (as a carried puck: game.ts carryPuck). */
 const BLADE_TURN = 0.2;
 const BLADE_STEP = 0.4;
+/** A puck left this far (m) or more from the spot at the end of its slide stays where it is (the spot moves to it). */
+const SPOT_SETTLE = 0.05;
+/** The most a hand-over moves the puck to the taker's blade (m): game.ts tryPickup's kick. */
+const HAND_OVER = 1.2;
 /** How hard they skate (fraction of top speed) while shoving and digging. */
 const PIN_SPEED_CAP = 0.4;
 const DIG_SPEED_CAP = 0.3;
@@ -247,7 +251,8 @@ function holdPuck(ctx: ContestCtx, c: Battle): void {
     // Still at the spot (any drift left by the slide is settled here, in a tick of a few hundredths of a millimetre).
     // While it resolves it stays where it is: a winner who was coming away with it and now passes it on (his side's
     // supporter has gone) plays it from there.
-    if (c.stage === 'resolve') { c.spot.x = p.pos.x; c.spot.y = p.pos.y; }
+    // And a puck the slide could not bring all the way (a net frame in its way) stays where it stopped: the spot moves to it.
+    if (c.stage === 'resolve' || hypot2(c.spot.x - p.pos.x, c.spot.y - p.pos.y) > SPOT_SETTLE) { c.spot.x = p.pos.x; c.spot.y = p.pos.y; }
     p.pos.x = c.spot.x;
     p.pos.y = c.spot.y;
     p.vel.x = 0;
@@ -451,7 +456,9 @@ function finish(c: Battle, ctx: ContestCtx): ContestResult {
   const sup = how === 'support' && support !== null ? skaterById(state, support) : null;
   const toSupport = d.clean && sup !== null && sup.onIce && !sup.leaving && sup.downT === 0
     && !crossesNet(p, bladePos(sup.pos, sup.facing, ctx.defs.get(sup.id)!.shoots, bladeScratch));
-  const toWinner = d.clean && !toSupport && !crossesNet(p, bladePos(winner.pos, winner.facing, ctx.defs.get(winner.id)!.shoots, bladeScratch));
+  // On his stick only from his blade's reach (it rode his blade as he came away; if he turned away from it, it squirts).
+  const wb = bladePos(winner.pos, winner.facing, ctx.defs.get(winner.id)!.shoots, bladeScratch);
+  const toWinner = d.clean && !toSupport && !crossesNet(p, wb) && hypot2(wb.x - p.x, wb.y - p.y) <= HAND_OVER;
   const clean = toSupport || toWinner;
   ctx.emit(contestEvent(state, {
     type: 'battle', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot,

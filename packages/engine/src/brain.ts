@@ -1,6 +1,6 @@
 import { atWrapPost as atWrapPost_, executeClear as executeClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
 import { BRAIN_INTERVAL_TICKS as BRAIN_INTERVAL_TICKS_, DT as DT_ } from './constants';
-import { carryOffside as carryOffside_, chooseOption as chooseOption_, listOptions as listOptions_, planBeaten as planBeaten_, readSituationInto as readSituationInto_, type Option, type Situation } from './options';
+import { carryOffside as carryOffside_, chooseOption as chooseOption_, listOptions as listOptions_, planBeaten as planBeaten_, readSituationInto as readSituationInto_, shieldingInBattle as shieldingInBattle_, type Option, type Situation } from './options';
 import { RINK } from './rink';
 import { TUNING as TUNING_ } from './tuning';
 import { steeredByContest as steeredByContest_ } from './team-play';
@@ -20,6 +20,7 @@ const BRAIN_INTERVAL_TICKS = BRAIN_INTERVAL_TICKS_;
 const DT = DT_;
 const chooseOption = chooseOption_;
 const carryOffside = carryOffside_;
+const shieldingInBattle = shieldingInBattle_;
 const listOptions = listOptions_;
 const readSituationInto = readSituationInto_;
 const planBeaten = planBeaten_;
@@ -195,6 +196,9 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   if (!fresh && state.tick % lookTicks !== 0) return;
   const s = findSkater(state, state.carrierId);
   if (!s || !s.onIce || s.downT > 0) return;
+  // Shielding it in a board battle (Task 9) he holds it, keeping his plan, until the battle decides what happens to it:
+  // no decision (options.ts listOptions offers only protect then).
+  if (!fresh && shieldingInBattle(state, s)) return;
   const why = fresh ? 'gain' : decisionPoint(state, s, defs.get(s.id)!, defs, prev, lookTicks);
   if (why === null) return;
   const busy = steeredByContest(state, s);

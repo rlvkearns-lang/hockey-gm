@@ -772,10 +772,11 @@ export function interceptedPasses(defender: PlayerDef, n: number): GameEvent[] {
   return out;
 }
 
-/** A poke check whose checker is moved out of stick reach (3.4 m away) just before the reach ends, played out. */
+/** A poke check whose checker is moved out of stick reach (3.4 m away) before the stick is out, played out. */
 export function pokeOutOfReach(): { c: ContestState; events: GameEvent[]; carrierId: string | null; contestIds: number } {
   const c = startPoke(), h = contestDuel.get(c)!;
-  while (c.stageT < 0.2) duelStep(h);
+  // (Task 9: he pokes from 0.15 s on as soon as the puck is a stick length away: moved before then.)
+  while (c.stageT < 0.1) duelStep(h);
   const checker = skater(h.st, 'away', 'C');
   checker.pos = { x: 2.8, y: 0 }; checker.vel = { x: 0, y: 0 };
   for (let i = 0; i < 30 && h.st.contests.includes(c); i++) duelStep(h);
