@@ -114,6 +114,11 @@ export type CarrierPlan = {
   id: string; kind: 'carry' | 'pass' | 'shoot' | 'dump' | 'protect' | 'rim' | 'clear'; lane: CarryLane | null; toId: string | null; to: Vec2 | null; tick: number;
   /** Drawn when he gets the puck: keys the part of his error in judging each option that stays with him while he has it (builder's addition). */
   seed?: number;
+  /**
+   * The situation he chose in (brain.ts: 'break', 'odd', 'behind', 'low' or 'normal', then the zone, e.g. 'normal:O'):
+   * he carries out what he picked until TUNING.value.lookSeconds have passed or this changes (Task 7, Task 6 review).
+   */
+  read?: string;
 };
 /** A team's committed phase (commit.ts): it follows the raw phase only once that has differed for TUNING.commit.phaseDelay (`pending` since `pendingTick`). */
 export type TeamPhaseState = { phase: TeamPhase; sinceTick: number; pending: TeamPhase | null; pendingTick: number };

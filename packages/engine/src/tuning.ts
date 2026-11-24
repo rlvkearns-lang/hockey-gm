@@ -142,10 +142,12 @@ export const TUNING = deepFreeze({
    */
   value: {
     noise: { persist: 0.95, readSeconds: 4 },
+    /** brain.ts: he carries out a pick this long (s) before he chooses again, unless his situation changes (Task 6 review). */
+    lookSeconds: 0.3,
     deke: 0.6,
     /** A pass's chance falls by skill.pass per point of passing under 100, a carry's by skill.carry per point of puckHandling under 100, pressured or not. */
     skill: { pass: 0.001, carry: 0.001 },
-    pick: { base: 0.0137, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
+    pick: { base: 0.017, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
     stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
     goal: 0.13, shotKeep: 0.05, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },

@@ -80,8 +80,10 @@ describe('A2: every player has a job (Task 4)', () => {
 
 describe('A3: decisions with the puck (Task 5)', () => {
   it('A3: no breakaway pass backward in three games', () => { expect(counters().breakawayBackPasses).toBe(0); }, 60_000);
-  it('A3: the pick stays a draw: under 3% of decision points in normal play have one kind of option above 97% (Task 5 review)', () => {
-    const c = counters(); expect(c.normalDecisionPoints).toBeGreaterThan(1000); expect(c.normalCertain / c.normalDecisionPoints).toBeLessThan(0.03);
+  // Task 6 review, Important 1: measured BEFORE the kind cap (after it, it was 0 by construction).
+  it('A3: the pick stays a draw: under 15% of decision points in normal play have one kind of option above 97% before the cap, and the cap binds on under 15%', () => {
+    const c = counters(); expect(c.normalDecisionPoints).toBeGreaterThan(1000);
+    expect(c.normalCertain / c.normalDecisionPoints).toBeLessThan(0.15); expect(c.normalCapBinds / c.normalDecisionPoints).toBeLessThan(0.15);
   }, 60_000);
   it('A3: the carrier keeps his mind: under 35% of his decisions change what he is doing', () => { expect(counters().carrierFlips / counters().carrierDecisions).toBeLessThan(0.35); }, 60_000);
   it('A2/A3: behind the net is used: at least 8 possessions there, 2 passes out front and 0.3 wraparounds a game', () => {

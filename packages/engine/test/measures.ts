@@ -35,7 +35,7 @@ export type PlayCounterKey =
   | 'goalieOverlapTicks' | 'raceJumpTicks'
   | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
-  | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain'
+  | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
   | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'passGoals';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
@@ -51,7 +51,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'goalieOverlapTicks', 'raceJumpTicks',
   'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderInside',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
-  'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain',
+  'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
   'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'passGoals',
 ];
 
@@ -420,7 +420,12 @@ export function createObserver(setup: GameSetup): Observer {
       const me = defs.get(cs.id)!;
       listOptions(st, me, defs, optionScratch);
       c.normalDecisionPoints++;
-      if (topKindShare(optionScratch, me, sit, st.carrierPlan) > 0.97 + 1e-9) c.normalCertain++;
+      // Before the kind cap (Task 6 review): certain when one kind gets over 0.97 of the draw; the cap binds when that
+      // happens with another kind on the list.
+      if (topKindShare(optionScratch, me, sit, st.carrierPlan) > 0.97 + 1e-9) {
+        c.normalCertain++;
+        if (new Set(optionScratch.map((o) => o.kind)).size > 1) c.normalCapBinds++;
+      }
     }
     const mates = new Map<string, number>();
     if (clear) for (const m of st.skaters) if (m.onIce && m.side === cs.side && m !== cs) mates.set(m.id, rxOf(st, m.side, m.pos.x));

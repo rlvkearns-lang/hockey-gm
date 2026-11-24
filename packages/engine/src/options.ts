@@ -66,6 +66,8 @@ export type Situation = {
   behindNet: boolean;
   /** Seconds he has had the puck (since his touch began), at most TUNING.value.holdCap. */
   held: number;
+  /** The same seconds, uncapped (his read of the play refreshes every TUNING.value.noise.readSeconds for as long as he has it). */
+  since: number;
 };
 
 export type Option =
@@ -184,7 +186,8 @@ function readInto(state: GameState, s: SkaterState, out: Situation): Situation {
   out.behindNet = rx > GOAL && Math.abs(ly) < BEHIND_Y;
   const t = state.touches;
   const since = t.side === s.side && t.ids[t.ids.length - 1] === s.id ? t.ticks[t.ticks.length - 1]! : state.tick;
-  out.held = Math.min(V.holdCap, (state.tick - since) * DT);
+  out.since = (state.tick - since) * DT;
+  out.held = Math.min(V.holdCap, out.since);
   return out;
 }
 
@@ -196,13 +199,16 @@ function defenderGoalSide(state: GameState, s: SkaterState): boolean {
   return false;
 }
 
+/** The carrier's situation now, written into `out`. */
+export function readSituationInto(state: GameState, s: SkaterState, out: Situation): Situation { return readInto(state, s, out); }
+
 /** The carrier's situation now (a new object). */
 export function readSituation(state: GameState, s: SkaterState): Situation {
-  return readInto(state, s, { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0 });
+  return readInto(state, s, { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 });
 }
 
 /** listOptions' situation when its caller passes none (private scratch). */
-const ownSituation: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0 };
+const ownSituation: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
 
 /**
  * A habit multiplies a value (a positive one by 0.6 + 0.8 * tendency, a negative one is divided by it) and leans it by
@@ -359,7 +365,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     v = habit(v, tend.pass) + passOn;
     // Vision: he sees the best `seen` passes as he reads them (value plus the error of his read, fixed for the possession).
     passKey.toId = m.id;
-    const sv = v + readError(plan, passKey, T0, held);
+    const sv = v + readError(plan, passKey, T0, sit.since);
     let i = passSeen.length;
     while (i > 0 && passSeen[i - 1]! < sv) i--;
     if (i >= seen) continue;
@@ -525,8 +531,6 @@ function race(state: GameState, s: SkaterState, to: Vec2, named: SkaterState | n
 
 /** The standard deviation of the softmax draw's implied (Gumbel) error, in units of its temperature: pi / sqrt(6). */
 const GUMBEL_SD = 1.2825498301618641;
-/** The share of the temperature left fresh at each look once he has his read. */
-const FRESH = Math.sqrt(1 - V.noise.persist * V.noise.persist);
 const LANE_KEY: Record<CarryLane, number> = { net: 1, wide: 2, middle: 3, office: 4, wrap: 5, hold: 6 };
 const KIND_KEY: Record<Option['kind'], number> = { shoot: 1, pass: 2, carry: 3, rim: 4, dump: 5, protect: 6, clear: 7 };
 
@@ -561,18 +565,20 @@ const pickW: number[] = [];
 const kindW: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
 
 /**
- * His pick, a draw weighted by value: option i is taken with weight exp(seen_i / T), where seen_i is its value, plus
- * TUNING.value.stick when it is what he is committed to, plus the part of his judging error that stays with him for the
- * possession (persist * a fixed normal error * T, keyed by his plan's seed). The temperature T (TUNING.value.pick: base +
- * perPoint * (100 - iq) + pressure * his pressure - perPoise * poise, at least `min`) is lower for a smart, poised player,
- * who usually takes the best option, and higher for a limited one. In an ordinary state (no breakaway, odd-man rush,
- * play behind the net or pressure down low) no kind of option is taken more than TUNING.brain.maxShare of the time when
- * there is another kind on the list: the rest goes to the other kinds by weight.
+ * His pick, a fresh draw weighted by value every time he chooses: option i is taken with weight exp(seen_i / T), where
+ * seen_i is its value as he reads it (plus his read's error, which stays with him for TUNING.value.noise.readSeconds at a
+ * time while he has the puck: readError) plus TUNING.value.stick when it is what he is committed to (fading over holdCap
+ * seconds with the puck). The temperature T (TUNING.value.pick: base + perPoint * (100 - iq) + pressure * his pressure -
+ * perPoise * poise, at least `min`) is lower for a smart, poised player, who usually takes the best option, and higher
+ * for a limited one; it is the same at every look (commitment, not a cooler draw, keeps him from flip-flopping: see
+ * brain.ts). In an ordinary state (no breakaway, odd-man rush, play behind the net or pressure down low) no kind of
+ * option is taken more than TUNING.brain.maxShare of the time when there is another kind on the list: the rest goes to
+ * the other kinds by weight (a backstop that rarely binds).
  */
 export function chooseOption(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null, rng: Rng): Option {
   const n = options.length;
   if (n === 1) return options[0]!;
-  const total = weigh(options, me, sit, plan);
+  const total = weigh(options, me, sit, plan, true);
   let r = rng.next() * total;
   for (let i = 0; i < n; i++) {
     const w = pickW[i]!;
@@ -582,10 +588,13 @@ export function chooseOption(options: readonly Option[], me: PlayerDef, sit: Sit
   return options[n - 1]!;
 }
 
-/** The share of chooseOption's draw that goes to its most likely kind of option (1 with a single kind on the list). */
-export function topKindShare(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null): number {
+/**
+ * The share of chooseOption's draw that goes to its most likely kind of option before the kind cap (1 with a single
+ * kind on the list); with `capped`, after it.
+ */
+export function topKindShare(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null, capped = false): number {
   if (options.length <= 1) return 1;
-  const total = weigh(options, me, sit, plan);
+  const total = weigh(options, me, sit, plan, capped);
   for (let k = 0; k < kindW.length; k++) kindW[k] = 0;
   for (let i = 0; i < options.length; i++) kindW[KIND_KEY[options[i]!.kind]]! += pickW[i]!;
   let top = 0;
@@ -601,27 +610,23 @@ function pickTemperature(me: PlayerDef, pressure: number): number {
 
 /**
  * The error in his read of option `o`: persist * T0 * GUMBEL_SD * a normal keyed by his plan's seed and how many
- * TUNING.value.noise.readSeconds he has had the puck (his read of the play holds that long, then he reads it again);
- * 0 with no seed.
+ * TUNING.value.noise.readSeconds he has had the puck (`since`, uncapped: his read of the play holds that long, then he
+ * reads it again); 0 with no seed.
  */
-function readError(plan: CarrierPlan | null, o: Option, T0: number, held: number): number {
+function readError(plan: CarrierPlan | null, o: Option, T0: number, since: number): number {
   if (plan === null || plan.seed === undefined) return 0;
-  return V.noise.persist * GUMBEL_SD * seenError(mix(plan.seed, Math.floor(held / V.noise.readSeconds) + 1), o) * T0;
+  return V.noise.persist * GUMBEL_SD * seenError(mix(plan.seed, Math.floor(since / V.noise.readSeconds) + 1), o) * T0;
 }
 
-/** Fills pickW with each option's weight in the draw (the kind cap applied); returns their total. */
-function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null): number {
-  const T0 = pickTemperature(me, sit.pressure);
-  // Once he has a read of the play (his plan's seed), most of his error is that read, fixed for the possession
-  // (readError), and the draw at each look is cooler (FRESH * T0).
-  const seeded = plan !== null && plan.seed !== undefined;
-  const T = seeded ? T0 * FRESH : T0;
+/** Fills pickW with each option's weight in the draw (with `cap`, the kind cap applied); returns their total. */
+function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null, cap: boolean): number {
+  const T = pickTemperature(me, sit.pressure);
   const n = options.length;
   let vmax = -Infinity;
   pickW.length = n;
   for (let i = 0; i < n; i++) {
     const o = options[i]!;
-    const z = readError(plan, o, T0, sit.held);
+    const z = readError(plan, o, T, sit.since);
     // His commitment to what he is doing fades over TUNING.value.holdCap seconds with the puck.
     const v = o.value + (committed(o, plan) ? V.stick * (1 - sit.held / V.holdCap) : 0) + z;
     pickW[i] = v;
@@ -633,10 +638,12 @@ function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: 
     const w = dexp((pickW[i]! - vmax) / T);
     pickW[i] = w;
     const k = KIND_KEY[options[i]!.kind];
-    if (kindW[k] === 0) kinds++;
+    // A kind counts once it has weight (an underflowed weight adds nothing).
+    if (kindW[k] === 0 && w > 0) kinds++;
     kindW[k]! += w;
     total += w;
   }
+  if (!cap) return total;
   // The parity cap, in an ordinary state (no breakaway, odd-man rush, play behind the net or pressure down low, whose
   // rules narrow his list on purpose): with more than one kind on the list, no kind gets more than maxShare of the draw.
   let top = 0;

@@ -278,7 +278,17 @@ export const slotState: GameState = (() => {
   return st;
 })();
 
-/** Share of `kind` among 2,000 decideCarrier draws (seeds 1..2000) with `d` as the carrier in `state`. */
+/**
+ * His first look with the puck as a game makes it (brain.ts brainTick): a plan whose seed (his read of the play) is drawn
+ * from `rng` first, then decideCarrier with the same `rng`. The state's carrierPlan is put back afterwards.
+ */
+export function firstLook(state: GameState, me: PlayerDef, ds: Map<string, PlayerDef>, rng: Rng): Decision {
+  const keep = state.carrierPlan;
+  state.carrierPlan = { id: me.id, kind: 'carry', lane: null, toId: null, to: null, tick: state.tick, seed: Math.floor(rng.next() * 4294967296) };
+  try { return decideCarrier(state, me, ds, rng); } finally { state.carrierPlan = keep; }
+}
+
+/** Share of `kind` among 2,000 first looks (firstLook, seeds 1..2000) with `d` as the carrier in `state`. */
 export function rate(kind: Decision['kind'], d: PlayerDef, state: GameState): number {
   const id = state.carrierId!;
   const carrier = state.skaters.find((s) => s.id === id)!;
@@ -286,7 +296,7 @@ export function rate(kind: Decision['kind'], d: PlayerDef, state: GameState): nu
   const ds = new Map(defs);
   ds.set(id, me);
   let n = 0;
-  for (let seed = 1; seed <= 2000; seed++) if (decideCarrier(state, me, ds, createRng(seed)).kind === kind) n++;
+  for (let seed = 1; seed <= 2000; seed++) if (firstLook(state, me, ds, createRng(seed)).kind === kind) n++;
   return n / 2000;
 }
 

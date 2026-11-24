@@ -7,9 +7,9 @@ import { crossesEndBox } from '../src/lanes';
 import { DT } from '../src/constants';
 import { createRng } from '../src/rng';
 import type { GameState, PlayerDef, SkaterState } from '../src/types';
-import { def, defs, place, playmaker, skater, slotState, sniper, stateWith } from './helpers';
+import { def, defs, firstLook, place, playmaker, skater, slotState, sniper, stateWith } from './helpers';
 
-/** decideCarrier for seeds 1..n with `d` (given the carrier's id and slot) as the carrier in `st`. */
+/** His first look (helpers.ts firstLook: the seeded path a game takes) for seeds 1..n with `d` (given the carrier's id and slot) as the carrier in `st`. */
 function decisions(st: GameState, d: PlayerDef, n: number): Decision[] {
   const id = st.carrierId!;
   const carrier = st.skaters.find((s) => s.id === id)!;
@@ -17,7 +17,7 @@ function decisions(st: GameState, d: PlayerDef, n: number): Decision[] {
   const ds = new Map(defs);
   ds.set(id, me);
   const out: Decision[] = [];
-  for (let seed = 1; seed <= n; seed++) out.push(decideCarrier(st, me, ds, createRng(seed)));
+  for (let seed = 1; seed <= n; seed++) out.push(firstLook(st, me, ds, createRng(seed)));
   return out;
 }
 const skaterById = (st: GameState, id: string): SkaterState => st.skaters.find((s) => s.id === id)!;
@@ -115,7 +115,7 @@ describe('the carrier values his options', () => {
     const me = { ...def({ iq: 99, poise: 99 }), id: 'home-RW', position: 'RW' as const };
     const sit = readSituation(st, skater(st, 'home', 'RW'));
     const opts: Option[] = [{ kind: 'protect', value: 0 }, { kind: 'carry', lane: 'net', to: { x: 0, y: 0 }, value: 0.5 }, { kind: 'carry', lane: 'wide', to: { x: 0, y: 0 }, value: 0.4 }];
-    expect(topKindShare(opts, me, sit, null)).toBeCloseTo(0.97, 9);
+    expect(topKindShare(opts, me, sit, null)).toBeGreaterThan(0.97); expect(topKindShare(opts, me, sit, null, true)).toBeCloseTo(0.97, 9);
     let protect = 0;
     for (let seed = 1; seed <= 4000; seed++) if (chooseOption(opts, me, sit, null, createRng(seed)).kind === 'protect') protect++;
     expect(protect / 4000).toBeGreaterThan(0.02); expect(protect / 4000).toBeLessThan(0.04);
