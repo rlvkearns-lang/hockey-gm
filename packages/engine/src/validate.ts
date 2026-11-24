@@ -54,6 +54,7 @@ function checkPlayer(team: TeamDef, p: PlayerDef): void {
   inRange(who, 'bad-form', 'form', p.form, -1, 1);
   inRange(who, 'bad-morale', 'morale', p.morale, -1, 1);
   inRange(who, 'bad-fatigue', 'fatigue', p.fatigue, 0, 1);
+  if (p.shoots !== 'L' && p.shoots !== 'R') fail('bad-player', `${who}: shoots must be 'L' or 'R', got ${String(p.shoots)}`);
   if (p.catches !== undefined && p.catches !== 'L' && p.catches !== 'R') fail('bad-player', `${who}: catches must be 'L' or 'R', got ${String(p.catches)}`);
 }
 

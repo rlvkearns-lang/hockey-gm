@@ -97,7 +97,8 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   it('A3: passes are completed 75% to 92% of the time (was 86.5%)', () => { expect(m().passCompletion).toBeGreaterThan(0.75); expect(m().passCompletion).toBeLessThan(0.92); }, 60_000);
   // A pickup: a loose puck or a pass taken (tryPickup) or a pass picked off; the move beyond the puck's own travel that
   // tick. Contest hand-overs (races, battles) have their own measures.
-  it('A3: a pickup moves the puck at most 1.2 m', () => { expect(counters().pickupSnapMax).toBeLessThanOrEqual(1.2); }, 60_000);
+  // Task 6 review, Minor 8: the carried puck's step limit keeps it to about 0.4 m (it read 1.18 before that limit).
+  it('A3: a pickup moves the puck at most 0.6 m beyond its own travel', () => { expect(counters().pickupSnapMax).toBeLessThanOrEqual(0.6); }, 60_000);
   // At 1763a70, 1 to 3 goals a game came from a pass, rim or clear that slid in with no shot (1.6 a game over seeds 1-8;
   // 0.375 after the Task 5 review fixes, 0 or 1 in eight games after Task 6).
   it('A3: a pass almost never slides into the net: at most one goal in seeds 1-8 from a pass, rim, dump or clear with no shot', () => {
