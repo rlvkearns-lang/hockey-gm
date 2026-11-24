@@ -42,6 +42,8 @@ export type Decision =
 
 const T = TUNING.brain;
 const optionScratch: Option[] = [];
+/** A protecting carrier's target stays at least this far (m) on the puck's side of a goal line. */
+const PROTECT_OFF_LINE = 0.6;
 /** Holding behind the net, he faces the slot at this rx. */
 const HOLD_FACE_RX = 20;
 /** brainTick's copy of the carrier's situation (written by decideCarrier, read for his carry speed). */
@@ -227,6 +229,10 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
       // Shielding it he never backs over the blue line with a teammate still in the zone (Task 8b: 20 of 47 offsides in
       // four games were a protecting carrier backing in).
       if (carryOffside(state, s, defs, s.target)) s.target.x = (RINK.blueLineX - T.holdUpGap) * state.attackDir[s.side];
+      // Nor across a goal line: backing round a post left the puck on the other side of the net frame from his blade
+      // (Task 8b: 2.8 m from it, seed 12). He stays on the puck's side of the line.
+      const gl = RINK.goalLineX, px = state.puck.pos.x, behind = Math.abs(px) > gl;
+      if ((Math.abs(s.target.x) > gl) !== behind) s.target.x = (px >= 0 ? 1 : -1) * (behind ? gl + PROTECT_OFF_LINE : gl - PROTECT_OFF_LINE);
       s.faceTarget = null;
       s.speedCap = T.protectSpeedCap;
       return;

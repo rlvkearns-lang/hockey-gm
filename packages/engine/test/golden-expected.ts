@@ -8,14 +8,14 @@ export const GOLDEN_EXPECTED: Record<number, Golden> = {
       "1:8b0d120264fb0259",
       "10:4b337b58e3441176",
       "100:9d287aa50604ec60",
-      "1000:f4819d89fb485c0a",
-      "10000:0fdc0d358c50baee",
-      "50000:240379975d0ca9f7",
-      "100000:8611278065cbb9c3"
+      "1000:f0a97cd13ae9587a",
+      "10000:45c47c33f19263e7",
+      "50000:cae4d658ee10b8bc",
+      "100000:87caad980e81f37a"
     ],
-    "final": "06ed100d9e8a2711",
-    "score": "2-1",
-    "events": 4460
+    "final": "9cf777c98c373ffe",
+    "score": "4-2",
+    "events": 4619
   },
   "42": {
     "roster": "1a569608feefa31c",
@@ -24,13 +24,13 @@ export const GOLDEN_EXPECTED: Record<number, Golden> = {
       "10:07e4328fcdf38e0b",
       "100:fee0226e35b0c71f",
       "1000:243babec771a716e",
-      "10000:54a93ab5bc4ec67a",
-      "50000:2ddbcccdf8acb4d3",
-      "100000:8a468c836c0c4fcc"
+      "10000:4778ce2b054dc465",
+      "50000:e46442cf8767d3d7",
+      "100000:781f7c970a5ce10b"
     ],
-    "final": "df0a68571641b5a2",
-    "score": "4-9",
-    "events": 4610
+    "final": "32203f233ec40ff9",
+    "score": "1-3",
+    "events": 4620
   },
   "123456": {
     "roster": "e2181b46075c2e03",
@@ -38,13 +38,13 @@ export const GOLDEN_EXPECTED: Record<number, Golden> = {
       "1:f4eb765676f1472c",
       "10:0547e7d7db9cbcce",
       "100:aec03f8837fe67e1",
-      "1000:c3105914a59f2554",
-      "10000:907b71584cf8a378",
-      "50000:9f8d5fb1071f7f98",
-      "100000:f3ca46bd5b53122d"
+      "1000:e28307b1e98552e9",
+      "10000:b9fb0a4f02311e9e",
+      "50000:149260befa35e4b5",
+      "100000:3466a1c3ccb5e36e"
     ],
-    "final": "c8374d7e26e66328",
-    "score": "2-1",
-    "events": 4694
+    "final": "df83d6d6d84c3f2a",
+    "score": "4-5",
+    "events": 4666
   }
 };

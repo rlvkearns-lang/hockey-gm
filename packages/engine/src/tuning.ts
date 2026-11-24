@@ -47,7 +47,12 @@ export const TUNING = deepFreeze({
     /** A shot's chance is scaled by openNetWeight[0] with the goalie square, up to the sum of both with him shaded openNetShade m off. */
     openNetWeight: [0.85, 0.5] as [number, number],
     openNetShade: 0.6,
-    /** A shot's chance is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
+    /**
+     * A shot's chance is scaled by calm (1 at no pressure) to this power. Task 8b, set from play (seeds 1-16, task-8b-report.md):
+     * a shooter with a man 1.8 to 3 m off scores as often as a free one in this engine (his shot is only a little wilder);
+     * what makes a shot poor is a checker in stick reach (TUNING.shot.rushed). It was 3.6, which valued those shots 3 to 4
+     * times too low.
+     */
     shootPressure: 0.6,
     /**
      * Largest share any one kind of option (all passing lanes together count as one kind, all carry lanes another) may
@@ -58,13 +63,18 @@ export const TUNING = deepFreeze({
     passRange: [2.5, 35] as [number, number],
     /** How far ahead (m) a carrier aims each carry decision outside the offensive zone. */
     carryAhead: 8,
-    /** Outside the offensive zone with a teammate wholly in it, he carries no closer than this (m) to the blue line. */
+    /**
+     * Outside the offensive zone with a teammate wholly in it, he carries (or backs away shielding it) no closer than this
+     * (m) to the blue line. Task 8b: 2 (was 1: the puck, 0.9 m ahead of him on his blade, slid over the line as he stopped).
+     */
     holdUpGap: 2,
     /** A teammate counts as in the zone if he will be wholly in it this many seconds from now at his speed. */
     offsideLookahead: 0.5,
     /**
      * The longer he has had the puck the more he wants to move it on: each second (TUNING.value.hold, at most holdCap)
-     * adds hold * holdBoost.shoot to a shot's value and hold * holdBoost.pass to a pass's (options.ts).
+     * adds hold * holdBoost.shoot to a shot's value and hold * holdBoost.pass to a pass's (options.ts). Task 8b: time with
+     * the puck no longer pushes him to shoot (shoot 0, was 0.3: with patience he waits for a look), and moves him to pass
+     * more (pass 6, was 2); in his first second with it (not settled) a pass is held back by `unsettled` instead.
      */
     holdBoost: { shoot: 0, pass: 6, unsettled: 1.33 },
     /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
@@ -115,6 +125,7 @@ export const TUNING = deepFreeze({
   /**
    * Jobs (jobs.ts): a man holding a job is keep (m) nearer its anchor than anyone else when the jobs are handed out
    * (keepNet for the net-front defender: the man at the net stays there rather than swapping with his partner).
+   * (keepNet was 6; Task 8b: 10, and the attackers' net-front man keeps his own job by keepNet too.)
    * openRadius (m): a skater getting open looks at 8 spots this far round his job's anchor (officeRadius behind the net).
    * reboundRange (m): a rebound loose within this far of the net is the net-front men's to go for (job-targets.ts).
    */
@@ -149,6 +160,12 @@ export const TUNING = deepFreeze({
    * his team offside costs `offside`; a dump from his own half (icing) costs `icing`; a rim or dump goes to his team
    * with a chance of raceBase + racePerMetre * (how much nearer his nearest teammate is than their nearest man), at
    * most raceMax.
+   * Task 8b (calibrated to play, task-8b-report.md): `goal` 0.13 -> 0.2 (free shooters scored 1.5 times what was valued;
+   * the rest of the 3.5 the Task 8 fit found was pressured shots, now valued through shootPressure and TUNING.shot.rushed),
+   * and TUNING.options.threat.shot with it (0.15 -> 0.23: a spot is worth the shot from it); `traffic` 0.02 -> 0.1 (a screen,
+   * a tip and a rebound with a man in front: point shots wait for traffic); pick.base 0.017 -> 0.0147 and pick.perPoint
+   * 0.0001 -> 0.00012 (the same spread for an average player on values that are now larger; a limited player errs more);
+   * `stick` 0.03 -> 0.034 and `hold` 0.002 -> 0.003 (kept in proportion to the larger values).
    */
   value: {
     noise: { persist: 0.95, readSeconds: 4 },
@@ -379,7 +396,8 @@ export const TUNING = deepFreeze({
       oneTimerRx: 18, wrapInside: 0.15, wrapSpread: 0.1,
       /**
        * A shooter turns his body up to setTurn rad per metre out toward his forehand as he winds up (Task 8: a
-       * backhand is a shot in tight with the net off his forehand, or with it well behind him).
+       * backhand is a shot in tight with the net off his forehand, or with it well behind him). Task 8b: 8 degrees a
+       * metre (was 10): with fewer rushed shots in tight, backhands had fallen to 3 to 6% of attempts.
        */
       setTurn: (8 * Math.PI) / 180,
     },
@@ -473,7 +491,7 @@ export const TUNING = deepFreeze({
      */
     rebound: {
       heldFrom: 25, heldPerSpeed: 0.004, heldScreened: 0.08, heldTipped: 0.12,
-      steered: { base: 0.24, perPoint: 0.005, tipped: 0.1 },
+      steered: { base: 0.35, perPoint: 0.005, tipped: 0.1 },
       steeredSpeed: [6, 9] as [number, number],
       steeredAngle: [(55 * Math.PI) / 180, (80 * Math.PI) / 180] as [number, number],
       speed: [2.5, 6] as [number, number],
