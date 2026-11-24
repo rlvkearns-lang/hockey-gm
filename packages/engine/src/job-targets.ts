@@ -6,16 +6,33 @@
  * attacks (goal line 27.13, blue line 7.62), ly to his left; `ps` is the puck's side (`ly >= 0 ? 1 : -1`). A defending
  * job's spots therefore have negative rx (his own net is at rx -27.13).
  */
-import { composite } from './attributes';
+import { composite as composite_ } from './attributes';
 import { DT } from './constants';
-import { dangerMan, laneOpen, laneWidth, spaceAt } from './lanes';
-import { clipToNets, RINK, resolveBoards, resolveNets } from './rink';
+import { dangerMan as dangerMan_, laneOpen as laneOpen_, laneWidth as laneWidth_, spaceAt as spaceAt_ } from './lanes';
+import { clipToNets as clipToNets_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_ } from './rink';
 import { TUNING } from './tuning';
 import type { GameState, Job, PlayerDef, Side, SkaterState, Tactics } from './types';
 import type { Want } from './commit';
-import { indexOf } from './commit';
-import { carrierOf, clamp } from './util';
+import { indexOf as indexOf_ } from './commit';
+import { carrierOf as carrierOf_, clamp as clamp_ } from './util';
 import type { Vec2 } from './vec';
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const composite = composite_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const carrierOf = carrierOf_;
+const clamp = clamp_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const indexOf = indexOf_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const clipToNets = clipToNets_;
+const RINK = RINK_;
+const resolveBoards = resolveBoards_;
+const resolveNets = resolveNets_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const dangerMan = dangerMan_;
+const laneOpen = laneOpen_;
+const laneWidth = laneWidth_;
+const spaceAt = spaceAt_;
 
 // Local copies of vec.ts helpers (hot loops: a call across modules costs more under the test runner's module wrapper).
 const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);
@@ -66,7 +83,7 @@ const NET_FRONT_BEHIND = 0.5;
 /** The net-front defender leads his man by this long (s). */
 const NET_FRONT_LEAD = 0.5;
 /** Where the net-front defender tries to stand: (m along the line from his man to the net, m beside it), in turn, until one is this far (m) from his goalie. */
-const NET_FRONT_TRIES: readonly (readonly [number, number])[] = [[0.9, 0.4], [1.0, 0], [0.9, -0.4]];
+const NET_FRONT_TRIES: readonly (readonly [number, number])[] = [[1.0, 0], [0.9, 0.4], [0.9, -0.4]];
 const NET_FRONT_GOALIE = 1.0;
 /** The centre covers the low man in his own zone when he is within this far (m) of the slot. */
 const LOW_MAN_RANGE = 6;

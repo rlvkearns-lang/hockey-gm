@@ -10,12 +10,18 @@
  * His effort (how hard he skates: speedFor gives his speedCap), how he slows and whether he skates through his target
  * follow his need every tick; they are kept in his plan so that game.ts moves him as his plan says.
  */
-import { DT } from './constants';
-import { zoneOf } from './rink';
-import { TUNING } from './tuning';
+import { DT as DT_ } from './constants';
+import { zoneOf as zoneOf_ } from './rink';
+import { TUNING as TUNING_ } from './tuning';
 import type { Effort, GameState, Job, ReplanReason, Side, SkaterPlan, SkaterState, SlowMode, TeamPhase, TeamPhaseState } from './types';
-import { carrierOf, SIDES } from './util';
+import { carrierOf as carrierOf_, SIDES as SIDES_ } from './util';
 import type { Vec2 } from './vec';
+// Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
+const DT = DT_;
+const zoneOf = zoneOf_;
+const TUNING = TUNING_;
+const carrierOf = carrierOf_;
+const SIDES = SIDES_;
 
 const C = TUNING.commit;
 const E = TUNING.effort;

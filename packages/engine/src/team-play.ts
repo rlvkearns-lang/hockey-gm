@@ -1,17 +1,42 @@
 import { PERIODS } from './constants';
-import { RINK, resolveBoards, resolveNets } from './rink';
+import { RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_ } from './rink';
 import { TUNING } from './tuning';
 import type { GameState, Job, PlayerDef, ReplanReason, Side, SkaterPlan, SkaterState, Tactics, TeamPhase } from './types';
 
 export type { TeamPhase } from './types';
 import { dist, type Vec2 } from './vec';
-import { carrierOf } from './util';
+import { carrierOf as carrierOf_ } from './util';
 import type { Drive } from './skating';
-import { commitTo, effortToReach, holding, holdJob, rawPhase, setFace, shapePhase, speedFor, triggerFor, updateTeamPhase, type ShapePhase, type Want } from './commit';
-import { assignTeamJobs, boardBattle, supportTarget } from './jobs';
-import { beginMarks, endMarks, isCoverJob, jobWant } from './job-targets';
+import { commitTo as commitTo_, effortToReach as effortToReach_, holding as holding_, holdJob as holdJob_, rawPhase as rawPhase_, setFace as setFace_, shapePhase, speedFor as speedFor_, triggerFor as triggerFor_, updateTeamPhase as updateTeamPhase_, type ShapePhase, type Want } from './commit';
+import { assignTeamJobs as assignTeamJobs_, boardBattle as boardBattle_, supportTarget as supportTarget_ } from './jobs';
+import { beginMarks as beginMarks_, endMarks as endMarks_, isCoverJob as isCoverJob_, jobWant as jobWant_ } from './job-targets';
 
 export { supportTarget } from './jobs';
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const carrierOf = carrierOf_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const beginMarks = beginMarks_;
+const endMarks = endMarks_;
+const isCoverJob = isCoverJob_;
+const jobWant = jobWant_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const assignTeamJobs = assignTeamJobs_;
+const boardBattle = boardBattle_;
+const supportTarget = supportTarget_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const RINK = RINK_;
+const resolveBoards = resolveBoards_;
+const resolveNets = resolveNets_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const commitTo = commitTo_;
+const effortToReach = effortToReach_;
+const holding = holding_;
+const holdJob = holdJob_;
+const rawPhase = rawPhase_;
+const setFace = setFace_;
+const speedFor = speedFor_;
+const triggerFor = triggerFor_;
+const updateTeamPhase = updateTeamPhase_;
 
 const BLUE = RINK.blueLineX;
 /** Attackers without the puck wait this far (m) outside the offensive blue line until the puck is in. */

@@ -1,15 +1,40 @@
-import { executeDump, executePass, executeShot, goalieShade, pressureOn } from './actions';
-import { composite } from './attributes';
-import { BRAIN_INTERVAL_TICKS, DT, PERIOD_SECONDS, PERIODS } from './constants';
-import { RINK, zoneOf } from './rink';
-import { TUNING } from './tuning';
-import { isTiedUp, scoreMargin, steeredByContest } from './team-play';
-import { bodyRadius } from './skating';
+import { executeDump as executeDump_, executePass as executePass_, executeShot as executeShot_, goalieShade as goalieShade_, pressureOn as pressureOn_ } from './actions';
+import { composite as composite_ } from './attributes';
+import { BRAIN_INTERVAL_TICKS as BRAIN_INTERVAL_TICKS_, DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
+import { RINK as RINK_, zoneOf as zoneOf_ } from './rink';
+import { TUNING as TUNING_ } from './tuning';
+import { isTiedUp as isTiedUp_, scoreMargin as scoreMargin_, steeredByContest as steeredByContest_ } from './team-play';
+import { bodyRadius as bodyRadius_ } from './skating';
 import type { Rng } from './rng';
 import type { GameEvent, GameState, PlayerDef, SkaterState } from './types';
-import { dist, hypot2, segDistXY, type Vec2 } from './vec';
-import { dexp, dpow } from './dmath';
-import { clamp, findSkater } from './util';
+import { dist as dist_, hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
+import { dexp as dexp_, dpow as dpow_ } from './dmath';
+import { clamp as clamp_, findSkater as findSkater_ } from './util';
+// Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
+const executeDump = executeDump_;
+const executePass = executePass_;
+const executeShot = executeShot_;
+const goalieShade = goalieShade_;
+const pressureOn = pressureOn_;
+const composite = composite_;
+const BRAIN_INTERVAL_TICKS = BRAIN_INTERVAL_TICKS_;
+const DT = DT_;
+const PERIOD_SECONDS = PERIOD_SECONDS_;
+const PERIODS = PERIODS_;
+const RINK = RINK_;
+const zoneOf = zoneOf_;
+const TUNING = TUNING_;
+const isTiedUp = isTiedUp_;
+const scoreMargin = scoreMargin_;
+const steeredByContest = steeredByContest_;
+const bodyRadius = bodyRadius_;
+const dist = dist_;
+const hypot2 = hypot2_;
+const segDistXY = segDistXY_;
+const dexp = dexp_;
+const dpow = dpow_;
+const clamp = clamp_;
+const findSkater = findSkater_;
 
 export type Decision =
   | { kind: 'carry'; to: Vec2 }

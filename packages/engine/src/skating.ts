@@ -1,8 +1,16 @@
-import { resolveBoards } from './rink';
-import { TUNING } from './tuning';
-import { hypot2 } from './vec';
+import { resolveBoards as resolveBoards_ } from './rink';
+import { TUNING as TUNING_ } from './tuning';
+import { hypot2 as hypot2_ } from './vec';
 import type { PlayerDef, SkaterState, SlowMode } from './types';
-import { datan2, dcos, dexp, dsin } from './dmath';
+import { datan2 as datan2_, dcos as dcos_, dexp as dexp_, dsin as dsin_ } from './dmath';
+// Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
+const resolveBoards = resolveBoards_;
+const TUNING = TUNING_;
+const hypot2 = hypot2_;
+const datan2 = datan2_;
+const dcos = dcos_;
+const dexp = dexp_;
+const dsin = dsin_;
 
 export type Movement = {
   topSpeed: number;

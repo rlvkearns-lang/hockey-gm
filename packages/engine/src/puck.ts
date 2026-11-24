@@ -1,8 +1,16 @@
 import type { Vec2 } from './vec';
-import { RINK, resolveBoards } from './rink';
-import { hypot2 } from './vec';
-import { dexp, hypot3 } from './dmath';
-import { GRAVITY, PUCK_RADIUS } from './util';
+import { RINK as RINK_, resolveBoards as resolveBoards_ } from './rink';
+import { hypot2 as hypot2_ } from './vec';
+import { dexp as dexp_, hypot3 as hypot3_ } from './dmath';
+import { GRAVITY as GRAVITY_, PUCK_RADIUS as PUCK_RADIUS_ } from './util';
+// Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
+const RINK = RINK_;
+const resolveBoards = resolveBoards_;
+const hypot2 = hypot2_;
+const dexp = dexp_;
+const hypot3 = hypot3_;
+const GRAVITY = GRAVITY_;
+const PUCK_RADIUS = PUCK_RADIUS_;
 
 export type Puck = { pos: Vec2; z: number; vel: Vec2; vz: number };
 

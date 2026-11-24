@@ -3,13 +3,25 @@
  * (the utility jobs aside); a man keeps his job while he is inside its hold (commit.ts) and is TUNING.jobs.keep nearer
  * its anchor than anyone else after it, so jobs are sticky without being fixed.
  */
-import { committedPhase, indexOf, inHold, triggerFor } from './commit';
-import { jobAnchor } from './job-targets';
-import { boardsNormal, RINK } from './rink';
+import { committedPhase as committedPhase_, indexOf as indexOf_, inHold as inHold_, triggerFor as triggerFor_ } from './commit';
+import { jobAnchor as jobAnchor_ } from './job-targets';
+import { boardsNormal as boardsNormal_, RINK as RINK_ } from './rink';
 import { TUNING } from './tuning';
 import type { ContestStateOf, GameState, Job, PlayerDef, Side, SkaterState, Tactics } from './types';
-import { carrierOf } from './util';
+import { carrierOf as carrierOf_ } from './util';
 import type { Vec2 } from './vec';
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const carrierOf = carrierOf_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const boardsNormal = boardsNormal_;
+const RINK = RINK_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const jobAnchor = jobAnchor_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const committedPhase = committedPhase_;
+const indexOf = indexOf_;
+const inHold = inHold_;
+const triggerFor = triggerFor_;
 
 // Local copies of vec.ts helpers (hot loops: a call across modules costs more under the test runner's module wrapper).
 const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);

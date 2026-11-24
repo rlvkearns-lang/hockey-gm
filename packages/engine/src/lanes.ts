@@ -3,11 +3,15 @@
  * is open, whether a skater has a clear path to the net, and which teammate is the carrier's most dangerous option.
  * "Standing opponents" are the other side's on-ice skaters who are not down (goalies are not counted).
  */
-import { dexp } from './dmath';
-import { RINK } from './rink';
+import { dexp as dexp_ } from './dmath';
+import { RINK as RINK_ } from './rink';
 import { TUNING } from './tuning';
 import type { GameState, Side, SkaterState } from './types';
 import type { Vec2 } from './vec';
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const RINK = RINK_;
+// Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
+const dexp = dexp_;
 
 // Local copies of vec.ts helpers (hot loops: a call across modules costs more under the test runner's module wrapper).
 const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);

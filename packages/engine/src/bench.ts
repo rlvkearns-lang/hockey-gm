@@ -1,15 +1,30 @@
-import { PERIOD_SECONDS } from './constants';
-import { gameEvent } from './events';
-import { faceoffPosition } from './faceoff';
-import { zoneOf } from './rink';
-import { movementOf } from './skating';
-import { phaseFor } from './team-play';
-import { holdJob, indexOf } from './commit';
-import { TUNING } from './tuning';
+import { PERIOD_SECONDS as PERIOD_SECONDS_ } from './constants';
+import { gameEvent as gameEvent_ } from './events';
+import { faceoffPosition as faceoffPosition_ } from './faceoff';
+import { zoneOf as zoneOf_ } from './rink';
+import { movementOf as movementOf_ } from './skating';
+import { phaseFor as phaseFor_ } from './team-play';
+import { holdJob as holdJob_, indexOf as indexOf_ } from './commit';
+import { TUNING as TUNING_ } from './tuning';
 import type { BenchState, BenchUnit, GameEvent, GameSetup, GameState, Position, Side, SkaterState } from './types';
-import { hypot2, type Vec2 } from './vec';
-import { dexp, dlog } from './dmath';
-import { SIDES, skaterById } from './util';
+import { hypot2 as hypot2_, type Vec2 } from './vec';
+import { dexp as dexp_, dlog as dlog_ } from './dmath';
+import { SIDES as SIDES_, skaterById as skaterById_ } from './util';
+// Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
+const PERIOD_SECONDS = PERIOD_SECONDS_;
+const gameEvent = gameEvent_;
+const faceoffPosition = faceoffPosition_;
+const zoneOf = zoneOf_;
+const movementOf = movementOf_;
+const phaseFor = phaseFor_;
+const holdJob = holdJob_;
+const indexOf = indexOf_;
+const TUNING = TUNING_;
+const hypot2 = hypot2_;
+const dexp = dexp_;
+const dlog = dlog_;
+const SIDES = SIDES_;
+const skaterById = skaterById_;
 
 export type Unit = 'forwards' | 'defence';
 

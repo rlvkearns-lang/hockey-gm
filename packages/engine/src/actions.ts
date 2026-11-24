@@ -1,14 +1,30 @@
-import { DT } from './constants';
-import { RINK } from './rink';
+import { DT as DT_ } from './constants';
+import { RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
-import { nearestOpponentDist, steeredByContest } from './team-play';
-import { TUNING } from './tuning';
-import { watchTurnover } from './turnovers';
-import { gameEvent } from './events';
+import { nearestOpponentDist as nearestOpponentDist_, steeredByContest as steeredByContest_ } from './team-play';
+import { TUNING as TUNING_ } from './tuning';
+import { watchTurnover as watchTurnover_ } from './turnovers';
+import { gameEvent as gameEvent_ } from './events';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
-import { hypot2, segDistXY, type Vec2 } from './vec';
-import { datan2, dcos, dsin } from './dmath';
-import { clamp, GRAVITY, skaterById } from './util';
+import { hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
+import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
+import { clamp as clamp_, GRAVITY as GRAVITY_, skaterById as skaterById_ } from './util';
+// Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
+const DT = DT_;
+const RINK = RINK_;
+const nearestOpponentDist = nearestOpponentDist_;
+const steeredByContest = steeredByContest_;
+const TUNING = TUNING_;
+const watchTurnover = watchTurnover_;
+const gameEvent = gameEvent_;
+const hypot2 = hypot2_;
+const segDistXY = segDistXY_;
+const datan2 = datan2_;
+const dcos = dcos_;
+const dsin = dsin_;
+const clamp = clamp_;
+const GRAVITY = GRAVITY_;
+const skaterById = skaterById_;
 
 /** After a release (draw, pass, shot, dump), the releasing players cannot pick the puck up again for this long. */
 export const RELEASE_NO_PICKUP_SECONDS = 0.3;

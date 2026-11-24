@@ -1,10 +1,20 @@
-import { gameEvent } from './events';
-import { stopPlay } from './faceoff';
-import { FACEOFF_DOTS, RINK } from './rink';
-import { bodyRadius, movementOf } from './skating';
+import { gameEvent as gameEvent_ } from './events';
+import { stopPlay as stopPlay_ } from './faceoff';
+import { FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_ } from './rink';
+import { bodyRadius as bodyRadius_, movementOf as movementOf_ } from './skating';
 import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
 import type { Vec2 } from './vec';
-import { findSkater, PUCK_RADIUS, SIDES } from './util';
+import { findSkater as findSkater_, PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
+// Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
+const gameEvent = gameEvent_;
+const stopPlay = stopPlay_;
+const FACEOFF_DOTS = FACEOFF_DOTS_;
+const RINK = RINK_;
+const bodyRadius = bodyRadius_;
+const movementOf = movementOf_;
+const findSkater = findSkater_;
+const PUCK_RADIUS = PUCK_RADIUS_;
+const SIDES = SIDES_;
 
 const BLUE = RINK.blueLineX;
 const GOAL = RINK.goalLineX;

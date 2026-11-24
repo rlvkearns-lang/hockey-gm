@@ -1,7 +1,10 @@
 import type { Movement } from './skating';
-import { TUNING } from './tuning';
+import { TUNING as TUNING_ } from './tuning';
 import type { GoalieState, SkaterState } from './types';
-import { hypot2 } from './vec';
+import { hypot2 as hypot2_ } from './vec';
+// Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
+const TUNING = TUNING_;
+const hypot2 = hypot2_;
 
 /** Reused per call so the pair loop looks movement up once per skater, not once per pair. */
 const scratch: (Movement | null)[] = [];
