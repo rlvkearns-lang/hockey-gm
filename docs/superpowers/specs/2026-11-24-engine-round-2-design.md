@@ -99,6 +99,8 @@ Found: of board battles with a winner who is given the puck, 49 of 51 hand it to
 - At the net front the defender plays between the attacker and the net.
 - A landed hit has degrees: a bump, a stagger (loses a step, keeps his feet) or a knockdown, by speed, weight, balance and whether he saw it coming. A much heavier man is rarely put down.
 - The poke checker reaches from a stick length away, not from on top of the puck.
+- Battling for position is constant, on and off the puck. The owner: "in the NHL players are always battling for position or puck, constantly being tied up or pushed around; here sometimes players just bounce around each other." When two opponents come together they engage instead of bouncing apart: a defender ties up a man's stick or body, boxes him out from the net or the puck, leans on him and rides him off his line; the attacker fights through, spins off or holds his ground. **[my call]** This is a light, continuous "engagement" between two players (who has inside position, how tied up each is), cheaper than a staged contest, decided by strength, balance, compete and leverage with the usual luck. It slows both men, limits what the tied-up man can do (receive a pass, get a shot or a stick on a rebound) and can turn into a staged board or net-front battle when the puck arrives. The engine reports it in state so the viewer can draw the lean and the shove.
+- Body contact no longer simply pushes players apart; separation happens when someone wins position or disengages.
 - Parity stays: the stronger man wins more often, never always.
 
 ### A6. Team tactics
