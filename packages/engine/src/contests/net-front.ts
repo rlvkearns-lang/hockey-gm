@@ -95,7 +95,13 @@ export const netFrontContest: Contest<'netFront'> = {
     const over = carrier === att || (carrier !== null && carrier.side !== att.side)
       || (carrier === null && state.pendingPass === null)
       || zoneOf(state.puck.pos.x, state.attackDir[att.side]) !== 'O'
-      || (c.stage !== 'tied' && dist(att.pos, netFrontSpot(state, att.side, spotScratch)) > LEAVE_RANGE);
+      || (c.stage !== 'tied' && dist(att.pos, netFrontSpot(state, att.side, spotScratch)) > LEAVE_RANGE)
+      // (Task 12 close-out: one round decides a battle: it is over once what the round won, the screen or the tie-up, has
+      // run its EFFECT_SECONDS; the two may start another after the cooldown. Before, a battle ran on until the puck
+      // moved, and an attacker's win (screen, rebound edge) was what usually moved it, while a tied-up attacker kept
+      // drawing rounds until he won one: forwards were credited with 0.74 of net-front battles against defencemen with
+      // rounds near even (mean rating edge +1), and some style pairs over 0.8.)
+      || ((c.stage === 'free' || c.stage === 'tied') && c.stageT >= EFFECT_SECONDS - STAGE_EPS);
     if (over) {
       setCooldown(state, att.id, KIND, T.cooldownSeconds);
       setCooldown(state, def.id, KIND, T.cooldownSeconds);

@@ -21,6 +21,8 @@ import { bladePos } from '../src/blade';
 import { DT } from '../src/constants';
 import type { GameEvent, GameSetup, GameState, PlayerDef, Side, SkaterState } from '../src/types';
 import { gameSetup } from './helpers';
+import { generateTeam } from '../src/roster-gen';
+import type { Tactics } from '../src/types';
 
 /** Raw sums over one game; every field is a count or a sum so games add up field by field. */
 export type PlayCounters = Record<PlayCounterKey, number>;
@@ -625,7 +627,14 @@ export function createObserver(setup: GameSetup): Observer {
         const b = bladePos(cs.pos, cs.facing, shoots.get(cs.id) === 1 ? 'L' : 'R', bladeAt);
         excess = Math.max(0, move - vmax * DT) + Math.hypot(b.x - p.pos.x, b.y - p.pos.y);
         limit = HAND_OVER;
-      } else excess = move - vmax * DT;
+      } else {
+        // (Task 12 close-out: a board battle's winner coming away with it moves it toward his blade a carried step a tick
+        // (board-battle.ts holdPuck: his speed times DT plus BLADE_TURN, 0.2 m), with no carrier yet: read as a carry. On
+        // seed 1 after the close-out the first such step, 0.21 m, met the back of the net and slowed to 3.6 m/s within the tick.)
+        const bb = st.contests.find((k) => k.kind === 'boardBattle' && k.stage === 'resolve');
+        const w = bb !== undefined && bb.kind === 'boardBattle' && bb.roles.winner !== null ? skaterById(st, bb.roles.winner) : undefined;
+        excess = w !== undefined ? move - Math.max(vmax, speedOf(w.vel)) * DT - CARRY_TURN : move - vmax * DT;
+      }
       if (excess > limit + 1e-9) c.puckJumpTicks++;
       if (excess > maxJump) maxJump = excess;
     }
@@ -747,6 +756,34 @@ const observeSeed = (seed: number): { counters: PlayCounters; maxPuckJump: numbe
 /** Plays `gameSetup(seed)` for each seed under an observer (each seed once per process). */
 export function measureGames(seeds: number[]): PlayMeasures {
   return measuresOf(seeds.map(observeSeed));
+}
+
+/** Generated team pairs (teams 2k+1 v 2k+2, k = 1..CERTAINTY_PAIRS) for the certainty guards (Task 12 close-out). */
+export const CERTAINTY_PAIRS = 6;
+const pairCache = new Map<string, number>();
+/**
+ * Certainty before the cap (normalCertain / normalDecisionPoints) for each of CERTAINTY_PAIRS generated team pairs, games
+ * seeds 1 and 2 pooled per pair, with tactics `t` for the home team (and the away team too with `both`) (Task 12
+ * close-out ruling 1: read over many rosters, not one pair that happens to sit high).
+ */
+export function pairCertainty(t: Partial<Tactics> = {}, both = false): number[] {
+  const out: number[] = [];
+  for (let k = 1; k <= CERTAINTY_PAIRS; k++) {
+    const key = JSON.stringify([t, both, k]);
+    let v = pairCache.get(key);
+    if (v === undefined) {
+      const home = generateTeam(2 * k + 1, 'A', 'AAA'), away = generateTeam(2 * k + 2, 'B', 'BBB');
+      let a = 0, b = 0;
+      for (const seed of [1, 2]) {
+        const s: GameSetup = { home: { ...home, tactics: { ...home.tactics, ...t } }, away: both ? { ...away, tactics: { ...away.tactics, ...t } } : away, seed, chemistry: [] };
+        const c = observeGame(s).counters; a += c.normalCertain; b += c.normalDecisionPoints;
+      }
+      v = a / b;
+      pairCache.set(key, v);
+    }
+    out.push(v);
+  }
+  return out;
 }
 
 /** The same games' counters, summed field by field. */

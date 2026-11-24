@@ -57,17 +57,20 @@ describe('hits', () => {
     const big = share(2000, () => runHit(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), def({ balance: 62, strength: 60, weightKg: 80 }), 6));
     const small = share(2000, () => runHit(def({ bodyChecking: 60, strength: 58, weightKg: 78 }), def({ balance: 88, strength: 90, weightKg: 104 }), 6));
     expect(big).toBeGreaterThan(small + 0.2); expect(small).toBeGreaterThanOrEqual(0.1);
-    // true rate is about 0.83 (below the 0.9 parity cap); 0.92 allows sampling noise over 2,000 trials
-    expect(big).toBeLessThanOrEqual(0.92);
+    // true rate is about 0.71 (below the 0.9 parity cap); 0.8 allows sampling noise over 2,000 trials
+    expect(big).toBeLessThanOrEqual(0.8);
     // The rule itself, without noise. Task 12 rescaled the momentum term (scale 12 -> 30, owner steer): this strong
-    // matchup at 6 m/s is about 0.83, no longer the 0.9 cap; only an extreme one at high speed nears the cap.
-    expect(hitChance(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), skaterState({}), def({ balance: 62, strength: 60, weightKg: 80 }), skaterState({}), 6)).toBeCloseTo(0.8341, 4);
+    // matchup at 6 m/s was about 0.83. Task 12 close-out (style parity, the owner's rule that the power forward does not
+    // always win): momentumScale 50 and attrScale 0.5, so it is about 0.71.
+    expect(hitChance(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), skaterState({}), def({ balance: 62, strength: 60, weightKg: 80 }), skaterState({}), 6)).toBeCloseTo(0.7062, 4);
   });
-  it('an ordinary mismatch at ordinary speed is a clear edge, an extreme one at speed nears the cap', () => {
+  it('an ordinary mismatch at ordinary speed is an edge, an extreme one at speed a big one, still short of the cap', () => {
+    // (Task 12 close-out: momentumScale 50 and attrScale 0.5 for style parity: ordinary 0.58 (was 0.6-0.8), extreme 0.75
+    // (was 0.85-0.9).)
     const ordinary = hitChance(def({ weightKg: 95, bodyChecking: 75 }), skaterState({}), def({ weightKg: 85 }), skaterState({}), 5);
-    expect(ordinary).toBeGreaterThan(0.6); expect(ordinary).toBeLessThan(0.8);
+    expect(ordinary).toBeGreaterThan(0.55); expect(ordinary).toBeLessThan(0.8);
     const extreme = hitChance(def({ weightKg: 104, bodyChecking: 85, strength: 85 }), skaterState({}), def({ weightKg: 75, balance: 60, strength: 60 }), skaterState({}), 9);
-    expect(extreme).toBeGreaterThan(0.85); expect(extreme).toBeLessThanOrEqual(0.9);
+    expect(extreme).toBeGreaterThan(0.7); expect(extreme).toBeLessThanOrEqual(0.9);
   });
   it('a failed hit does not always bounce the hitter off, even when he was the big favourite', () => {
     const o = hitOutcomes(def({ weightKg: 104, bodyChecking: 95, strength: 95 }), def({ weightKg: 75, balance: 50, strength: 50 }), 8, 1500);

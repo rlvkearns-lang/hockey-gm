@@ -1,6 +1,7 @@
 import { hasBadge } from '../badges';
 import { planOf } from '../commit';
 import { recordTouch } from '../actions';
+import { DT } from '../constants';
 import { bladePos } from '../blade';
 import { movementOf } from '../skating';
 import { sitBack } from '../team-play';
@@ -194,7 +195,10 @@ function finish(c: ContestStateOf<'pokeCheck'>, ctx: ContestCtx, checker: Skater
   // it was no take: it is raked loose toward him.
   const pk = state.puck.pos;
   const blade = bladePos(checker.pos, checker.facing, ctx.defs.get(checker.id)!.shoots, bladeScratch);
-  const far = outcome === 'take' && hypot2(blade.x - pk.x, blade.y - pk.y) > TAKE_REACH;
+  // (Task 12 close-out: less how far he moves this tick, as the hand-over is read after it: a take decided at 1.19 m on
+  // seed 12 ended over 1.2 m from his blade, a jump.)
+  const reach = TAKE_REACH - hypot2(checker.vel.x, checker.vel.y) * DT;
+  const far = outcome === 'take' && hypot2(blade.x - pk.x, blade.y - pk.y) > reach;
   if (far) { outcome = 'loose'; c.data.outcome = 'loose'; }
   if (outcome === 'beaten') {
     dropParticipant(state, c, carrier.id);

@@ -438,7 +438,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       tw.x = GOAL * dir; tw.y = 0;
       // (The men within TUNING.block.clearOfShooter of him cannot block it in flight: the checker on him is in `rush`.)
       const sw = laneWidth(state, side, p, tw, s.pos, TUNING.block.clearOfShooter);
-      traffic = netFrontMate(state, s);
+      const front = netFrontMate(state, s);
+      traffic = front !== null;
+      g *= shotBadgeFactor(state, s, me, defs, dNet, pressure, front);
       if (dNet >= FAR_SHOT) {
         // From the point (11 m or more, Task 7): a teammate in front of the net screens the goalie (V.traffic), and
         // without a lane (under TUNING.block.path of clear ice) a defender's block chance stops it.
@@ -756,13 +758,35 @@ function shotAfter(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<st
     + saved * (held * val(AF.held) + steered * val(AF.steered) + rebound * val(AF.rebound, ours / 0.5));
 }
 
-function netFrontMate(state: GameState, s: SkaterState): boolean {
+function netFrontMate(state: GameState, s: SkaterState): SkaterState | null {
   const nx = state.attackDir[s.side] * GOAL;
   for (const m of state.skaters) {
     if (!m.onIce || m.side !== s.side || m === s || m.downT > 0) continue;
-    if (hyp(m.pos.x - nx, m.pos.y) <= TRAFFIC_NEAR && planOf(state, m.id).job === 'netFront') return true;
+    if (hyp(m.pos.x - nx, m.pos.y) <= TRAFFIC_NEAR && planOf(state, m.id).job === 'netFront') return m;
   }
-  return false;
+  return null;
+}
+
+/**
+ * Task 12 close-out: the shot badges as execution plays them, so that the carrier's valuation matches it. Each factor
+ * is the badge's measured lift in the chance a shot scores (TUNING.badges.value, set from executed shots): a One-Timer
+ * man's one-timer, a Heavy Slapshot man's slapshot (from slapFrom m or more under slapPressure), a Quick Release man's
+ * shot by his pressure, a Net-Front Finisher's rebound shot, and a shot from the point with a Net-Front Finisher
+ * screening in front (his tips).
+ */
+function shotBadgeFactor(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, dNet: number, pressure: number, front: SkaterState | null): number {
+  const BV = TUNING.badges.value, ST = TUNING.shot.types;
+  let k = 1;
+  if (me.badges !== undefined && me.badges.length > 0) {
+    const ot = state.oneTimerTaken;
+    if (ot !== null && ot.id === s.id && state.tick - ot.tick <= ST.oneTimerTicks) { if (hasBadge(me, 'One-Timer')) k *= BV.oneTimer; }
+    else if (dNet >= ST.slapFrom && pressure < ST.slapPressure && hasBadge(me, 'Heavy Slapshot')) k *= BV.heavySlap;
+    if (hasBadge(me, 'Quick Release')) k *= 1 + BV.quickRelease * pressure;
+    const ls = state.lastSave;
+    if (ls !== null && ls.side !== s.side && (state.tick - ls.tick) * DT <= TUNING.rebound.windowSeconds && hasBadge(me, 'Net-Front Finisher')) k *= BV.finisherRebound;
+  }
+  if (front !== null && dNet >= FAR_SHOT) { const fd = defs.get(front.id); if (fd !== undefined && hasBadge(fd, 'Net-Front Finisher')) k *= BV.finisherScreen; }
+  return k;
 }
 
 /** Whether `m` is one of his team's point men (job pointStrong or pointWeak, or a defenceman at the point). */

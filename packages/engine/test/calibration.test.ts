@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { simulateGame } from '../src/game';
-import { battleWinShareByType, goalsPer60ByType, runGames, setup, summarise, winShare } from './helpers';
+import { battleWinShareByType, goalsPer60ByType, runGames, setup, styleParity, summarise, winShare } from './helpers';
 
 /**
  * 300 games of two overall-70 teams (fresh rosters every game), and 300 of a 76 against a 66, played on worker
@@ -10,6 +10,18 @@ import { battleWinShareByType, goalsPer60ByType, runGames, setup, summarise, win
 const GAMES_TIMEOUT = 900_000;
 
 describe('calibration', () => {
+  // Task 12 close-out ruling 3 (the owner's rule: "the power forward doesn't ALWAYS beat the two way guy"): over the 300
+  // games, for board battles, engagements, net-front battles and hits, no primary style wins more than 75% of its
+  // contests against another, judged on the pairs with 150 or more (the rest are too few to judge). At the close-out
+  // (160 games): largest board 0.72 (Power Forward v Playmaker), engagements 0.71 (PF v Speedster), net front 0.66 (PF v
+  // Offensive D), hits 0.71 (Enforcer v Offensive D).
+  it('style parity: no style wins over 75% of its board battles, engagements, net-front battles or hits against another', () => {
+    const sum: Record<string, number> = {};
+    for (const r of runGames(300)) for (const [k, v] of Object.entries(r.styleDuels)) sum[k] = (sum[k] ?? 0) + v;
+    const { judged } = styleParity(sum, 150);
+    expect(judged.length).toBeGreaterThan(80);
+    for (const j of judged) expect(j.share, `${j.kind}: ${j.top} over ${j.low} in ${j.n}`).toBeLessThanOrEqual(0.75);
+  }, GAMES_TIMEOUT);
   it('5-on-5 totals look like hockey', () => {
     const m = summarise(runGames(300));
     expect(m.goals).toBeGreaterThan(2.1);   expect(m.goals).toBeLessThan(3.0);

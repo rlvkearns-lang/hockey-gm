@@ -52,7 +52,7 @@ function closingSpeed(h: SkaterState, t: SkaterState): number {
 
 /**
  * Chance that `hitter` (state `h`) lands a hit on `target` (state `t`) at contact, closing at `closing` m/s:
- * winProb of hitter (bodyChecking .5, strength .3, balance .2) minus target (balance .45, strength .35, poise .2) plus
+ * winProb of T.attrScale times (hitter (bodyChecking .5, strength .3, balance .2) minus target (balance .45, strength .35, poise .2)) plus
  * (hitterMass * closing - targetMass * T.braceSpeed) / T.momentumScale, masses from Movement. Chemistry is each one's
  * mean with teammates in it; `jumpEdge` is the hitter's team's jump less the target's (GameState.teamJump).
  */
@@ -60,7 +60,7 @@ export function hitChance(
   hitter: PlayerDef, h: SkaterState, target: PlayerDef, t: SkaterState, closing: number, hitterChem = 0, targetChem = 0, jumpEdge = 0,
 ): number {
   // (Task 12: a Big Hitter's rating is TUNING.badges.bigHitterRating higher.)
-  const edge = effective(hitter, h, T.hitter, hitterChem) + (hasBadge(hitter, 'Big Hitter') ? TUNING.badges.bigHitterRating : 0) - effective(target, t, T.brace, targetChem) + jumpEdge
+  const edge = T.attrScale * (effective(hitter, h, T.hitter, hitterChem) + (hasBadge(hitter, 'Big Hitter') ? TUNING.badges.bigHitterRating : 0) - effective(target, t, T.brace, targetChem)) + jumpEdge
     + (movementOf(hitter, 1).mass * closing - movementOf(target, 1).mass * T.braceSpeed) / T.momentumScale;
   return winProb(edge);
 }

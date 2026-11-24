@@ -1,4 +1,5 @@
 import { generateTeam } from '../src/roster-gen';
+import { styleOf } from '../src/styles';
 import { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from '../src/attributes';
 import { DT, PERIOD_SECONDS } from '../src/constants';
 import { drainEnergy, recoverEnergy } from '../src/bench';
@@ -1040,12 +1041,12 @@ export const canReceive = (st: GameState, id: string): boolean => canReceivePass
  * and leader it set and how far (m) the attacker's target then is from where he stood.
  */
 export function netFrontRounds(seconds: number): {
-  stages: string[]; roundTimes: number[]; rounds: { stage: string; leader: string | null; attackerTarget: number }[];
+  stages: string[]; roundTimes: number[]; rounds: { stage: string; leader: string | null; attackerTarget: number }[]; endTime: number | null;
 } {
   const { h, c } = netFrontStart();
   const st = h.st;
   const att = st.skaters.find((k) => k.id === attackerId)!;
-  const out = { stages: [c.stage], roundTimes: [] as number[], rounds: [] as { stage: string; leader: string | null; attackerTarget: number }[] };
+  const out = { stages: [c.stage], roundTimes: [] as number[], rounds: [] as { stage: string; leader: string | null; attackerTarget: number }[], endTime: null as number | null };
   let rounds = 0;
   for (let i = 0; i < Math.round(seconds / DT) && st.contests.includes(c); i++) {
     const before = { x: att.pos.x, y: att.pos.y };
@@ -1055,6 +1056,7 @@ export function netFrontRounds(seconds: number): {
       out.roundTimes.push(st.tick * DT);
       out.rounds.push({ stage: c.stage, leader: c.leader, attackerTarget: Math.hypot(att.target.x - before.x, att.target.y - before.y) });
     }
+    if (!st.contests.includes(c)) out.endTime = st.tick * DT;
   }
   return out;
 }
@@ -1307,6 +1309,12 @@ export type GameRecord = {
   /** The play observer's counters for the game (test/measures.ts), and its largest puck jump (m). */
   play: PlayCounters;
   maxPuckJump: number;
+  /**
+   * Task 12 close-out: style against style (primary styles by styleOf), keyed `kind|winner|loser`: `board` (board
+   * battles), `engage` (engagements with someone inside at the end), `netFront` (net-front battles), `hit` (the hitter
+   * wins when it lands, the target when it is absorbed or bounces).
+   */
+  styleDuels: Record<string, number>;
 };
 
 export type CalibrationOpts = { homeOverall?: number; awayOverall?: number };
@@ -1362,7 +1370,45 @@ export function playRecord(i: number, o: CalibrationOpts = {}): GameRecord {
   }
   const types: Record<string, string> = {};
   for (const p of [...s.home.players, ...s.away.players]) types[p.id] = p.type;
-  return { index: i, ms, score: r.score, team: r.team, players: r.players, types, counts, contests, play: obs.counters(), maxPuckJump: obs.maxPuckJump() };
+  return { index: i, ms, score: r.score, team: r.team, players: r.players, types, counts, contests, play: obs.counters(), maxPuckJump: obs.maxPuckJump(), styleDuels: styleDuelsOf(s, r.events) };
+}
+
+/** GameRecord.styleDuels for one game's events. */
+export function styleDuelsOf(s: GameSetup, events: readonly GameEvent[]): Record<string, number> {
+  const style = new Map<string, string>();
+  for (const p of [...s.home.players, ...s.away.players]) { const st = styleOf(p); if (st !== null) style.set(p.id, st.primary); }
+  const out: Record<string, number> = {};
+  const add = (kind: string, w: string | null, l: string | null): void => {
+    const a = w === null ? undefined : style.get(w), b = l === null ? undefined : style.get(l);
+    if (a !== undefined && b !== undefined) { const k = `${kind}|${a}|${b}`; out[k] = (out[k] ?? 0) + 1; }
+  };
+  for (const e of events) {
+    if (e.type === 'battle') add(e.detail.how === 'netFront' ? 'netFront' : 'board', e.playerId, e.otherId);
+    else if (e.type === 'engagement' && e.playerId !== null) add('engage', e.playerId, e.otherId);
+    else if (e.type === 'hit') { if (e.detail.result === 'landed') add('hit', e.playerId, e.otherId); else add('hit', e.otherId, e.playerId); }
+  }
+  return out;
+}
+
+/**
+ * Style-against-style shares from summed styleDuels: for each kind and each unordered pair of styles with at least
+ * `min` contests, the larger side's share (the pairs under `min` are returned apart, not judged).
+ */
+export function styleParity(duels: Record<string, number>, min: number): { judged: { kind: string; top: string; low: string; share: number; n: number }[]; small: { kind: string; a: string; b: string; n: number }[] } {
+  const judged: { kind: string; top: string; low: string; share: number; n: number }[] = [], small: { kind: string; a: string; b: string; n: number }[] = [];
+  const seen = new Set<string>();
+  for (const key of Object.keys(duels)) {
+    const [kind, a, b] = key.split('|') as [string, string, string];
+    if (a === b) continue;
+    const pk = [kind, ...[a, b].sort()].join('|');
+    if (seen.has(pk)) continue;
+    seen.add(pk);
+    const w = duels[`${kind}|${a}|${b}`] ?? 0, l = duels[`${kind}|${b}|${a}`] ?? 0, n = w + l;
+    if (n < min) small.push({ kind, a, b, n });
+    else judged.push(w >= l ? { kind, top: a, low: b, share: w / n, n } : { kind, top: b, low: a, share: l / n, n });
+  }
+  judged.sort((x, y) => y.share - x.share);
+  return { judged, small };
 }
 
 const recordCache = new Map<string, GameRecord[]>();

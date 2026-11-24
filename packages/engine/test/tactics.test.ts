@@ -15,7 +15,7 @@ function topShare(opts: Option[], me: PlayerDef, sit: Situation): number {
   const top = topKindShare(opts, me, sit, null);
   return opts[0]!.value >= opts[1]!.value ? top : 1 - top;
 }
-import { observeGame, tacticCounts, tacticMeasures } from './measures';
+import { tacticCounts, tacticMeasures } from './measures';
 
 /** `s` with `side`'s tactics changed by `t` (the rosters are the same). */
 const withTactics = (s: GameSetup, side: Side, t: Partial<Tactics>): GameSetup => ({ ...s, [side]: { ...s[side], tactics: { ...s[side].tactics, ...t } } });
@@ -125,22 +125,7 @@ describe('tactics: two teams look different', () => {
 });
 
 describe('tactics shade, they never decide (Review Focus 3)', () => {
-  it('for every entry and offence tactic (both teams on it, two games) one kind is certain before the cap in under 15% of ordinary decisions', () => {
-    for (const t of [{ zoneEntry: 'dump' }, { zoneEntry: 'carry' }, { offence: 'pointShots' }, { offence: 'rush' }] as Partial<Tactics>[]) {
-      const s = { ...gameSetup(1), home: { ...gameSetup(1).home, tactics: { ...gameSetup(1).home.tactics, ...t } }, away: { ...gameSetup(1).away, tactics: { ...gameSetup(1).away.tactics, ...t } } };
-      const a = observeGame(s).counters, b = observeGame({ ...s, seed: 2 }).counters;
-      expect((a.normalCertain + b.normalCertain) / (a.normalDecisionPoints + b.normalDecisionPoints), JSON.stringify(t)).toBeLessThan(0.15);
-    }
-  }, LONG);
-  it('for every forecheck, defence and pinch tactic (the home team on it, seeds 1-8 pooled, as the close-out ruling read them) one kind is certain before the cap in under 15% of ordinary decisions (Task 11 review fix)', () => {
-    // Seeds 1-8: passive 0.145 (0.151 with both teams on it), pinch often 0.141. One game is noise-limited (0.13 to 0.17).
-    for (const t of [{ forecheck: 'passive' }, { forecheck: 'aggressive' }, { defence: 'pressure' }, { pinch: 'often' }, { pinch: 'rarely' }] as Partial<Tactics>[]) {
-      const s = withTactics(gameSetup(1), 'home', t);
-      let certain = 0, points = 0;
-      for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) { const c = observeGame({ ...s, seed }).counters; certain += c.normalCertain; points += c.normalDecisionPoints; }
-      expect(certain / points, JSON.stringify(t)).toBeLessThan(0.15);
-    }
-  }, LONG);
+  // (The certainty guards for every tactic are in certainty-entry.test.ts and certainty-jobs.test.ts: Task 12 close-out.)
   it('players bend the tactic: asked to dump, grinders take it up far more than a skilled line does (odds of a dump-in, against the same line on mixed; seeds 1-4; Task 11 review fix)', () => {
     // Seeds 1-16 at d6e9888 (the rosters before Task 12): grinders 0.083 -> 0.710 (odds times 27), playmakers 0.021 -> 0.089 (times 4.5). With no bend both lines
     // would play the dump at 60; the bend plays it at about 136 for the grinders and 3.4 for the playmakers.

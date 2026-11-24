@@ -18,8 +18,8 @@ import { pokeCheckContest } from '../src/contests/poke-check';
 import { planOf } from '../src/commit';
 import { SKATER_ATTRS } from '../src/attributes';
 import { TUNING } from '../src/tuning';
-import type { Badge, PlayerDef, SavePose, ShotType } from '../src/types';
-import { at, def, defs, duel, duelStep, g, place, runBattle, st, stateWith } from './helpers';
+import type { Badge, GameState, PlayerDef, SavePose, ShotType } from '../src/types';
+import { at, def, defs, duel, duelStep, g, place, rate, runBattle, skater, slotState, st, stateWith } from './helpers';
 
 describe('badges are earned (Task 12)', () => {
   it('by being clearly good at one thing: each at its threshold, not a point under', () => {
@@ -38,8 +38,9 @@ describe('badges are earned (Task 12)', () => {
     expect(earnedBadges(def({ strength: 85, compete: 85 }))).toEqual(['Board Battler']);
     expect(earnedBadges(def({ strength: 88, balance: 80 }))).toEqual(['Net-Front Presence']);
     expect(earnedBadges(def({ faceoffs: 88 }))).toEqual(['Faceoff Specialist']);
-    expect(earnedBadges(def({ position: 'G', goalie: { ...g(70), reboundControl: 85 } }))).toEqual(['Rebound Control']);
-    expect(earnedBadges(def({ position: 'G', goalie: { ...g(70), glove: 85 } }))).toEqual(['Glove Hand']);
+    expect(earnedBadges(def({ position: 'G', goalie: { ...g(70), reboundControl: 78 } }))).toEqual(['Rebound Control']);
+    expect(earnedBadges(def({ position: 'G', goalie: { ...g(70), glove: 78 } }))).toEqual(['Glove Hand']);
+    expect(earnedBadges(def({ position: 'G', goalie: { ...g(70), glove: 77 } }))).toEqual([]);
   });
   it('a goalie earns only goalie badges, a skater only skater badges', () => {
     expect(earnedBadges(def({ position: 'G', speed: 99, goalie: { ...g(99) } }))).toEqual(['Rebound Control', 'Glove Hand']);
@@ -163,5 +164,54 @@ describe('badges: each has one small real effect (Task 12)', () => {
     }
     expect(saveChance({ ...saveBase, goalie: gAll, distance: 30, shotSpeed: 10, gloveHand: true })).toBeLessThanOrEqual(0.97);
     expect(saveChance({ ...saveBase, goalie: g(1), distance: 2, shotSpeed: 45, quickRelease: true, lateralMiss: 1.5 })).toBeGreaterThanOrEqual(0.03);
+  });
+});
+
+describe('the carrier values what the shot badges do (Task 12 close-out: valuation matches execution)', () => {
+  const clone = (s: GameState): GameState => structuredClone(s);
+  /** Home LD at the point with the puck, defenders back around the net, home LW (job netFront) in front. */
+  const pointState = (): GameState => {
+    const st = stateWith({ carrier: 'home', puckX: 13, puckY: 6, carrierSlot: 'LD' });
+    const put = (side: 'home' | 'away', slot: 'LW' | 'RW' | 'C' | 'LD' | 'RD', x: number, y: number): void => { const k = skater(st, side, slot); k.pos = { x, y }; k.target = { x, y }; };
+    put('home', 'LW', 24.6, 0.6); put('home', 'RW', 23, -7); put('home', 'C', 20, 6); put('home', 'RD', 12, -7);
+    put('away', 'LD', 25, -1.5); put('away', 'RD', 23, 5); put('away', 'C', 21, -2); put('away', 'LW', 16, 8); put('away', 'RW', 16, -8);
+    planOf(st, 'home-LW').job = 'netFront';
+    return st;
+  };
+  /** His share of shots among 2,000 first looks without and with `badge` (on him, or on home LW in front of the net). */
+  const shift = (st: GameState, badge: Badge, who: 'carrier' | 'home-LW' = 'carrier'): { without: number; with: number } => {
+    if (who === 'carrier') return { without: rate('shoot', def({}), st), with: rate('shoot', def({ badges: [badge] }), st) };
+    const saved = defs.get('home-LW')!;
+    const without = rate('shoot', def({}), st);
+    defs.set('home-LW', { ...saved, badges: [badge] });
+    try { return { without, with: rate('shoot', def({}), st) }; } finally { defs.set('home-LW', saved); }
+  };
+  // Seeds 1-2000 at the close-out: slapshot from the point 0.722 -> 0.743; a wrist shot with a checker 1.2 m off 0.084 ->
+  // 0.100; a point shot with a Net-Front Finisher in front 0.722 -> 0.747.
+  const modest = (r: { without: number; with: number }, label: string): void => {
+    expect(r.with, label).toBeGreaterThan(r.without); expect(r.with / r.without, label).toBeLessThan(1.5);
+    expect(r.with, label).toBeLessThan(0.9); expect(r.without, label).toBeGreaterThan(0.03);
+  };
+  it('a One-Timer man shoots a one-timer more often, a Heavy Slapshot man a slapshot from the point, a Quick Release man under pressure, and a point man with a Net-Front Finisher in front; modestly, and still a draw', () => {
+    const ot = pointState(); ot.oneTimerTaken = { id: ot.carrierId!, tick: ot.tick };
+    // On a one-timer he shoots almost always (TUNING.value.oneTimerBonus; 0.97 either way): the badge shows in the
+    // shot's value, a little higher, not in the choice.
+    const shotValue = (d: PlayerDef): number => { const me = { ...d, id: ot.carrierId!, position: 'LD' as const }; const ds = new Map(defs); ds.set(me.id, me); return listOptions(ot, me, ds, []).find((o) => o.kind === 'shoot')!.value; };
+    expect(shotValue(def({ badges: ['One-Timer'] }))).toBeGreaterThan(shotValue(def({})));
+    expect(rate('shoot', def({ badges: ['One-Timer'] }), ot)).toBeLessThan(0.98);
+    modest(shift(pointState(), 'Heavy Slapshot'), 'slapshot');
+    const qr = clone(slotState); const c = qr.skaters.find((k) => k.id === qr.carrierId)!; const k = skater(qr, 'away', 'C'); k.pos = { x: c.pos.x + 1.2, y: c.pos.y + 0.3 }; k.target = { ...k.pos };
+    modest(shift(qr, 'Quick Release'), 'quick release');
+    modest(shift(pointState(), 'Net-Front Finisher', 'home-LW'), 'finisher in front');
+  }, 240_000);
+});
+
+describe('the block habit (Task 12 close-out)', () => {
+  it('a man keener to get in front of shots blocks more of those that pass him, inside the clamps; the default 0.5 changes nothing', () => {
+    const at = (block: number, shotBlocking = 70): number => blockChance(def({ shotBlocking, tendencies: { ...def().tendencies, block } }));
+    expect(at(0.5)).toBe(blockChance(def({})));
+    expect(at(0.85)).toBeGreaterThan(at(0.5)); expect(at(0.2)).toBeLessThan(at(0.5));
+    expect(at(0.85) - at(0.2)).toBeCloseTo(0.13, 9);
+    expect(at(1, 100)).toBeLessThanOrEqual(0.97); expect(at(0, 1)).toBeGreaterThanOrEqual(0.03);
   });
 });

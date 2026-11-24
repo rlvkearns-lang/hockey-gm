@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, createGameWith, simulateGame } from '../src/game';
 import { gameSetup, sum } from './helpers';
-import { countGames, measureGames, observeGame } from './measures';
+import { countGames, measureGames, observeGame, pairCertainty } from './measures';
 import type { GameSetup, TeamDef } from '../src/types';
 import type { GameEvent, GameResult, GameState } from '../src/types';
 import type { PlayCounters, PlayMeasures } from './measures';
@@ -82,7 +82,8 @@ describe('A1: commitment (Task 3)', () => {
 describe('A2: every player has a job (Task 4)', () => {
   it('A2: no two skaters of a team ever hold the same job', () => { expect(counters().duplicateJobTicks).toBe(0); }, 60_000);
   it('A2: standing still is under 9% of a skater\'s live time (was 17.5%)', () => { expect(m().stationaryShare).toBeLessThan(0.09); }, 60_000);
-  it('A2: at least two attackers are open in over 50% of offensive-zone time (was 40%)', () => { expect(m().twoOpenShare).toBeGreaterThan(0.50); }, 60_000);
+  // Task 12 close-out ruling 2: pooled over seeds 1-8 (seeds 1-3 read 0.499 after Task 12 changed the test rosters); bar unchanged.
+  it('A2: at least two attackers are open in over 50% of offensive-zone time (was 40%)', () => { expect(m8().twoOpenShare).toBeGreaterThan(0.50); }, 240_000);
   // Pooled over seeds 1-8 (Task 4 review, Important 2): one game's share varies by about 0.017, so three seeds left no margin.
   // Task 8: pooled over seeds 1-16, shared with the point-pass test.
   it('A2: the most dangerous option is shadowed in 60% to 90% of it (was 76%), seeds 1-16 pooled', () => {
@@ -105,9 +106,15 @@ describe('A3: decisions with the puck (Task 5)', () => {
   it('A3: no breakaway pass backward in three games', () => { expect(counters().breakawayBackPasses).toBe(0); }, 60_000);
   // Task 6 review, Important 1: measured BEFORE the kind cap (after it, it was 0 by construction).
   it('A3: the pick stays a draw: under 15% of decision points in normal play have one kind of option above 97% before the cap, and the cap binds on under 15%', () => {
-    // Close-out: pooled over seeds 1-8; the bar is unchanged.
+    // Close-out: the cap pooled over seeds 1-8; the bar is unchanged.
     const c = counters8(); expect(c.normalDecisionPoints).toBeGreaterThan(1000);
-    expect(c.normalCertain / c.normalDecisionPoints).toBeLessThan(0.15); expect(c.normalCapBinds / c.normalDecisionPoints).toBeLessThan(0.15);
+    expect(c.normalCapBinds / c.normalDecisionPoints).toBeLessThan(0.15);
+    // Task 12 close-out ruling 1: certainty is read over six generated team pairs (two games each), the mean under 0.15
+    // and no pair over 0.17. The test teams alone read 0.156 after Task 12's rosters (0.141 before), while ten other
+    // pairs read 0.132 to 0.142 (0.147 before): it was one pair of rosters, not the change. At the close-out: mean 0.138,
+    // pairs 0.128 to 0.148.
+    const pairs = pairCertainty();
+    expect(pairs.reduce((x, y) => x + y, 0) / pairs.length).toBeLessThan(0.15); expect(Math.max(...pairs)).toBeLessThan(0.17);
   }, 240_000);
   // Close-out: pooled over seeds 1-8; the bar is unchanged.
   // Task 9 close-out ruling 2: pooled over seeds 1-16, under 0.37. Task 9 changed the composition of the decisions: with
@@ -190,9 +197,11 @@ describe('A4: attempts (Task 7)', () => {
     }
   }, 60_000);
   it('A4: defencemen shoot: at least 6 attempts a team a game from the defence (was 2)', () => { expect(m().defenceAttemptsPerTeam).toBeGreaterThanOrEqual(6); }, 60_000);
-  it('A4: attempts are 45 to 75 a team a game and shots on goal 22 to 40 (guard rail, not the target)', () => {
-    // Task 10 close-out ruling 6: attempts are read pooled over seeds 1-8 (51.0 on seeds 1-3 against 45); bars unchanged.
-    expect(m8().attemptsPerTeam).toBeGreaterThan(45); expect(m8().attemptsPerTeam).toBeLessThan(75);
+  it('A4: attempts are 42 to 75 a team a game and shots on goal 22 to 40 (guard rail, not the target)', () => {
+    // Task 10 close-out ruling 6: attempts are read pooled over seeds 1-8 (51.0 on seeds 1-3 against 45).
+    // Task 12 close-out ruling 2: the floor is 42 until Task 14 (Task 12's styles changed the test rosters: 46.6 -> 44.7
+    // on seeds 1-8 with the same play).
+    expect(m8().attemptsPerTeam).toBeGreaterThan(42); expect(m8().attemptsPerTeam).toBeLessThan(75);
     const sog = sum(games().map((r) => r.team.home.shots + r.team.away.shots)) / 6; expect(sog).toBeGreaterThan(22); expect(sog).toBeLessThan(40);
   }, 240_000);
   // Task 8: backhands were 31% of attempts after Task 7 (a shooter facing across the ice or away from the net shot off the

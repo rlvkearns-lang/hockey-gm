@@ -161,7 +161,9 @@ describe('board battles', () => {
   // about 15 decided battles a game (no-winner battles 18.9 -> 4.1) and 6 protects (released 7 -> 0): under 270 a game,
   // the mean of seeds 1-8 (about 105 of them net-front battles).
   it('a full game has plenty of battles', () => {
-    const n = [1, 2, 3, 4, 5, 6, 7, 8].map((seed) => count(simulateGame(setup(seed)), 'battle'));
+    // (Task 12 close-out: board battles only: a net-front battle is now decided by one round, so its `battle` events come
+    // once a round and are no measure of board battles.)
+    const n = [1, 2, 3, 4, 5, 6, 7, 8].map((seed) => simulateGame(setup(seed)).events.filter((e) => e.type === 'battle' && e.detail.how !== 'netFront').length);
     const mean = n.reduce((a, b) => a + b, 0) / n.length;
     expect(mean).toBeGreaterThan(40); expect(mean).toBeLessThan(270);
   }, 8 * GAME_TIMEOUT);

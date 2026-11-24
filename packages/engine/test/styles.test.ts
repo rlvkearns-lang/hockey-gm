@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { blendHabits, STYLES, styleLabel, styleOf } from '../src/styles';
 import { PLAYER_TYPES } from '../src/player-types';
 import { generateTeam } from '../src/roster-gen';
-import { def, shareOf } from './helpers';
+import { at, def, runBattle, shareOf } from './helpers';
+import { engageChance } from '../src/engagements';
+import type { PlayerDef, Style } from '../src/types';
 
 describe('styles (Task 12)', () => {
   it('habits are two thirds primary and one third secondary', () => {
@@ -45,6 +47,9 @@ describe('styles (Task 12)', () => {
     const styles = ps.map((p) => styleOf(p)!); for (const s of Object.keys(STYLES)) expect(styles.some((x) => x.primary === s)).toBe(true);
     const withSecond = styles.filter((s) => s.secondary !== null).length / styles.length; expect(withSecond).toBeGreaterThan(0.3); expect(withSecond).toBeLessThan(0.8);
     expect(shareOf(ps, (p) => (p.badges ?? []).length <= 3)).toBeGreaterThan(0.9); expect(shareOf(ps, (p) => (p.badges ?? []).length >= 1)).toBeGreaterThan(0.1);
+    // (Task 12 close-out: about one goalie in five holds a badge.)
+    const gs = Array.from({ length: 100 }, (_, i) => generateTeam(i + 1, 'T', 'T')).flatMap((t) => t.players.filter((p) => p.position === 'G'));
+    const withBadge = shareOf(gs, (p) => (p.badges ?? []).length >= 1); expect(withBadge).toBeGreaterThan(0.12); expect(withBadge).toBeLessThan(0.3);
   });
   it('a generated player: his type is his drawn primary style\'s, no sub-type, no style set by hand, habits a blend of his styles (Task 12)', () => {
     const ps = Array.from({ length: 10 }, (_, i) => generateTeam(i + 1, 'T', 'T')).flatMap((t) => t.players);
@@ -56,4 +61,19 @@ describe('styles (Task 12)', () => {
     }
     expect(ps.some((p) => p.type === 'Shutdown Forward')).toBe(true);
   });
+});
+
+describe('style parity, a quick check (Task 12 close-out; the full table is in the calibration suite)', () => {
+  /** A typical player of `s`: every attribute 70 plus the style's bias, his style's habits and middle of its build. */
+  const typical = (s: Style): PlayerDef => {
+    const st = STYLES[s], b = PLAYER_TYPES[st.typeKey]!.build;
+    return def({ ...Object.fromEntries(Object.entries(st.attrBias).map(([k, v]) => [k, 70 + v])), tendencies: st.habits, weightKg: (b.weightKg[0] + b.weightKg[1]) / 2 });
+  };
+  it('a power forward does not always win a board battle against a playmaker, nor an engagement draw against a speedster', () => {
+    let won = 0, n = 0;
+    for (let i = 0; i < 300; i++) { const r = runBattle(typical('Power Forward'), typical('Playmaker')); if (r.winner !== null) { n++; if (r.winner === 'a') won++; } }
+    expect(won / n).toBeGreaterThan(0.5); expect(won / n).toBeLessThan(0.75);
+    const p = engageChance(typical('Power Forward'), at(0, 0), typical('Speedster'), at(1, 0), null);
+    expect(p).toBeGreaterThan(0.5); expect(p).toBeLessThan(0.75);
+  }, 120_000);
 });

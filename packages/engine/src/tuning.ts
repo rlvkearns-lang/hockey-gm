@@ -619,9 +619,13 @@ export const TUNING = deepFreeze({
    */
   tip: { base: 0.10, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
 
-  /** Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from the shooter; chance base + perPoint * shotBlocking. */
+  /**
+   * Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from
+   * the shooter; chance base + perPoint * shotBlocking + perHabit * (his block habit - 0.5) (Task 12 close-out: how
+   * willing he is to get in front of it; 0.5, the default, changes nothing).
+   */
   block: {
-    maxZ: 1.1, path: 0.55, clearOfShooter: 1.5, base: 0.40, perPoint: 0.004,
+    maxZ: 1.1, path: 0.55, clearOfShooter: 1.5, base: 0.40, perPoint: 0.004, perHabit: 0.2,
     /** A blocked puck stops at the blocker and keeps this share of its speed, turned by up to `spread` (rad) either side of straight back. */
     keep: [0.1, 0.3] as [number, number],
     spread: 1.2,
@@ -669,12 +673,24 @@ export const TUNING = deepFreeze({
     releaseWindowSeconds: 0.3,
     /** ...and makes up his mind (one draw against hitAttemptChance) at most once per this many seconds. */
     decideSeconds: 10,
-    /** Target speed (m/s) assumed for his side of the momentum term, and the term's scale in rating points. */
+    /**
+     * Target speed (m/s) assumed for his side of the momentum term, and the term's scale in rating points (Task 12
+     * close-out: 30 -> 50, with attrScale below; a hitter closing at minClosing or more had about 20 points on an even man
+     * from momentum alone, so any style difference put the pair over 0.75).
+     */
     braceSpeed: 2,
-    momentumScale: 30,
+    momentumScale: 50,
     /** A failed hit bounces the hitter off (down for a moment) with this chance at an even contest, scaled by 2 * (1 - his chance of landing it). */
     bounceChance: 0.1,
     hitter: { bodyChecking: 0.5, strength: 0.3, balance: 0.2 } as SkaterWeights,
+    /**
+     * How much the two men's rating difference (hitter against brace) feeds the edge (Task 12 close-out). A hit is the one
+     * contest where the two sides are rated on different attributes and the momentum term already favours the hitter
+     * (closing at minClosing or more), so the styles' attribute differences went in whole on top: a Power Forward landed
+     * 0.79 of his hits on a Speedster and an Enforcer 0.76 on an Offensive Defenceman (120 games, 150+ each). With 0.5
+     * and momentumScale 50: largest pair 0.70 (Enforcer v Speedster, 160 games).
+     */
+    attrScale: 0.5,
     brace: { balance: 0.45, strength: 0.35, poise: 0.2 } as SkaterWeights,
     /**
      * How hard a landed hit is (Task 9, contests/hit.ts hitDegreeChances): x = (closing - closingFrom) * perClosing +
@@ -861,5 +877,13 @@ export const TUNING = deepFreeze({
     reboundControlShare: 0.06,
     /** Glove Hand (goalie): save log-odds on his catching side above gloveHeight (m); held chance on a glove save. */
     gloveSave: 0.25, gloveHeight: 0.5, gloveHeld: 0.08,
+    /**
+     * What the carrier's valuation sees of the shot badges (options.ts shotBadgeFactor; Task 12 close-out): each is the
+     * lift in the chance a shot scores measured from executed shots against a 70 goalie (20,000 paired shots each, 70
+     * shooters): a one-timer from the slot 1.053; a slapshot from the point 1.081; a wrist shot with a checker 1.2 m off
+     * (pressure about 1) 1.136, so quickRelease is per unit of pressure; a rebound shot from 5 m 1.003 (from that close the
+     * spread barely matters); a wrist shot from the point with a Net-Front Finisher screening 1.087 (his tips 6.7% -> 9.7%).
+     */
+    value: { oneTimer: 1.05, heavySlap: 1.08, quickRelease: 0.14, finisherRebound: 1.0, finisherScreen: 1.09 },
   },
 });

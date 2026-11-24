@@ -42,9 +42,14 @@ const BLOCK = TUNING.block;
 const MISS_SPEED = 3;
 const SHOT_MAX_SECONDS = 3;
 
-/** Chance `d` blocks a shot whose path passes his body: BLOCK.base + shotBlocking * BLOCK.perPoint (+ TUNING.badges.shotBlockerChance for a Shot Blocker, Task 12), within [0.03, 0.97]. */
+/**
+ * Chance `d` blocks a shot whose path passes his body: BLOCK.base + shotBlocking * BLOCK.perPoint, plus BLOCK.perHabit *
+ * (his block habit - 0.5) (how willing he is to get in front of it: a Defensive Defenceman's 0.85 about +0.07, a Sniper's
+ * 0.2 -0.06), plus TUNING.badges.shotBlockerChance for a Shot Blocker (Task 12), within [0.03, 0.97].
+ */
 export function blockChance(d: PlayerDef): number {
-  return clamp(BLOCK.base + d.attrs.shotBlocking * BLOCK.perPoint + (hasBadge(d, 'Shot Blocker') ? TUNING.badges.shotBlockerChance : 0), 0.03, 0.97);
+  return clamp(BLOCK.base + d.attrs.shotBlocking * BLOCK.perPoint + BLOCK.perHabit * ((d.tendencies.block ?? 0.5) - 0.5)
+    + (hasBadge(d, 'Shot Blocker') ? TUNING.badges.shotBlockerChance : 0), 0.03, 0.97);
 }
 
 /**

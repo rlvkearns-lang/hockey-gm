@@ -63,7 +63,7 @@ const BLUE = RINK.blueLineX;
  * blue line than the puck): otherwise he holds the line and someone else goes. True when `d` may not go.
  * (The Task 11 brief said "above him", the point man. Tried in the review fixes: pinches by a team told to pinch often
  * fell from 3.8 to 2.2 a game on seeds 1-16, and four guards that read one to three games went red, carrier pressed
- * 0.771 against 0.78 among them; kept as it was, for a ruling.)
+ * 0.771 against 0.78 among them. Controller ruling, Task 12 close-out: "above the puck" is kept; the brief's wording is dropped.)
  */
 /** A defenceman of `side` at the point with the puck loose in the zone it attacks: inside the blue line or within 1 m of it. */
 function atPoint(state: GameState, side: Side, d: SkaterState): boolean {
@@ -311,7 +311,8 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
   // the two swapped: 115 net-front spells a game ended that way while a teammate carried the puck).
   // (Task 11 review fix: a cycle team's list puts its low support first, but the net-front man is still handed out
   // before it: handed out after low support, the man at the net was pulled off it and net-front holds, tips and second
-  // chances fell, 0.54 -> 0.42 holds over 2.5 s, 3.5 -> 1.9 tips a game on seeds 1-8. The order counts after him.)
+  // chances fell, 0.54 -> 0.42 holds over 2.5 s, 3.5 -> 1.9 tips a game on seeds 1-8. The order counts after him.
+  // Controller ruling, Task 12 close-out: accepted as is, with no game measure required.)
   const nf = jobs.indexOf('netFront');
   for (let kk = nf >= 0 ? -1 : 0; kk < jobs.length; kk++) {
     const k = kk < 0 ? nf : kk;

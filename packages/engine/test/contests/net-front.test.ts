@@ -38,12 +38,14 @@ describe('net-front battles', () => {
   it('a tied-up forward cannot take a pass', () => { const st = netFrontWonByDefender(); expect(canReceive(st, attackerId)).toBe(false); });
 
   it('a forward who holds his ground can take a pass', () => { const st = netFrontWonByAttacker(); expect(canReceive(st, attackerId)).toBe(true); });
-  it('jostles every 1.2 s, and the stage and leader follow each round', () => {
+  // Task 12 close-out (style parity): one round decides a battle; it is over once what the round won has run its 1.2 s,
+  // and the two may start another at once (a battle used to run on round after round until the puck moved).
+  it('jostles 1.2 s, one round decides it, the stage and leader follow the round, and it is over 1.2 s later', () => {
     const r = netFrontRounds(6);
     expect(r.stages[0]).toBe('jostle');
-    expect(r.roundTimes.length).toBeGreaterThanOrEqual(5);
-    for (let i = 1; i < r.roundTimes.length; i++) expect(r.roundTimes[i]! - r.roundTimes[i - 1]!).toBeCloseTo(1.2, 5);
+    expect(r.roundTimes.length).toBe(1);
     for (const x of r.rounds) expect(x.stage).toBe(x.leader === attackerId ? 'free' : 'tied');
+    expect(r.endTime! - r.roundTimes[0]!).toBeCloseTo(1.2, 1);
   });
   it('the defender pushes a tied-up forward out about 1.5 m', () => {
     const r = netFrontRounds(6);
