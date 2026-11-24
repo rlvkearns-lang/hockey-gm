@@ -136,7 +136,7 @@ const FACE_SPOT_JOBS: ReadonlySet<Job> = new Set<Job>(['dGapStrong', 'dGapWeak',
 /** Jobs that follow the puck or a man every tick (the rest that follow one do so every other tick). */
 const TRACK_EVERY_TICK: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'f1', 'dCorner', 'dNet']);
 /** A defender covering a man sprints to him from this far (m) from his cover spot. */
-const COVER_SPRINT_FROM = 3;
+const COVER_SPRINT_FROM = 1.5;
 /** Jobs that skate flat out after the puck or its carrier whatever the distance. */
 const SPRINT_JOBS: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'battleSupport', 'f1', 'tagUp']);
 

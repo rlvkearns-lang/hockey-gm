@@ -131,7 +131,7 @@ export const TUNING = deepFreeze({
    * at most gapFar. A defender keeps the man he covers unless the rule's man is keepMan (m) nearer him. A lane is
    * shadowed from a cover spot within shadowReach (m) of it. `gap` (m): the net-front defender's goal-side gap.
    */
-  cover: { gap: 1.2, goalShade: 0.35, gapNear: 1.5, gapFar: 3.5, gapFrom: 10, gapPerMetre: 0.1, keepMan: 4, shadowReach: 3 },
+  cover: { gap: 1.2, goalShade: 0.35, gapNear: 1.5, gapFar: 5, gapFrom: 10, gapPerMetre: 0.25, keepMan: 4, shadowReach: 3 },
   /** A goalie's body (bodies.ts resolveGoalies): skaters are kept this far (m) plus their own radius from his centre. */
   goalieBody: { radius: 0.55 },
 

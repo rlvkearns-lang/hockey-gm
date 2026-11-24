@@ -66,7 +66,7 @@ const NET_FRONT_BEHIND = 0.5;
 /** The net-front defender leads his man by this long (s). */
 const NET_FRONT_LEAD = 0.5;
 /** Where the net-front defender tries to stand: (m along the line from his man to the net, m beside it), in turn, until one is this far (m) from his goalie. */
-const NET_FRONT_TRIES: readonly (readonly [number, number])[] = [[1.1, 0], [1.0, 0.4], [1.0, -0.4]];
+const NET_FRONT_TRIES: readonly (readonly [number, number])[] = [[0.9, 0.4], [1.0, 0], [0.9, -0.4]];
 const NET_FRONT_GOALIE = 1.0;
 /** The centre covers the low man in his own zone when he is within this far (m) of the slot. */
 const LOW_MAN_RANGE = 6;
@@ -89,9 +89,14 @@ const FACING: ReadonlySet<Job> = new Set<Job>(['dGapStrong', 'dGapWeak', 'dLineS
 /** Jobs that keep a man (stickyMark): the covering jobs and the weak-side gap defenceman. */
 const MARKING: ReadonlySet<Job> = new Set<Job>(['backcheckA', 'backcheckB', 'wingStrong', 'wingWeak', 'dzCentre', 'dGapWeak']);
 /** A defender takes the danger lane from within this far (m) of it, at this share of the way from the carrier to the danger man. */
-const LANE_TAKE_RANGE = 8;
+const LANE_TAKE_RANGE = 12;
 const LANE_TAKE_FROM = 0.35;
 const LANE_TAKE_TO = 0.85;
+/**
+ * The defending jobs whose man may take the danger lane (laneTaker): all but those that go at the puck or its carrier
+ * (f1, dCorner) and the net-front defender, who keeps inside position.
+ */
+const LANE_TAKERS: ReadonlySet<Job> = new Set<Job>(['f2', 'f3', 'dLineStrong', 'dLineWeak', 'backcheckA', 'backcheckB', 'dGapStrong', 'dGapWeak', 'dzCentre', 'wingStrong', 'wingWeak']);
 /** Jobs that cover a man. */
 const COVER_JOBS: ReadonlySet<Job> = new Set<Job>(['backcheckA', 'backcheckB', 'wingStrong', 'wingWeak', 'dzCentre']);
 
@@ -601,7 +606,7 @@ function dangerFor(state: GameState, side: Side, c: SkaterState): SkaterState | 
 }
 
 /**
- * The lane taker of `side`: of its defenders covering a man (the MARKING jobs), the one nearest the lane from the
+ * The lane taker of `side`: of its defenders in a LANE_TAKERS job, the one nearest the lane from the
  * opposing carrier to his most dangerous teammate, within LANE_TAKE_RANGE (m) of it. Null with no opposing carrier,
  * no danger man or nobody near. Cached per pass.
  */
@@ -615,7 +620,7 @@ function laneTaker(state: GameState, side: Side): SkaterState | null {
     let bestD = LANE_TAKE_RANGE;
     for (let k = 0; k < state.skaters.length; k++) {
       const t = state.skaters[k]!;
-      if (!standing(t) || t.side !== side || t.leaving || t.contestId !== null || !MARKING.has(state.plans[k]!.job)) continue;
+      if (!standing(t) || t.side !== side || t.leaving || t.contestId !== null || !LANE_TAKERS.has(state.plans[k]!.job)) continue;
       const d = segD(t.pos.x, t.pos.y, c.pos.x, c.pos.y, m.pos.x, m.pos.y);
       if (d < bestD) { bestD = d; best = t; }
     }
@@ -642,12 +647,11 @@ function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: 
     const fallback = jobAnchor(state, s.side, job, tactics, anchorScratch);
     out.pos.x = fallback.x;
     out.pos.y = fallback.y;
-    if (takeLane(state, s, spotScratch) || (shadow && shadowSpot(state, s, spotScratch, fallback) !== null)) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; out.follow = 'puck'; }
+    if (shadow && shadowSpot(state, s, spotScratch, fallback) !== null) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; out.follow = 'puck'; }
     return;
   }
   coverSpot(state, s, mark, coverGap(state, s, mark), out.pos);
-  // The defender nearest the most dangerous pass takes that lane first; the others cover their men.
-  if (takeLane(state, s, spotScratch) || (shadow && shadowSpot(state, s, spotScratch, out.pos) !== null)) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; }
+  if (shadow && shadowSpot(state, s, spotScratch, out.pos) !== null) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; }
   out.follow = 'man';
   out.markId = mark.id;
   if (distV(s.pos, mark.pos) <= FACE_MAN_RANGE) out.face = state.puck.pos;
@@ -659,6 +663,17 @@ function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: 
  * team play adds the blue line's needs (keepLegal) and the effort by distance for held spots.
  */
 export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<string, PlayerDef>, tactics: Tactics, out: Want): Want {
+  jobWantOwn(state, s, job, defs, tactics, out);
+  // The defender nearest the most dangerous pass takes that lane first, whatever his job; the others play theirs.
+  if (LANE_TAKERS.has(job) && takeLane(state, s, out.pos)) {
+    if (out.follow === 'spot') out.follow = 'puck';
+    // A lane is taken now or not at all: he gets there flat out.
+    if (distV(s.pos, out.pos) > 1) out.effort = 'sprint';
+  }
+  return out;
+}
+
+function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string, PlayerDef>, tactics: Tactics, out: Want): Want {
   const f = frameOf(state, s.side);
   const { dir, pr, ps } = f;
   const p = out.pos;
