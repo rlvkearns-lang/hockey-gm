@@ -32,7 +32,7 @@ export type SaveFacts = { pose: SavePose; speed: number; screened: boolean; tipp
 
 /**
  * Chances of each outcome; each within [0.03, 0.97] and summing to 1. held: G.freeze[pose] (base + perPoint *
- * reboundControl) less 0.004 per m/s over 25, less 0.08 screened, less 0.12 tipped; of the rest, steered: 0.35 + 0.005 *
+ * reboundControl) less 0.004 per m/s over 25, less 0.08 screened, less 0.12 tipped; of the rest, steered: R.steered.base (0.3; 0.35 until the Task 8b close-out, for more rebounds) + 0.005 *
  * (reboundControl - 50), less 0.1 tipped; the rest leave a rebound.
  */
 export function saveOutcomeChances(f: SaveFacts): Record<SaveKind, number> {

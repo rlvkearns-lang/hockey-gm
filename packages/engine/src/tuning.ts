@@ -389,7 +389,7 @@ export const TUNING = deepFreeze({
      * (within [0.03, 0.97]): stick.block of those are blocked at his stick (a `block`), the rest go on deflected wide at
      * stick.keep of their speed. The valuation (options.ts) takes the same stick chance off the shot's chance to score,
      * and `value` * how rushed more for the lost speed and accuracy (set from play, close-out: a fully rushed shot scores
-     * 0.13 to 0.21 of a free one from the same spot per attempt, 0.36 to 0.56 per shot on goal; see task-8b-report.md).
+     * 0.13 to 0.19 of a free one from the same spot per attempt, 0.36 to 0.52 per shot on goal; see task-8b-report.md).
      */
     rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.2, wild: 0.15, aim: 0.8, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.6 },
     /** Shooters aim this far (m) from the centre of the net, either side, and this high. */
