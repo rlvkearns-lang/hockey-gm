@@ -59,4 +59,14 @@ describe('box-score takeaways and giveaways', () => {
     expect(r.team.home.takeaways).toBe(1); expect(r.team.away.giveaways).toBe(1);
     expect(r.players.find((p) => p.id === a)!.takeaways).toBe(1); expect(r.players.find((p) => p.id === b)!.giveaways).toBe(1);
   });
+  // Task 9 close-out ruling 6: a goalie's `stop` of a puck that was not shot is no save and no shot against.
+  it('a goalie stopping a puck that was not shot is no save, no shot against and no shot', () => {
+    const setup = gameSetup(1);
+    const a = setup.home.players[0]!.id, goalie = setup.away.lines.goalie;
+    const base = { tick: 1, period: 1, clock: 1000, assistIds: [], pos: { x: 0, y: 0 } };
+    const stop: GameEvent = { ...base, type: 'stop', side: 'away', playerId: goalie, otherId: a, detail: { pose: 'pad', kind: 'held', speed: 6 } };
+    const r = buildResult(setup, [stop], new Map());
+    const g = r.players.find((p) => p.id === goalie)!;
+    expect(g.saves).toBe(0); expect(g.shotsAgainst).toBe(0); expect(r.team.home.shots).toBe(0); expect(r.team.home.attempts).toBe(0);
+  });
 });

@@ -35,6 +35,9 @@ const m16 = lazy((): PlayMeasures => measureGames(Array.from({ length: 16 }, (_,
 const SEEDS8 = [1, 2, 3, 4, 5, 6, 7, 8];
 const m8 = lazy((): PlayMeasures => measureGames(SEEDS8));
 const counters8 = lazy((): PlayCounters => countGames(SEEDS8));
+/** Seeds 1-16 pooled, the counters (Task 9 close-out rulings). */
+const SEEDS16 = Array.from({ length: 16 }, (_, i) => i + 1);
+const counters16 = lazy((): PlayCounters => countGames(SEEDS16));
 
 describe('guard rails', () => {
   it('three games complete with 1 to 5 goals a team on average and no NaN or Infinity anywhere in the result or final state', () => {
@@ -99,7 +102,10 @@ describe('A3: decisions with the puck (Task 5)', () => {
     expect(c.normalCertain / c.normalDecisionPoints).toBeLessThan(0.15); expect(c.normalCapBinds / c.normalDecisionPoints).toBeLessThan(0.15);
   }, 240_000);
   // Close-out: pooled over seeds 1-8; the bar is unchanged.
-  it('A3: the carrier keeps his mind: under 35% of his decisions change what he is doing (seeds 1-8)', () => { expect(counters8().carrierFlips / counters8().carrierDecisions).toBeLessThan(0.35); }, 240_000);
+  // Task 9 close-out ruling 2: pooled over seeds 1-16, under 0.37. Task 9 changed the composition of the decisions: with
+  // fewer pucks changing hands (poke takes 35 -> 12 a game, hits that free the puck 41 -> 23) there are fewer "gained the
+  // puck" decisions, which never count as flips (flips per other decision only 0.515 -> 0.531). Task 14 revisits.
+  it('A3: the carrier keeps his mind: under 37% of his decisions change what he is doing (seeds 1-16)', () => { expect(counters16().carrierFlips / counters16().carrierDecisions).toBeLessThan(0.37); }, 240_000);
   it('A2/A3: behind the net is used: at least 8 possessions there, 2 passes out front and 0.3 wraparounds a game', () => {
     expect(m().behindNetPossessionsPerGame).toBeGreaterThanOrEqual(8); expect(m().passesOutFrontPerGame).toBeGreaterThanOrEqual(2); expect(m().wrapAttemptsPerGame).toBeGreaterThanOrEqual(0.3);
   }, 60_000);
@@ -205,7 +211,10 @@ describe('A4: saves, rebounds and tips (Task 8)', () => {
     const saves = games().flatMap((r) => r.events.filter((e) => e.type === 'save'));
     const rb = saves.filter((e) => e.type === 'save' && e.detail.kind === 'rebound').length / saves.length;
     // Close-out: second chances are pooled over seeds 1-8 (3.7 to 6.7 on three seeds by the roll); the bar is unchanged.
-    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m8().reboundChancesPerGame).toBeGreaterThanOrEqual(6);
+    // Task 9 close-out ruling 3: pooled over seeds 1-16, at least 4. On 16 seeds it was under 6 at every recent commit (5.31
+    // before the Task 8b review fix, 5.5 after it, about 4.5 after Task 9); Task 14 tunes rebounds to the design's target
+    // (about a fifth to a quarter of goals from rebounds and tips together).
+    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m16().reboundChancesPerGame).toBeGreaterThanOrEqual(4);
   }, 240_000);
   it('A4: tips happen: at least 2 a game, some on goal', () => {
     const tips = sum(games().map((r) => r.events.filter((e) => e.type === 'tip').length)) / 3;
@@ -257,7 +266,8 @@ describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
   // checker within 1.8 m, and a poor option still takes 3 to 7% of a draw, so the share of attempts follows the share of
   // decisions. Task 10 (engagements: a tied-up man cannot get a shot off) must bring it under 20%.
   it('A4: a pressured shot is a poor shot: under 35% of attempts are let go with a checker in stick reach (was 49%; Task 10: under 20%)', () => {
-    const c = counters8(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.35);
+    // Task 9 close-out ruling 5: pooled over seeds 1-16 (0.349 on seeds 1-8 and 0.302 on 9-16 after Task 9); bar unchanged.
+    const c = counters16(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.35);
   }, 240_000);
   // Close-out ruling 2: the far shots of normal play that count are the UNSCREENED ones (no teammate at the net or in the
   // goalie's sight line: measures.ts attemptsNormalFarBare); the screened ones are what "long shots wait for traffic"
@@ -278,6 +288,11 @@ describe('A5: battles the winner wins (Task 9)', () => {
   // Review Focus 4 for the whole game, on seeds 1-16 (controller): measures.ts puckJumpTicks counts live ticks on which the
   // puck moves further than its speed allows (0.05 m of slack; a carried puck may swing with the blade, 0.2 m a tick
   // beyond his travel), or goes to a new carrier's blade from more than 1.2 m.
+  // Task 9 close-out ruling 4: a defender who has the carrier closes on him when he shields the puck (job-targets.ts
+  // takeCarrier); a 15 s stand-off along the boards with a winger shadowing at 2.5 m broke the robustness file.
+  it('a protecting carrier is engaged within 3 s (a contest with him, or an opponent within 1.5 m) in at least 95% of cases (seeds 1-16)', () => {
+    const c = counters16(); expect(c.protectSpells).toBeGreaterThan(500); expect(c.protectEngaged / c.protectSpells).toBeGreaterThanOrEqual(0.95);
+  }, 240_000);
   it('no teleport: on a live tick the puck never moves further than its speed allows, 1.2 m when it changes hands (seeds 1-16)', () => {
     expect(countGames(Array.from({ length: 16 }, (_, i) => i + 1)).puckJumpTicks).toBe(0); expect(m16().maxPuckJump).toBeLessThanOrEqual(1.2);
   }, 240_000);

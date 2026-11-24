@@ -41,6 +41,7 @@ export type PlayCounterKey =
   | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals'
   | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
   | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear'
+  | 'protectSpells' | 'protectEngaged'
   | 'attemptsBackhand' | 'attemptsInReach' | 'attemptsOddManFar' | 'attemptsOddManClose' | 'attemptsLowClose' | 'attemptsLowFar' | 'attemptsNormalFar' | 'attemptsNormalFarBare' | 'attemptsNormalClose' | 'attemptsBreakaway' | 'attemptsOther';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
@@ -60,6 +61,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
   'netFrontHolds', 'netFrontHoldsLong', 'pointShotSaves', 'pointShotSavesNear',
+  'protectSpells', 'protectEngaged',
   'attemptsBackhand', 'attemptsInReach', 'attemptsOddManFar', 'attemptsOddManClose', 'attemptsLowClose', 'attemptsLowFar', 'attemptsNormalFar', 'attemptsNormalFarBare', 'attemptsNormalClose', 'attemptsBreakaway', 'attemptsOther',
 ];
 
@@ -143,6 +145,12 @@ const CONTACT_TICKS = 10;
  * (where it is carried to over the next ticks) is at most HAND_OVER (m): a pickup's kick.
  */
 const JUMP_SLACK = 0.05;
+/**
+ * A protecting carrier is engaged (close-out of Task 9) when he is in a contest with an opponent, or a standing opponent is
+ * within PROTECT_ENGAGE (m) of him, within PROTECT_TICKS of starting to protect. Spells that end unengaged sooner (he
+ * moved on) do not count.
+ */
+const PROTECT_ENGAGE = 1.5;
 const CARRY_TURN = 0.2;
 const HAND_OVER = 1.2;
 const DECIDED = new Set(['pinned', 'stick', 'support', 'scramble']);
@@ -533,6 +541,29 @@ export function createObserver(setup: GameSetup): Observer {
     wasLoose = live && cs === undefined;
   }
 
+  /** The carrier protecting now: who, since which tick, and whether he has been engaged. */
+  let protecting: { id: string; tick: number; engaged: boolean } | null = null;
+  const PROTECT_TICKS = ticksOf(3);
+  function protect(st: GameState): void {
+    const plan = st.phase === 'live' ? st.carrierPlan ?? null : null;
+    const cs = plan !== null && plan.kind === 'protect' && plan.id === st.carrierId ? skaterById(st, plan.id) : undefined;
+    if (cs === undefined) {
+      if (protecting !== null && protecting.engaged) { c.protectSpells++; c.protectEngaged++; }
+      protecting = null;
+      return;
+    }
+    if (protecting === null || protecting.id !== cs.id) protecting = { id: cs.id, tick: st.tick, engaged: false };
+    if (protecting.engaged || st.tick - protecting.tick > PROTECT_TICKS) return;
+    let engaged = false;
+    if (cs.contestId !== null) {
+      const ct = st.contests.find((k) => k.id === cs.contestId);
+      if (ct !== undefined && ct.participants.some((id) => skaterById(st, id)?.side !== cs.side)) engaged = true;
+    }
+    if (!engaged) for (const o of st.skaters) if (o.onIce && o.side !== cs.side && o.downT === 0 && Math.hypot(o.pos.x - cs.pos.x, o.pos.y - cs.pos.y) <= PROTECT_ENGAGE) { engaged = true; break; }
+    if (engaged) protecting.engaged = true;
+    else if (st.tick - protecting.tick === PROTECT_TICKS) c.protectSpells++; // 3 s protecting and nobody on him
+  }
+
   const bladeAt = { x: 0, y: 0 };
   function puck(st: GameState, events: readonly GameEvent[]): void {
     const live = st.phase === 'live', p = st.puck, speed = speedOf(p.vel);
@@ -617,6 +648,7 @@ export function createObserver(setup: GameSetup): Observer {
       carrierMind(st);
       bodies(st);
       carry(st, events);
+      protect(st);
       puck(st, events);
     },
     counters: () => ({ ...c }),

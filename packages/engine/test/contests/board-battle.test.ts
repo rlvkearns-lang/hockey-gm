@@ -157,13 +157,14 @@ describe('board battles', () => {
     expect(r.steps[0]).toBeGreaterThan(0.02); expect(r.steps[1]).toBeGreaterThan(0.02);
     expect(r.steps.slice(8).every((x) => x < 1e-9)).toBe(true); expect(r.offSpot).toBeLessThan(1e-9);
   });
-  // Task 8b review fix: one game read 221 (seed 3; 197 to 237 on seeds 1-5, about 100 of them net-front battles): the
-  // count is read as the mean of seeds 1-5; the bars are unchanged.
+  // Task 9 close-out ruling 1: the 220 bar predates battles having winners and protects not being given up. Task 9 adds
+  // about 15 decided battles a game (no-winner battles 18.9 -> 4.1) and 6 protects (released 7 -> 0): under 270 a game,
+  // the mean of seeds 1-8 (about 105 of them net-front battles).
   it('a full game has plenty of battles', () => {
-    const n = [1, 2, 3, 4, 5].map((seed) => count(simulateGame(setup(seed)), 'battle'));
+    const n = [1, 2, 3, 4, 5, 6, 7, 8].map((seed) => count(simulateGame(setup(seed)), 'battle'));
     const mean = n.reduce((a, b) => a + b, 0) / n.length;
-    expect(mean).toBeGreaterThan(40); expect(mean).toBeLessThan(220);
-  }, 5 * GAME_TIMEOUT);
+    expect(mean).toBeGreaterThan(40); expect(mean).toBeLessThan(270);
+  }, 8 * GAME_TIMEOUT);
 
   it('every tick shows the stage, its time, and who is pinned once someone is', () => {
     const log = runBattleLogged(pf, twoWay);

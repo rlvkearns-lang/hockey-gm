@@ -756,8 +756,9 @@ export function carrierTaker(state: GameState, side: Side): SkaterState | null {
 }
 
 /**
- * Has the carrier (`s` is carrierTaker): below the dots he pressures him (PRESS_GAP goal-side, skating through him),
- * above them he contains him (CONTAIN_GAP goal-side). Behind the net he waits at the near post until he is within
+ * Has the carrier (`s` is carrierTaker): below the dots, or wherever the carrier is shielding the puck (his plan is
+ * protect), he pressures him (PRESS_GAP goal-side, skating through him); above them he contains him (CONTAIN_GAP
+ * goal-side). Behind the net he waits at the near post until he is within
  * BEHIND_CHASE_RANGE of the carrier or has waited BEHIND_CHASE_SECONDS. Returns false when `s` is not the taker.
  */
 function takeCarrier(state: GameState, s: SkaterState, out: Want): boolean {
@@ -781,7 +782,10 @@ function takeCarrier(state: GameState, s: SkaterState, out: Want): boolean {
       return true;
     }
   }
-  const deep = crx < CONTAIN_ABOVE;
+  // A carrier who is shielding the puck (his plan is protect) is pressured wherever he is: containing him at a stick's
+  // length and more, nobody ever engaged him (Task 9 close-out: 15 s along the boards with a winger shadowing at 2.5 m).
+  const shielding = state.carrierPlan !== null && state.carrierPlan.id === c.id && state.carrierPlan.kind === 'protect';
+  const deep = crx < CONTAIN_ABOVE || shielding;
   pressSpot(state, s, c, deep ? PRESS_GAP : CONTAIN_GAP, p, deep ? PRESS_LANE : CONTAIN_LANE);
   // Containing, he plays where the carrier is going (CONTAIN_LEAD s ahead), not where he was.
   if (!deep) { p.x += c.vel.x * CONTAIN_LEAD; p.y += c.vel.y * CONTAIN_LEAD; }
