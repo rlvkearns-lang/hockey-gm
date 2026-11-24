@@ -8,6 +8,7 @@ import { movementOf } from '../skating';
 import { TUNING } from '../tuning';
 import { heldSeconds, watchTurnover } from '../turnovers';
 import { PUCK_RADIUS } from '../util';
+import { engagementOf } from '../engage-state';
 import type { ContestStateOf, GameEvent, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
@@ -137,6 +138,9 @@ export const boardBattleContest: Contest<'boardBattle'> = {
       },
       data: { holdsPuck: false, slide: 0, held: 0, firstSet: false, balance: 0, nextAt: PIN_ROUND, digRounds: 0, clean: false },
     };
+    // Out of an engagement (Task 10): the man who had inside position on the other is the first man in.
+    const inside = insideOf(state, c.roles.a, c.roles.b);
+    if (inside !== null) { c.roles.first = inside; c.data.firstSet = true; }
     if (carrierIdx === NONE) intoFeet(c, ctx);
     else c.leader = participants[carrierIdx]!;
     steer(c, ctx);
@@ -163,6 +167,15 @@ export const boardBattleContest: Contest<'boardBattle'> = {
     return r;
   },
 };
+
+/** The man of `a` and `b` with inside position in an engagement of either (Task 10), or null. */
+function insideOf(state: GameState, a: string, b: string): string | null {
+  for (const id of [a, b]) {
+    const e = engagementOf(state, id);
+    if (e !== null && (e.inside === a || e.inside === b)) return e.inside;
+  }
+  return null;
+}
 
 const BATTLEABLE = 'boardBattle.puck';
 

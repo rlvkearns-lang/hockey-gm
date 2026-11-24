@@ -11,7 +11,7 @@ export type EventKind = 'pass' | 'lineChange' | 'goal' | 'other';
 export const kindOf = (e: GameEvent): EventKind => (e.type === 'pass' || e.type === 'lineChange' || e.type === 'goal' ? e.type : 'other');
 
 /** Bookkeeping events for a viewer's animation and director, not lines for people to read. */
-const NOT_LISTED: readonly GameEvent['type'][] = ['release', 'contestStart', 'contestEnd'];
+const NOT_LISTED: readonly GameEvent['type'][] = ['release', 'contestStart', 'contestEnd', 'engagement'];
 export const listed = (e: GameEvent): boolean => !NOT_LISTED.includes(e.type);
 
 const TAKEAWAY_HOW = { poke: 'with a poke check', battle: 'in a battle' } as const;
@@ -21,6 +21,7 @@ const TURNOVER_HOW = {
 } as const;
 const BATTLE_HOW = { protect: 'He kept the puck', pinned: 'He pinned him on the boards', stick: 'He won it with his stick', scramble: 'In the scramble', support: 'His teammate came to help', netFront: '' } as const;
 const HIT_DEGREE = { knockdown: ' and put him down', stagger: ' and staggered him', bump: ' (a bump)' } as const;
+const ENGAGE_HOW = { heldPosition: 'held his spot', foughtThrough: 'fought through', spunOff: 'spun off', released: 'they came apart', contest: 'it became a battle', whistle: 'the whistle went' } as const;
 const SAVE_HOW = { pad: 'with the pad', glove: 'with the glove', blocker: 'with the blocker', butterfly: 'in the butterfly' } as const;
 
 const metres = (d: number): string => ` from ${d.toFixed(1)} m`;
@@ -50,6 +51,11 @@ export function describe(e: GameEvent, defs: Map<string, PlayerDef>, abbr: Recor
       case 'turnover': return `Turnover: ${me} won the puck off ${other} ${TURNOVER_HOW[e.detail.how]}`;
       case 'takeaway': return `Takeaway: ${me} took the puck from ${other} ${TAKEAWAY_HOW[e.detail.how]}`;
       case 'giveaway': return `Giveaway: ${me} lost the puck (${other} picked off his pass)`;
+      case 'engagement': {
+        const pair = `${name(e.detail.a)} and ${name(e.detail.b)}`;
+        const how = ENGAGE_HOW[e.detail.result];
+        return e.playerId === null ? `${pair} battled for position (${e.detail.kind}): ${how}` : `${me} had inside position on ${other} (${e.detail.kind}): ${how}`;
+      }
       case 'battle': {
         const kind = e.detail.how === 'netFront' ? 'Net-front battle' : 'Board battle';
         const how = BATTLE_HOW[e.detail.how];

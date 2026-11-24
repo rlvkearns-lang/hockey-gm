@@ -46,7 +46,7 @@ export function restPuck(state: GameState): void {
 
 /**
  * Whistle: phase `stopped`, puck at rest where it is, nobody in possession, no pass or shot pending, the touch chain
- * cleared, every contest over (its players free) and every net-front tie-up and rebound edge gone, and every on-ice
+ * cleared, every contest over (its players free) and every net-front tie-up, engagement and rebound edge gone, and every on-ice
  * skater heads for his line-up spot for the faceoff at `spot` (his plan: job `lineUp`, reason `whistle`).
  */
 export function stopPlay(state: GameState, spot: Vec2): void {
@@ -66,6 +66,7 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.lastRelease = null;
   state.tiedUpUntil = [];
   state.staggered = [];
+  state.engagements = []; // a new list: game.ts step emits `whistle` for the old one's
   state.reboundEdge = null;
   state.lastSave = null;
   clearContests(state);

@@ -8,6 +8,7 @@ import type { ContestStateOf, GameState, SkaterState } from '../types';
 import { dist, hypot2, segDistXY, type Vec2 } from '../vec';
 import { datan2, dcos, dsin } from '../dmath';
 import { wrapAngle } from '../skating';
+import { engagementOf } from '../engage-state';
 import {
   carrierNow, carrierOf, contestEvent, contestRating, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx,
@@ -80,7 +81,7 @@ export const netFrontContest: Contest<'netFront'> = {
     const c: ContestStateOf<'netFront'> = {
       id: -1, kind: KIND, stage: 'jostle', stageT: 0, participants: participants.slice(), leader: null,
       spot: { x: att.pos.x, y: att.pos.y }, freeIds: [att.id], roles: { attacker: att.id, defender: participants[1]! },
-      data: { rounds: 0, outX: 0, outY: 0 },
+      data: { rounds: 0, outX: 0, outY: 0, inside: insideOf(state, att.id, participants[1]!) },
     };
     steer(c, ctx);
     return c;
@@ -116,7 +117,10 @@ export const netFrontContest: Contest<'netFront'> = {
 function round(c: ContestStateOf<'netFront'>, ctx: ContestCtx, att: SkaterState, def: SkaterState): void {
   const state = ctx.state;
   const ma = movementOf(ctx.defs.get(att.id)!, 1).mass, md = movementOf(ctx.defs.get(def.id)!, 1).mass;
-  const edge = contestRating(ctx, c, att.id, T.body) - contestRating(ctx, c, def.id, T.body) + (ma - md) / T.massPerPoint;
+  // Out of an engagement between them (Task 10): the man who had inside position has TUNING.engage.insideEdge in the first round.
+  const inside = c.data.rounds === 0 ? c.data.inside ?? null : null;
+  const edge = contestRating(ctx, c, att.id, T.body) - contestRating(ctx, c, def.id, T.body) + (ma - md) / T.massPerPoint
+    + (inside === att.id ? TUNING.engage.insideEdge : inside === def.id ? -TUNING.engage.insideEdge : 0);
   const effectTick = state.tick + Math.round(EFFECT_SECONDS / DT);
   c.data.rounds++;
   if (ctx.rng.next() < winProb(edge)) {
@@ -139,6 +143,12 @@ function round(c: ContestStateOf<'netFront'>, ctx: ContestCtx, att: SkaterState,
   c.leader = def.id;
   c.freeIds.length = 0; // he goes where he is pushed
   enterStage(c, 'tied');
+}
+
+/** Who had inside position in an engagement between `a` and `b` (Task 10), or null. */
+function insideOf(state: GameState, a: string, b: string): string | null {
+  const e = engagementOf(state, a);
+  return e !== null && (e.a === b || e.b === b) ? e.inside : null;
 }
 
 /** The defender is within BETWEEN of the segment from the attacker to the centre of the net. */

@@ -36,6 +36,7 @@ export type PlayCounterKey =
   | 'contactOver03' | 'puckJumpTicks'
   | 'goalieOverlapTicks' | 'raceJumpTicks'
   | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside'
+  | 'engagedTicks' | 'contactOver03Free' | 'contactOver03Engaged' | 'coverTicks' | 'coverDist' | 'coverNearTicks' | 'coverNearDist' | 'engagements'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
   | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals'
@@ -56,6 +57,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'contactOver03', 'puckJumpTicks',
   'goalieOverlapTicks', 'raceJumpTicks',
   'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderInside',
+  'engagedTicks', 'contactOver03Free', 'contactOver03Engaged', 'coverTicks', 'coverDist', 'coverNearTicks', 'coverNearDist', 'engagements',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
   'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals',
@@ -118,6 +120,9 @@ const UTILITY = new Set(['change', 'lineUp', 'tagUp', 'contest', 'down']);
  * than his man and within NET_FRONT_INSIDE (m) of him.
  */
 const NET_FRONT_MAN = 2;
+/** Covering jobs (job-targets.ts MARKING, and dNet) whose distance to their man is measured; near the net: within COVER_NEAR (m). */
+const COVERING = new Set(['backcheckA', 'backcheckB', 'wingStrong', 'wingWeak', 'dzCentre', 'dGapWeak', 'dNet']);
+const COVER_NEAR = 10;
 const NET_FRONT_INSIDE = 1.6;
 /** A goalie's body radius (TUNING.goalieBody.radius). */
 const GOALIE_RADIUS = 0.55;
@@ -187,7 +192,7 @@ export function createObserver(setup: GameSetup): Observer {
   let behind: { id: string; ticks: number } | null = null;
   /** Last tick each player was the carrier of a behind-the-net possession (0.5 s or more there). */
   const lastBehind = new Map<string, number>();
-  let contacts = new Map<string, number>();
+  let contacts = new Map<string, number>(), freeContacts = new Map<string, number>();
   /** The puck at the end of the last tick: where, its speed (on the ice, and with z), whether play was live, and its carrier then (where he stood). */
   let prevPuck: { x: number; y: number; speed: number; speed3: number; live: boolean; carrier: string | null } | null = null;
   /** The carrier at the end of the last tick, and whether he was on a breakaway then. */
@@ -406,6 +411,16 @@ export function createObserver(setup: GameSetup): Observer {
         const plan = st.plans[i]!;
         const job = plan.job;
         if (!UTILITY.has(job)) { if (seen.has(job)) dup = true; seen.add(job); }
+        // Task 10: how far a covering defender (a marking job following a man) is from his man, and when that man is
+        // within COVER_NEAR of the net the defender defends.
+        if (COVERING.has(job) && plan.follow === 'man' && plan.markId !== null) {
+          const m = skaterById(st, plan.markId);
+          if (m !== undefined && m.onIce) {
+            const d = Math.hypot(m.pos.x - s.pos.x, m.pos.y - s.pos.y);
+            c.coverTicks++; c.coverDist += d;
+            if (Math.hypot(m.pos.x + st.attackDir[side] * RINK.goalLineX, m.pos.y) <= COVER_NEAR) { c.coverNearTicks++; c.coverNearDist += d; }
+          }
+        }
         if (job !== 'dNet' || plan.markId === null) return;
         const m = skaterById(st, plan.markId);
         if (m === undefined || Math.hypot(m.pos.x - s.pos.x, m.pos.y - s.pos.y) > NET_FRONT_MAN) return;
@@ -498,7 +513,7 @@ export function createObserver(setup: GameSetup): Observer {
   }
 
   function bodies(st: GameState): void {
-    const next = new Map<string, number>();
+    const next = new Map<string, number>(), nextFree = new Map<string, number>();
     if (st.phase === 'live') {
       const home = st.skaters.filter((s) => s.onIce && s.side === 'home'), away = st.skaters.filter((s) => s.onIce && s.side === 'away');
       for (const a of home) for (const b of away) {
@@ -508,9 +523,18 @@ export function createObserver(setup: GameSetup): Observer {
         const run = (contacts.get(key) ?? 0) + 1;
         if (run === CONTACT_TICKS) c.contactOver03++;
         next.set(key, run);
+        // Task 10: the same run with neither steered by a contest (it starts again after one), and whether, on its 10th
+        // tick, the two are engaged with each other.
+        const freeRun = !steered(st, a) && !steered(st, b) ? (freeContacts.get(key) ?? 0) + 1 : 0;
+        if (freeRun === CONTACT_TICKS) {
+          c.contactOver03Free++;
+          if (st.engagements.some((e) => (e.a === a.id && e.b === b.id) || (e.a === b.id && e.b === a.id))) c.contactOver03Engaged++;
+        }
+        if (freeRun > 0) nextFree.set(key, freeRun);
       }
     }
     contacts = next;
+    freeContacts = nextFree;
   }
 
   /**
@@ -633,7 +657,8 @@ export function createObserver(setup: GameSetup): Observer {
 
   return {
     tick(st, events) {
-      if (st.phase === 'live') c.liveTicks++;
+      if (st.phase === 'live') { c.liveTicks++; if (st.engagements.length > 0) c.engagedTicks++; }
+      for (const e of events) if (e.type === 'engagement') c.engagements++;
       netFront(st, events);
       skaters(st);
       jobs(st);

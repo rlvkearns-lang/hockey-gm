@@ -13,6 +13,7 @@ import type { GameEvent, GameState, PlayerDef, ShotInFlight, ShotType, Side, Ska
 import { hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, GRAVITY as GRAVITY_, skaterById as skaterById_ } from './util';
+import { tieOf } from './engage-state';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const DT = DT_;
 const bladePos = bladePos_;
@@ -265,6 +266,24 @@ export function shotRush(state: GameState, s: SkaterState, defs: Map<string, Pla
 }
 
 /**
+ * A shot's spread (sigma, m) for shooter `me` from `d` m under `pressure`, of `type`, `rushed` (0..1, shotRush) and with
+ * `tie` (Task 10: a tied-up shooter's spread is times 1 + TUNING.engage.limits.spread * his tie).
+ */
+export function spreadOf(me: PlayerDef, d: number, pressure: number, type: ShotType, rushed: number, tie: number): number {
+  return (SHOT.spread.base + (100 - me.attrs.shootingAccuracy) * SHOT.spread.perPoint + d * SHOT.spread.perMetre
+    + pressure * SHOT.spread.pressure) * TYPE_SPREAD[type] * (1 + SHOT.rushed.spread * rushed) * (1 + TUNING.engage.limits.spread * tie);
+}
+
+/** The spread executeShot would give `shooterId`'s shot now, of `type` (shotTypeFor when not given). */
+export function shotSpread(state: GameState, shooterId: string, defs: Map<string, PlayerDef>, type?: ShotType): number {
+  const s = skaterById(state, shooterId), me = defs.get(shooterId)!;
+  const p = state.puck.pos, d = hypot2(state.attackDir[s.side] * RINK.goalLineX - p.x, p.y), pressure = pressureOn(state, s);
+  const t = type ?? shotTypeFor(state, s, me.shoots, d, pressure);
+  return spreadOf(me, d, pressure, t, shotRush(state, s, defs, rushProbe).rushed, state.engagements.length > 0 ? tieOf(state, shooterId) : 0);
+}
+const rushProbe: ShotRush = { checker: null, rushed: 0, stick: 0 };
+
+/**
  * Shoot at the attacked net: aim at a spot inside it (more often on the side the goalie leaves open), missed by a
  * normal spread from shootingAccuracy, distance and pressure, or now and then mishit wide or high (TUNING.shot.wild).
  * Speed TUNING.shot.speed (base + per point of power), lifted so it arrives at the aimed height. Its type (`shotType`,
@@ -300,8 +319,7 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
   // The checker's stick on it: blocked at his stick, or deflected wide.
   const sticked = checker !== null && rng.chance(rush.stick);
   const stickBlock = sticked && rng.chance(SHOT.rushed.stick.block);
-  const sigma = (SHOT.spread.base + (100 - a.shootingAccuracy) * SHOT.spread.perPoint + d * SHOT.spread.perMetre
-    + pressure * SHOT.spread.pressure) * TYPE_SPREAD[type] * (1 + SHOT.rushed.spread * rushed);
+  const sigma = spreadOf(me, d, pressure, type, rushed, state.engagements.length > 0 ? tieOf(state, shooterId) : 0);
   const shade = goalieShade(state, s.side);
   const openSide = shade > 0 ? -1 : 1;
   const aimSide = rng.chance(clamp(0.5 + Math.abs(shade) * SHOT.openSidePull, 0.5, SHOT.openSideMax)) ? openSide : -openSide;

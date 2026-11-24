@@ -286,7 +286,8 @@ export type ContestData = {
     /** The winner comes away with it clean (else it squirts loose). */
     clean: boolean;
   };
-  netFront: { rounds: number; outX: number; outY: number };
+  /** `inside` (Task 10): the man who had inside position in an engagement the battle took over (+TUNING.engage.insideEdge in its first round), else absent or null. */
+  netFront: { rounds: number; outX: number; outY: number; inside?: string | null };
   looseRace: { outcome: 'undecided' | 'a' | 'b' | 'bounce'; gap: number };
 };
 
@@ -320,6 +321,28 @@ export type ContestStateOf<K extends ContestKind> = {
 };
 
 export type ContestState = { [K in ContestKind]: ContestStateOf<K> }[ContestKind];
+
+/**
+ * Two opponents battling for position (engagements.ts, Task 10). Lighter than a contest: nobody is steered; both are
+ * slowed and limited. A viewer draws the lean and the shove from it.
+ */
+export type Engagement = {
+  /** The pair; `a` comes first in `state.skaters`. */
+  a: string;
+  b: string;
+  /** The tick it began. */
+  sinceTick: number;
+  /** boxOut: near a net, one keeping the other from it; tieUp: a defender on the man he covers; ride: one of them has the puck; lean: anything else. */
+  kind: 'boxOut' | 'tieUp' | 'ride' | 'lean';
+  /** Who has inside position (between the other man and the net or puck they both want); null while it is even. */
+  inside: string | null;
+  /** How tied up each is, 0 (free) to 1 (stick and body held). */
+  tieA: number;
+  tieB: number;
+  /** Who won the last draw (null before the first), and the tick of the next. */
+  lastWon: string | null;
+  nextDrawTick: number;
+};
 
 /**
  * Plain JSON data only: a viewer reads it between steps, and it holds everything that decides the rest of the game, so
@@ -386,6 +409,11 @@ export type GameState = {
   tiedUpUntil: { id: string; tick: number }[];
   /** Skaters staggered by a hit (Task 9): each skates at most TUNING.hit.degree.staggerCap of his top speed until `untilTick`. */
   staggered: { id: string; untilTick: number }[];
+  /**
+   * Pairs of opponents battling for position (engagements.ts, Task 10): lighter than a contest. Nobody is steered; both
+   * are slowed and the tied-up man is limited. Each skater is in at most one. Cleared at a whistle.
+   */
+  engagements: Engagement[];
   /** Skater `id` won his last net-front round: +10 in a loose-puck race (a rebound) while tick < `untilTick`. */
   reboundEdge: { id: string; untilTick: number } | null;
   /**
@@ -493,6 +521,15 @@ export type EventDetails = {
   takeaway: { how: 'poke' | 'battle'; atTick: number };
   /** Box score: playerId's pass was picked off by otherId at `atTick` (pos is where), under little pressure. */
   giveaway: { how: 'intercepted'; atTick: number };
+  /**
+   * An engagement (Task 10) that lasted 0.3 s or more ended: playerId had inside position at the end (null: nobody),
+   * otherId is the other man (with nobody inside: playerId null and otherId null; `a` and `b` always name the pair, `a`
+   * first in state.skaters). `seconds`: how long it lasted. `result`: heldPosition (the inside man's opponent gave up: his
+   * job changed), foughtThrough (a man got loose nearer the puck or the net he attacks), spunOff (he got loose, not nearer),
+   * released (they came apart, or one went down, left the ice or changed his job with nobody inside), contest (a staged
+   * contest took one of them), whistle.
+   */
+  engagement: { kind: Engagement['kind']; seconds: number; result: 'heldPosition' | 'foughtThrough' | 'spunOff' | 'released' | 'contest' | 'whistle'; a: string; b: string };
   /** playerId beat otherId in a board battle (how it was won) or a net-front battle (`netFront`). */
   battle: {
     how: 'protect' | 'pinned' | 'stick' | 'support' | 'scramble' | 'netFront'; contestId: number;

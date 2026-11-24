@@ -23,6 +23,7 @@
  * Positions here are attack-relative for the carrier's side: rx toward the net he attacks (goal line 27.13, blue line
  * 7.62), ly to his left.
  */
+import { tieOf } from './engage-state';
 import { goalieShade as goalieShade_, pressureOn as pressureOn_, shotRush as shotRush_ } from './actions';
 import { composite as composite_ } from './attributes';
 import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
@@ -427,6 +428,12 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const fail = shotAfter(state, s, me, defs, gc, pBlock, traffic, dNet, pressure, here, rushed, rushStick);
       let v = habit(gc * (1 - here) + fail - (1 - gc) * here, tend.shoot);
       v = v >= 0 ? v * shootScore : v / shootScore;
+      // A tied-up shooter cannot get a clean shot off (Task 10): its value is times 1 - TUNING.engage.limits.shootValue *
+      // his tie (a negative value grows as much the other way).
+      if (state.engagements.length > 0) {
+        const tie = tieOf(state, s.id);
+        if (tie > 0) { const k = 1 - TUNING.engage.limits.shootValue * tie; v = v >= 0 ? v * k : v / k; }
+      }
       const ot = state.oneTimerTaken;
       if (ot !== null && ot.id === s.id && state.tick - ot.tick <= TUNING.shot.types.oneTimerTicks) v += V.oneTimerBonus;
       out.push({ kind: 'shoot', value: v + shootOn });

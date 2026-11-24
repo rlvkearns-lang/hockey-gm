@@ -1,3 +1,4 @@
+import { DT } from './constants';
 import type { Movement } from './skating';
 import { TUNING as TUNING_ } from './tuning';
 import type { GoalieState, SkaterState } from './types';
@@ -6,12 +7,22 @@ import { hypot2 as hypot2_, type Vec2 } from './vec';
 const TUNING = TUNING_;
 const hypot2 = hypot2_;
 
+/**
+ * An engaged pair (engagements.ts, Task 10), as indexes into the `skaters` given to resolveBodies, with each man's tie.
+ * Callers reuse these objects (no allocation per tick).
+ */
+export type EngagedPair = { i: number; j: number; tieI: number; tieJ: number };
+
 /** Reused per call so the pair loop looks movement up once per skater, not once per pair. */
 const scratch: (Movement | null)[] = [];
 
 /**
  * Single pass; the caller clamps to the boards afterwards.
  * Push overlapping on-ice bodies apart, the lighter one giving more.
+ * Engaged pairs (`engaged`, the first `engagedCount` of them; Task 10) are held at contact: their overlap is removed as
+ * any other's, but a man moving away from the other keeps only 1 - his tie of his velocity away from him (and of this
+ * tick's step away, while they are beyond contact), so a tied-up man cannot simply skate off. Pairs that are not engaged
+ * separate as before.
  * Returns each contact with the closing speed along the line between centres (0 if already parting).
  */
 export function resolveBodies(
@@ -19,6 +30,8 @@ export function resolveBodies(
   move: (id: string) => Movement,
   /** Each skater's Movement, parallel to `skaters`, when the caller already has them (then `move` is not asked). */
   moves?: readonly Movement[],
+  engaged?: readonly EngagedPair[],
+  engagedCount = engaged?.length ?? 0,
 ): { a: string; b: string; closing: number }[] {
   const contacts: { a: string; b: string; closing: number }[] = [];
   const n = skaters.length;
@@ -49,7 +62,41 @@ export function resolveBodies(
       contacts.push({ a: a.id, b: b.id, closing });
     }
   }
+  for (let k = 0; k < engagedCount; k++) {
+    const e = engaged![k]!;
+    const ma = scratch[e.i], mb = scratch[e.j];
+    if (!ma || !mb) continue;
+    hold(skaters[e.i]!, skaters[e.j]!, ma.radius + mb.radius, e.tieI, e.tieJ);
+  }
   return contacts;
+}
+
+
+/**
+ * Holds engaged `a` and `b` together: each keeps only 1 - his tie of his velocity away from the other, and, while they are
+ * beyond contact (`min`, their radii), gives back that share of this tick's step away (never closer than contact).
+ */
+function hold(a: SkaterState, b: SkaterState, min: number, tieA: number, tieB: number): void {
+  const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y;
+  const d = hypot2(dx, dy);
+  if (d < 1e-9) return;
+  const nx = dx / d, ny = dy / d;
+  let gap = d - min;
+  const awayA = -(a.vel.x * nx + a.vel.y * ny);
+  if (awayA > 0 && tieA > 0) {
+    const cut = awayA * tieA;
+    a.vel.x += nx * cut; a.vel.y += ny * cut;
+    const back = Math.min(cut * DT, Math.max(0, gap));
+    a.pos.x += nx * back; a.pos.y += ny * back;
+    gap -= back;
+  }
+  const awayB = b.vel.x * nx + b.vel.y * ny;
+  if (awayB > 0 && tieB > 0) {
+    const cut = awayB * tieB;
+    b.vel.x -= nx * cut; b.vel.y -= ny * cut;
+    const back = Math.min(cut * DT, Math.max(0, gap));
+    b.pos.x -= nx * back; b.pos.y -= ny * back;
+  }
 }
 
 /**

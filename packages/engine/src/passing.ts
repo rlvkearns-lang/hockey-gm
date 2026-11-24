@@ -14,6 +14,7 @@ import { dcos as dcos_, dlog as dlog_, dsin as dsin_ } from './dmath';
 import { crossesNet as crossesNet_, passLaneWidth as passLaneWidth_ } from './lanes';
 import { ICE_DECAY } from './puck';
 import { slideStopChance } from './slide';
+import { tieOf, tiedChance } from './engage-state';
 import { RINK as RINK_ } from './rink';
 import { isTiedUp as isTiedUp_, steeredByContest as steeredByContest_ } from './team-play';
 import { TUNING } from './tuning';
@@ -120,9 +121,10 @@ export function stickInterceptChance(d: PlayerDef, speed: number): number {
  * off his facing), plus 0.002 per point of puckHandling over 70, less TUNING.pass.contested times `contested` (0 to 1: an
  * opponent on him as it arrives, receiverContest); clamped to [0.03, 0.97].
  */
-export function receiveChance(receiver: PlayerDef, arriveSpeed: number, fromBehind: boolean, contested = 0): number {
-  return clamp(RECEIVE_MAX - RECEIVE_PER_MS * Math.max(0, arriveSpeed - RECEIVE_FROM) - (fromBehind ? RECEIVE_BEHIND : 0)
-    + RECEIVE_PER_POINT * (receiver.attrs.puckHandling - 70) - PASS.contested * contested, 0.03, 0.97);
+export function receiveChance(receiver: PlayerDef, arriveSpeed: number, fromBehind: boolean, contested = 0, tie = 0): number {
+  // A tied-up receiver (Task 10, engagements.ts) catches it less often by TUNING.engage.limits.receive per unit of tie, never never.
+  return tiedChance(clamp(RECEIVE_MAX - RECEIVE_PER_MS * Math.max(0, arriveSpeed - RECEIVE_FROM) - (fromBehind ? RECEIVE_BEHIND : 0)
+    + RECEIVE_PER_POINT * (receiver.attrs.puckHandling - 70) - PASS.contested * contested, 0.03, 0.97), tie, TUNING.engage.limits.receive);
 }
 
 /**
@@ -258,7 +260,7 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
   // From behind him: the puck comes at him from more than 120 degrees off his facing.
   const rx = p.x - aim.x, ry = p.y - aim.y, rl = hyp(rx, ry) || 1;
   const behind = (rx * dcos(to.facing) + ry * dsin(to.facing)) / rl < BEHIND_COS;
-  out.chance = td ? receiveChance(td, arriveSpeed, behind, out.contest) : RECEIVE_MAX;
+  out.chance = td ? receiveChance(td, arriveSpeed, behind, out.contest, state.engagements.length > 0 ? tieOf(state, to.id) : 0) : RECEIVE_MAX;
   return out;
 }
 

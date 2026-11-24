@@ -14,6 +14,7 @@ import type { GameEvent, GameState, PlayerDef } from './types';
 import { hypot2 as hypot2_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_ } from './util';
+import { tieOf, tiedChance } from './engage-state';
 const recordTouch = recordTouch_;
 const composite = composite_;
 const bladePos = bladePos_;
@@ -32,8 +33,9 @@ const HAND_EYE = { puckHandling: 0.5, shootingAccuracy: 0.3, iq: 0.2 };
 const blade: Vec2 = { x: 0, y: 0 };
 
 /** Hand-eye for a tip: puckHandling .5, shootingAccuracy .3, iq .2. Chance: TUNING.tip.base (0.10) + TUNING.tip.perPoint (0.004) * (handEye - 50), clamped to [0.03, 0.97]. */
-export function tipChance(d: PlayerDef): number {
-  return clamp(T.base + T.perPoint * (composite(d.attrs, HAND_EYE) - 50), 0.03, 0.97);
+export function tipChance(d: PlayerDef, tie = 0): number {
+  // A tied-up man (Task 10) tips it less often: times 1 - TUNING.engage.limits.tip * his tie, never never.
+  return tiedChance(clamp(T.base + T.perPoint * (composite(d.attrs, HAND_EYE) - 50), 0.03, 0.97), tie, TUNING.engage.limits.tip);
 }
 
 /**
@@ -67,7 +69,7 @@ export function tryTip(state: GameState, defs: Map<string, PlayerDef>, rng: Rng,
     const qx = ax + mx * u, qy = ay + my * u;
     if (hypot2(b.x - qx, b.y - qy) > T.reach) continue;
     shot.tipTried.push(s.id);
-    if (!rng.chance(tipChance(d))) continue;
+    if (!rng.chance(tipChance(d, state.engagements.length > 0 ? tieOf(state, s.id) : 0))) continue;
     // Off his stick: from where it met it, turned, lifted or knocked down, a little slower.
     pk.pos.x = qx;
     pk.pos.y = qy;

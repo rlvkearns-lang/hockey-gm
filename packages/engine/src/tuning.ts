@@ -698,6 +698,25 @@ export const TUNING = deepFreeze({
   /** Scoring (goalie.ts): a teammate's touch earns an assist only if he had the puck within this long (s) of the goal. */
   scoring: { assistWindowSeconds: 10 },
 
+  /**
+   * Engagements (engagements.ts, Task 10): two opponents whose bodies come within `contact` (m, beyond their radii) battle
+   * for position, when they meet at under maxRelSpeed (m/s) one against the other (faster, they glance off or it is a hit);
+   * coming together ties each up by startTie (so getting loose takes two draws won in a row). One draw every
+   * drawSeconds: the loser's tie rises by tieUp, the winner's falls by tieDown; two wins in a
+   * row take inside position. A draw is winProb of the `weights` composite difference, plus mass difference / massPerPoint,
+   * plus insideEdge for the man inside. A man's speed cap is times 1 - slow * his tie. It ends `released` beyond contact +
+   * releaseGap (m); a man with tie freeAt or less whose target is over breakAway (m) from the other who wins a draw gets
+   * loose. Near a net (the pair within netRange m of its centre) it is a box-out. Its event is emitted from eventSeconds.
+   * A tied-up man's limits: pass reception x (1 - receive * tie), shot spread x (1 + spread * tie), shot value x (1 -
+   * shootValue * tie), tip chance x (1 - tip * tie), loose-puck reach x (1 - reach * tie).
+   */
+  engage: {
+    contact: 0.15, drawSeconds: 0.4, slow: 0.5, massPerPoint: 4, insideEdge: 5, tieUp: 0.3, tieDown: 0.2,
+    weights: { strength: 0.35, balance: 0.3, compete: 0.35 },
+    startTie: 0.4, maxRelSpeed: 4, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
+    limits: { receive: 0.6, spread: 1, shootValue: 0.5, tip: 0.6, reach: 0.5 },
+  },
+
   /** Fatigue and line changes (bench.ts). */
   fatigue: {
     /**

@@ -2,13 +2,14 @@ import { blockPickup as blockPickup_, recordTouch as recordTouch_, tryIntercept 
 import { bladePos as bladePos_ } from './blade';
 import { comesFromBehind as comesFromBehind_, receiveChance as receiveChance_, receiverContest as receiverContest_ } from './passing';
 import { BENCH_DOORS as BENCH_DOORS_, benchTick as benchTick_, finishChanges as finishChanges_, initialBench as initialBench_ } from './bench';
-import { resolveBodies as resolveBodies_, resolveGoalies as resolveGoalies_, routeAroundGoalies as routeAroundGoalies_ } from './bodies';
+import { type EngagedPair, resolveBodies as resolveBodies_, resolveGoalies as resolveGoalies_, routeAroundGoalies as routeAroundGoalies_ } from './bodies';
 import { brainTick as brainTick_ } from './brain';
 import { BRAIN_INTERVAL_TICKS, DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
 import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
 import { staggerCap as staggerCap_ } from './contests/hit';
+import { engagementTick as engagementTick_, engageSpeedFactor as engageSpeedFactor_, tieOf as tieOf_, whistleEngagements as whistleEngagements_ } from './engagements';
 import { goaliePlaysPass as goaliePlaysPass_, goalieTick as goalieTick_, scoreFacedShot as scoreFacedShot_, whistleFacedShot as whistleFacedShot_ } from './goalie';
 import { moveLoosePuck as moveLoosePuck_, trackShot as trackShot_ } from './shots';
 import type { PuckEvent } from './puck';
@@ -62,6 +63,10 @@ const snapToLineup = snapToLineup_;
 const goalieTick = goalieTick_;
 const goaliePlaysPass = goaliePlaysPass_;
 const staggerCap = staggerCap_;
+const engagementTick = engagementTick_;
+const engageSpeedFactor = engageSpeedFactor_;
+const tieOf = tieOf_;
+const whistleEngagements = whistleEngagements_;
 const scoreFacedShot = scoreFacedShot_;
 const whistleFacedShot = whistleFacedShot_;
 const trackShot = trackShot_;
@@ -177,7 +182,7 @@ function initialState(setup: GameSetup): GameState {
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
-    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], staggered: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
+    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], staggered: [], engagements: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
     bench: initialBench(setup),
     plans: initialPlans(skaters.length),
     carrierPlan: null,
@@ -333,6 +338,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
       // Staggered by a hit (Task 9): he skates at most staggerCap of his top speed for a moment, whatever drives him.
       const cap = s.speedCap, stag = state.staggered.length > 0 ? staggerCap(state, s.id) : 1;
       if (stag < cap) s.speedCap = stag;
+      // In an engagement (Task 10): times 1 - TUNING.engage.slow * his tie.
+      if (state.engagements.length > 0) s.speedCap *= engageSpeedFactor(state, s.id);
       if (!nearNet || (waypoint.x === t.x && waypoint.y === t.y)) stepSkater(s, onIceMoves[i]!, DT, driveOf(state, s, onIceIdx[i]!));
       else {
         const tx = t.x, ty = t.y;
@@ -342,13 +349,34 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
       }
       s.speedCap = cap;
     }
-    resolveBodies(skaters, move, onIceMoves);
+    resolveBodies(skaters, move, onIceMoves, engagedPairs, engagedPairsOf(skaters));
     for (let i = 0; i < skaters.length; i++) {
       const s = skaters[i]!;
       const r = onIceMoves[i]!.radius;
       resolveBoards(s.pos, s.vel, r, 0);
       resolveNets(s.pos, s.vel, r);
     }
+  }
+
+  /** Engaged pairs as indexes into the on-ice list (Task 10), refilled in place each tick; onIceAt[i]: skater i's on-ice index. */
+  const engagedPairs: EngagedPair[] = [];
+  const onIceAt: number[] = [];
+  const indexOfId = new Map(state.skaters.map((sk, i) => [sk.id, i]));
+  function engagedPairsOf(skaters: SkaterState[]): number {
+    const es = state.engagements;
+    if (es.length === 0) return 0;
+    onIceAt.length = state.skaters.length;
+    for (let i = 0; i < onIceAt.length; i++) onIceAt[i] = -1;
+    for (let k = 0; k < onIceIdx.length; k++) onIceAt[onIceIdx[k]!] = k;
+    let n = 0;
+    for (const e of es) {
+      const i = onIceAt[indexOfId.get(e.a)!]!, j = onIceAt[indexOfId.get(e.b)!]!;
+      if (i < 0 || j < 0 || skaters[i]!.id !== e.a) continue;
+      const p = engagedPairs[n] ?? (engagedPairs[n] = { i: 0, j: 0, tieI: 0, tieJ: 0 });
+      p.i = i; p.j = j; p.tieI = e.tieA; p.tieJ = e.tieB;
+      n++;
+    }
+    return n;
   }
 
   const waypoint = { x: 0, y: 0 };
@@ -455,13 +483,14 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id) || isTiedUp(state, s.id)) break;
         const d = bodyById.get(s.id)!.def;
         const b = bladePos(s.pos, s.facing, d.shoots, bladeScratch);
-        if (segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y) > PICKUP_REACH) break;
+        const tie = state.engagements.length > 0 ? tieOf(state, s.id) : 0;
+        if (segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y) > PICKUP_REACH * (1 - TUNING.engage.limits.reach * tie)) break;
         if (!pass.bobbled) {
           const speed = hypot2(p.vel.x, p.vel.y);
           // An opponent on him as it arrives contests the catch.
           let near = Infinity;
           for (const o of skaters) if (o.side !== s.side && o.downT === 0) { const od = dist(o.pos, b); if (od < near) near = od; }
-          if (!rng.chance(receiveChance(d, speed, comesFromBehind(s.facing, p.vel.x, p.vel.y), receiverContest(near, 0)))) {
+          if (!rng.chance(receiveChance(d, speed, comesFromBehind(s.facing, p.vel.x, p.vel.y), receiverContest(near, 0), tie))) {
             // Off his stick: it bobbles away, and he needs a moment to get to it.
             const a = datan2(p.vel.y, p.vel.x) + rng.range(-BOBBLE_TURN, BOBBLE_TURN), v = rng.range(BOBBLE_SPEED[0], BOBBLE_SPEED[1]);
             p.vel.x = dcos(a) * v;
@@ -486,8 +515,10 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         if (pass !== null && !pass.bobbled && (s.id === pass.toId || s.side !== passSide)) continue;
         const b = bladePos(s.pos, s.facing, bodyById.get(s.id)!.def.shoots, bladeScratch);
         const db = segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y), dc = dist(s.pos, p.pos);
+        // A tied-up man (Task 10) reaches less far for it: times 1 - TUNING.engage.limits.reach * his tie.
+        const reach = state.engagements.length > 0 ? PICKUP_REACH * (1 - TUNING.engage.limits.reach * tieOf(state, s.id)) : PICKUP_REACH;
         // In his feet he kicks it up to his stick: only when the blade is within MAX_KICK of it.
-        const d = db <= PICKUP_REACH ? db : dc <= IN_FEET && dist(b, p.pos) <= MAX_KICK ? dc : Infinity;
+        const d = db <= reach ? db : dc <= IN_FEET && dist(b, p.pos) <= MAX_KICK ? dc : Infinity;
         if (d < bestD) { bestD = d; best = s; }
       }
     }
@@ -530,6 +561,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
     assignJobs(state, defs, tactics);
     brainTick(state, defs, rng, events, lookTicks);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
+    engagementTick(state, defs, rng, events);
 
     const skaters = onIceSkaters();
     moveSkaters(skaters);
@@ -596,6 +628,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
       state.lastRelease = null;
       state.tiedUpUntil = [];
       state.staggered = [];
+      state.engagements = [];
       state.reboundEdge = null;
       state.turnoverWatch = null;
       state.lastSave = null;
@@ -609,9 +642,12 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
   function step(): void {
     if (state.phase === 'final') return;
     const before = state.contests.slice();
+    const engaged = state.engagements;
     const mark = events.length;
     stepOnce();
     endCutContests(before, mark);
+    // Engagements a whistle or the period's end cleared this step (a new list) end `whistle` (Task 10).
+    if (state.engagements !== engaged && engaged.length > 0) whistleEngagements(state, engaged, events);
     noNegativeZero(state);
     state.rng = rng.getState();
   }

@@ -12,6 +12,7 @@ import {
   type Contest, type ContestCtx, type ContestResult,
 } from './core';
 import { datan2, dcos, dsin } from '../dmath';
+import { tieOf } from '../engage-state';
 
 const KIND = 'looseRace';
 const T = TUNING.looseRace;
@@ -213,7 +214,8 @@ const bladeScratch: Vec2 = { x: 0, y: 0 };
 function canTake(ctx: ContestCtx, w: SkaterState, p: Vec2): boolean {
   const b = bladePos(w.pos, w.facing, ctx.defs.get(w.id)!.shoots, bladeScratch);
   const db = dist(b, p);
-  return db <= TUNING.blade.pickupReach || (dist(w.pos, p) <= IN_FEET && db <= MAX_KICK);
+  // A tied-up man (Task 10) reaches less far: times 1 - TUNING.engage.limits.reach * his tie.
+  return db <= TUNING.blade.pickupReach * (1 - TUNING.engage.limits.reach * tieOf(ctx.state, w.id)) || (dist(w.pos, p) <= IN_FEET && db <= MAX_KICK);
 }
 
 function end(c: ContestStateOf<'looseRace'>, ctx: ContestCtx, winnerId: string | null, outcome: ContestOutcome): ContestResult {
