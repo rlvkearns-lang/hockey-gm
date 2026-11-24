@@ -15,13 +15,7 @@ const onCooldown = onCooldown_;
 const winProb = winProb_;
 const RINK = RINK_;
 const bodyRadius = bodyRadius_;
-/** Each player's body radius (derived from his def; never changes in a game). */
-const radiusCache = new WeakMap<PlayerDef, number>();
-function radiusOf(d: PlayerDef): number {
-  let r = radiusCache.get(d);
-  if (r === undefined) { r = bodyRadius(d.weightKg); radiusCache.set(d, r); }
-  return r;
-}
+
 
 /**
  * Battling for position (Task 10, design A5): two opponents whose bodies come together engage instead of bouncing apart.
@@ -55,11 +49,6 @@ export function engageChance(a: PlayerDef, sa: SkaterState, b: PlayerDef, sb: Sk
   return winProb(edge);
 }
 
-/** Per skater index: whether he is in an engagement this tick (scratch, refilled each call). */
-const engaged: boolean[] = [];
-/** The free on-ice skaters' indexes and radii this tick (scratch). */
-const cand: number[] = [];
-const radii: number[] = [];
 
 const free = (s: SkaterState): boolean => s.onIce && !s.leaving && s.downT === 0 && s.contestId === null;
 
@@ -95,65 +84,87 @@ function kindOf(state: GameState, a: SkaterState, b: SkaterState): Engagement['k
  */
 export function engagementTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out?: GameEvent[]): void {
   if (state.phase !== 'live') return;
-  const sk = state.skaters, n = sk.length, es = state.engagements;
-  engaged.length = n;
-  for (let i = 0; i < n; i++) engaged[i] = false;
+  const sk = state.skaters, es = state.engagements, tick = state.tick, mark = ++stamp;
+  const ix = indexes(sk, defs);
   let k = 0;
   for (let i = 0; i < es.length; i++) {
     const e = es[i]!;
-    const ia = indexIn(sk, e.a), ib = indexIn(sk, e.b);
+    const ia = ix.index.get(e.a)!, ib = ix.index.get(e.b)!;
     const a = sk[ia]!, b = sk[ib]!;
-    const end = stepEngagement(state, defs, rng, e, a, b, ia, ib);
-    if (end === null) { es[k++] = e; engaged[ia] = true; engaged[ib] = true; continue; }
-    if (out !== undefined && state.tick - e.sinceTick >= EVENT_TICKS) out.push(engagementEvent(state, e, a, b, end));
+    const end = stepEngagement(state, defs, rng, e, a, b, ia, ib, ix.radius[ia]!, ix.radius[ib]!);
+    if (end === null) { es[k++] = e; engagedAt[ia] = mark; engagedAt[ib] = mark; continue; }
+    if (out !== undefined && tick - e.sinceTick >= EVENT_TICKS) out.push(engagementEvent(state, e, a, b, end));
   }
   es.length = k;
 
-  // New engagements: opposing pairs in body contact, among the free on-ice men (a cheap broad phase on squared distances).
-  cand.length = 0;
-  radii.length = 0;
-  for (let i = 0; i < n; i++) { const s = sk[i]!; if (s.onIce && !engaged[i] && free(s)) { cand.push(i); radii.push(radiusOf(defs.get(s.id)!)); } }
-  for (let ci = 0; ci < cand.length; ci++) {
-    const i = cand[ci]!, a = sk[i]!;
-    if (engaged[i]) continue;
-    for (let cj = ci + 1; cj < cand.length; cj++) {
-      const j = cand[cj]!, b = sk[j]!;
-      if (engaged[j] || b.side === a.side) continue;
-      const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y, r = radii[ci]! + radii[cj]! + E.contact;
+  // New engagements: opposing pairs in body contact, home man against away man among the free on-ice men (a cheap broad
+  // phase on squared distances).
+  const home = state.onIce.home, away = state.onIce.away;
+  for (let hi = 0; hi < home.length; hi++) {
+    const ih = ix.index.get(home[hi]!);
+    if (ih === undefined || engagedAt[ih] === mark) continue;
+    const h = sk[ih]!;
+    if (!free(h)) continue;
+    for (let ai = 0; ai < away.length; ai++) {
+      const ia = ix.index.get(away[ai]!);
+      if (ia === undefined || engagedAt[ia] === mark) continue;
+      const w = sk[ia]!;
+      if (!free(w)) continue;
+      const dx = w.pos.x - h.pos.x, dy = w.pos.y - h.pos.y, r = ix.radius[ih]! + ix.radius[ia]! + E.contact;
       if (dx * dx + dy * dy > r * r) continue;
       // Glancing past each other at speed is no battle for position.
       // (Across the line between them: one going by the other; into or apart along it is a man leaning in or pushing off.)
-      const vx = b.vel.x - a.vel.x, vy = b.vel.y - a.vel.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const vx = w.vel.x - h.vel.x, vy = w.vel.y - h.vel.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
       const across = (vx * dy - vy * dx) / d;
       if (across > E.maxRelSpeed || across < -E.maxRelSpeed) continue;
-      if (onCooldown(state, a.id, cooldownKind(b.id)) || onCooldown(state, b.id, cooldownKind(a.id))) continue;
-      es.push({ a: a.id, b: b.id, sinceTick: state.tick, kind: kindOf(state, a, b), inside: null, tieA: E.startTie, tieB: E.startTie, lastWon: null, nextDrawTick: state.tick + DRAW_TICKS });
-      engaged[i] = true;
-      engaged[j] = true;
+      if (onCooldown(state, h.id, cooldownKind(w.id)) || onCooldown(state, w.id, cooldownKind(h.id))) continue;
+      // `a` is the one first in state.skaters.
+      const [a, b] = ih < ia ? [h, w] : [w, h];
+      es.push({ a: a.id, b: b.id, sinceTick: tick, kind: kindOf(state, a, b), inside: null, tieA: E.startTie, tieB: E.startTie, lastWon: null, nextDrawTick: tick + DRAW_TICKS });
+      engagedAt[ih] = mark;
+      engagedAt[ia] = mark;
       break;
     }
   }
 }
 
-/** Each skater list's index by id (derived: the list's order never changes in a game; a restored state has a new list). */
-const indexCache = new WeakMap<readonly SkaterState[], Map<string, number>>();
-function indexIn(sk: readonly SkaterState[], id: string): number {
+/**
+ * Per skater index: the call (`stamp`, counted up on every call, so two games stepped in turn never share one) on which he
+ * was last found in an engagement. Scratch, never reset.
+ */
+const engagedAt: number[] = [];
+let stamp = 0;
+
+/** Each skater list's index by id and body radius by index (derived: the list's order never changes in a game; a restored state has a new list). */
+type Indexes = { index: Map<string, number>; radius: number[] };
+const indexCache = new WeakMap<readonly SkaterState[], Indexes>();
+function indexes(sk: readonly SkaterState[], defs: Map<string, PlayerDef>): Indexes {
   let m = indexCache.get(sk);
-  if (m === undefined) { m = new Map(); for (let i = 0; i < sk.length; i++) m.set(sk[i]!.id, i); indexCache.set(sk, m); }
-  return m.get(id) ?? -1;
+  if (m === undefined) {
+    m = { index: new Map(), radius: [] };
+    for (let i = 0; i < sk.length; i++) { m.index.set(sk[i]!.id, i); m.radius.push(bodyRadius(defs.get(sk[i]!.id)!.weightKg)); }
+    indexCache.set(sk, m);
+    engagedAt.length = Math.max(engagedAt.length, sk.length);
+    for (let i = 0; i < engagedAt.length; i++) engagedAt[i] ??= -1;
+  }
+  return m;
+}
+function indexIn(sk: readonly SkaterState[], id: string): number {
+  for (let i = 0; i < sk.length; i++) if (sk[i]!.id === id) return i;
+  return -1;
 }
 
 type EndResult = Exclude<EngagementResult, 'whistle'>;
 
 /** One tick of engagement `e` between `a` and `b` (skater indexes ia, ib): its end, or null while it goes on. */
 function stepEngagement(
-  state: GameState, defs: Map<string, PlayerDef>, rng: Rng, e: Engagement, a: SkaterState, b: SkaterState, ia: number, ib: number,
+  state: GameState, defs: Map<string, PlayerDef>, rng: Rng, e: Engagement, a: SkaterState, b: SkaterState, ia: number, ib: number, ra: number, rb: number,
 ): EndResult | null {
   if (a.contestId !== null || b.contestId !== null) return 'contest';
   if (!a.onIce || !b.onIce || a.leaving || b.leaving || a.downT > 0 || b.downT > 0) return 'released';
   const da = defs.get(a.id)!, db = defs.get(b.id)!;
   const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y, dd = dx * dx + dy * dy;
-  const touch = radiusOf(da) + radiusOf(db) + E.contact, apart = touch + E.releaseGap;
+  const touch = ra + rb + E.contact, apart = touch + E.releaseGap;
   if (dd > apart * apart) return 'released';
   // Giving up: his job changed since it began (he has somewhere else to be). He is out of it once he has pushed off (out
   // of body contact); until then the battle goes on and his tie holds him.
