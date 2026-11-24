@@ -118,7 +118,9 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   it('A3: point passes stay in: over 90% kept (was 48%) and over 75% completed (was 37%), seeds 1-16 pooled', () => { expect(m16().pointPassKeptShare).toBeGreaterThan(0.90); expect(m16().pointPassCompletion).toBeGreaterThan(0.75); }, 240_000);
   // Task 7 review, Important 1 (controller ruling): with slow passes no longer immune to interception, completion is to
   // be 0.72 to 0.85 (it read 0.745 on seeds 1-8 and 1-16); pooled over seeds 1-16.
-  it('A3: passes are completed 70% to 85% of the time (controller ruling after Task 9: pokes take the puck off fewer carriers, so more passes are made under pressure; free passes complete at 0.75; Task 14 tunes) (was 86.5%), seeds 1-16 pooled', () => { expect(m16().passCompletion).toBeGreaterThan(0.70); expect(m16().passCompletion).toBeLessThan(0.85); }, 240_000);
+  // After Task 9 the band was lowered to 0.70 by ruling (pokes took the puck off fewer carriers). The Task 9 review fix (a
+  // won poke takes the puck where it is won) brought it back to 0.723, so the bar is 0.72 again.
+  it('A3: passes are completed 72% to 85% of the time (was 86.5%), seeds 1-16 pooled', () => { expect(m16().passCompletion).toBeGreaterThan(0.72); expect(m16().passCompletion).toBeLessThan(0.85); }, 240_000);
   it('A3: 600 to 900 passes a game', () => { expect(counters().passes / 3).toBeGreaterThan(600); expect(counters().passes / 3).toBeLessThan(900); }, 60_000);
   // A pickup: a loose puck or a pass taken (tryPickup) or a pass picked off; the move beyond the puck's own travel that
   // tick. Contest hand-overs (races, battles) have their own measures.
@@ -217,7 +219,9 @@ describe('A4: saves, rebounds and tips (Task 8)', () => {
     expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m16().reboundChancesPerGame).toBeGreaterThanOrEqual(4);
   }, 240_000);
   it('A4: tips happen: at least 2 a game, some on goal', () => {
-    const tips = sum(games().map((r) => r.events.filter((e) => e.type === 'tip').length)) / 3;
+    // Task 9 review fix: read pooled over seeds 1-16 (seeds 1-3 read 1.33 after it, 3.0 before, while seeds 1-16 went 2.94
+    // -> 3.25: one game reads 1 to 8); the bar is unchanged.
+    const tips = counters16().tips / 16;
     expect(tips).toBeGreaterThanOrEqual(2);
     expect(games().some((r) => r.events.some((e) => e.type === 'shot' && e.detail.tippedFrom !== null))).toBe(true);
   }, 60_000);

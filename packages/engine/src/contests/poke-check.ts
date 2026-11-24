@@ -55,8 +55,8 @@ function steerReach(ctx: ContestCtx, checker: SkaterState): void {
 
 /**
  * Poke check, stages `reach` (the stick goes out: he pokes from REACH_MIN_SECONDS on, as soon as the puck is a stick
- * length away, and at REACH_SECONDS at the latest), `resolve` (RESOLVE_SECONDS: `leader` is the
- * winner) and, after a failure by a wide margin, `beaten` (the checker alone, a step behind). Participants: the
+ * length away, and at REACH_SECONDS at the latest; a won poke, take or loose, ends it there and then, the puck moving that
+ * tick: Task 9 review), `resolve` (RESOLVE_SECONDS, a failed poke: `leader` is the carrier) and, after a failure by a wide margin, `beaten` (the checker alone, a step behind). Participants: the
  * checker, then the carrier (in `freeIds`: only the checker is steered). The carrier letting the puck go before it
  * resolves, or the checker not a stick length from the puck when the reach ends (T.minReach to T.stickReach), ends it
  * with no result. A `take` gives the checker the puck: it goes to his blade (applyResult).
@@ -135,6 +135,9 @@ export const pokeCheckContest: Contest<'pokeCheck'> = {
       if (!inWindow) return { winnerId: null, puck: 'unchanged', outcome: 'outOfReach' };
       c.data.outcome = roll(c, ctx, checker, carrier);
       c.leader = c.data.outcome === 'take' || c.data.outcome === 'loose' ? checker.id : carrier.id;
+      // Task 9 review, Important 2: a won poke moves the puck the moment it is won (the carrier no longer skates on with
+      // it for the 0.1 s the result shows, which turned about 44% of won takes into loose pucks).
+      if (c.leader === checker.id) return finish(c, ctx, checker, carrier);
       enterStage(c, 'resolve');
       return null;
     }
@@ -172,8 +175,8 @@ const bladeScratch = { x: 0, y: 0 };
 function finish(c: ContestStateOf<'pokeCheck'>, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): ContestResult | null {
   const state = ctx.state;
   let outcome = c.data.outcome;
-  // A take goes to his blade (Task 9); with the carrier gone on by then (it shows for RESOLVE_SECONDS), it is raked
-  // loose toward him instead.
+  // A take goes to his blade (Task 9), decided the tick the poke is won; with his blade over TAKE_REACH from the puck then,
+  // it was no take: it is raked loose toward him.
   const pk = state.puck.pos;
   const blade = bladePos(checker.pos, checker.facing, ctx.defs.get(checker.id)!.shoots, bladeScratch);
   const far = outcome === 'take' && hypot2(blade.x - pk.x, blade.y - pk.y) > TAKE_REACH;

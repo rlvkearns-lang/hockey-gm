@@ -21,13 +21,32 @@ function pokeSeeded(seed: number): { result: string; checkerToPuck: number } {
     // The poke is decided at the start of a tick (the contests run before anyone moves): where he is then.
     const was = c.stage, d = Math.hypot(ck.pos.x - h.st.puck.pos.x, ck.pos.y - h.st.puck.pos.y);
     duelStep(h);
-    if (was === 'reach' && c.stage === 'resolve') at = d;
+    // Task 9 review: a won poke ends on the tick it is won; a failed one goes on to resolve.
+    if (was === 'reach' && (c.stage !== 'reach' || !h.st.contests.includes(c))) at = d;
   }
   const end = h.events.find((e) => e.type === 'contestEnd');
   return { result: end?.type === 'contestEnd' ? end.detail.result : 'running', checkerToPuck: at };
 }
 
 describe('poke checks', () => {
+  // Task 9 review, Important 2: the puck goes where the poke is won, on that tick; it no longer travels on with the carrier
+  // for the 0.1 s the result shows (which raked about 44% of won takes loose). A skating carrier, half of won pokes are takes.
+  it('a won poke takes the puck where it is won: about half the wins on a skating carrier are clean takes', () => {
+    let takes = 0, won = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      const h = duel(def(), def(), 1.4, 0, 90_000 + seed);
+      const cr = h.st.skaters.find((k) => k.id === 'home-C')!, ck = h.st.skaters.find((k) => k.id === 'away-C')!;
+      cr.vel = { x: 0, y: 8 }; cr.target = { x: 0, y: 25 }; cr.facing = Math.PI / 2;
+      ck.pos = { x: 1.0, y: 0.9 }; ck.target = { ...ck.pos }; ck.facing = Math.PI;
+      const c = startContest(h.st, h.ds, h.rng, pokeCheckContest, ['away-C', 'home-C'], h.events);
+      for (let i = 0; i < 60 && h.st.contests.includes(c); i++) duelStep(h);
+      const t = h.events.find((e) => e.type === 'turnover');
+      if (t === undefined) continue;
+      won++;
+      if (t.type === 'turnover' && t.detail.how === 'poke') { takes++; expect(h.st.carrierId).toBe('away-C'); }
+    }
+    expect(won).toBeGreaterThan(60); expect(takes / won).toBeGreaterThan(0.4); expect(takes / won).toBeLessThan(0.6);
+  });
   it('the better stick wins more poke checks, not all', () => {
     const p = share(2000, () => runPoke(def({ stickChecking: 92, defensivePositioning: 85 }), def({ puckHandling: 60 })));
     const q = share(2000, () => runPoke(def({ stickChecking: 55 }), def({ puckHandling: 92, poise: 88 })));
