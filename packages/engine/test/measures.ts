@@ -396,7 +396,7 @@ export function createObserver(setup: GameSetup): Observer {
     // draw its most likely kind of option gets.
     if (st.tick % BRAIN_INTERVAL_TICKS === 0 && !sit.breakaway && !sit.oddMan && !sit.behindNet && !sit.pressuredLow) {
       const me = defs.get(cs.id)!;
-      listOptions(st, me, defs, setup[cs.side].tactics, optionScratch);
+      listOptions(st, me, defs, optionScratch);
       c.normalDecisionPoints++;
       if (topKindShare(optionScratch, me, sit, st.carrierPlan) > 0.97 + 1e-9) c.normalCertain++;
     }

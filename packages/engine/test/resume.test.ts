@@ -36,6 +36,7 @@ describe('resuming a game from a snapshot', () => {
     ['in the third period, a turnover being watched', (s) => s.period === 3 && s.turnoverWatch !== null, 80_000],
     ['mid-hold (a spot target issued under 0.2 s ago)', (s) => s.plans.some((p, i) => s.skaters[i]!.onIce && p.follow === 'spot' && s.tick - p.targetTick > 0 && s.tick - p.targetTick < 6), 20_000],
     ['with a phase change pending', (s) => s.teamPhase.home.pending !== null || s.teamPhase.away.pending !== null, 50_000],
+    ['mid-possession (a carrier plan with a seed, decided 1 to 4 ticks ago)', (s) => s.carrierPlan !== null && s.carrierPlan.seed !== undefined && s.tick - s.carrierPlan.tick >= 1 && s.tick - s.carrierPlan.tick <= 4, 30_000],
   ];
   for (const [name, when, from] of cases) {
     it(`restored ${name}, it plays out exactly as the straight run`, () => {

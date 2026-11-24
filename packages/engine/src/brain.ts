@@ -1,10 +1,10 @@
 import { executeClear as executeClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
 import { BRAIN_INTERVAL_TICKS as BRAIN_INTERVAL_TICKS_ } from './constants';
-import { chooseOption as chooseOption_, lastSituation, listOptions as listOptions_, type Option } from './options';
+import { chooseOption as chooseOption_, listOptions as listOptions_, type Option, type Situation } from './options';
 import { TUNING as TUNING_ } from './tuning';
 import { steeredByContest as steeredByContest_ } from './team-play';
 import type { Rng } from './rng';
-import type { CarrierPlan, CarryLane, GameEvent, GameState, PlayerDef, Side, SkaterState, Tactics } from './types';
+import type { CarrierPlan, CarryLane, GameEvent, GameState, PlayerDef, SkaterState } from './types';
 import { hypot2 as hypot2_, type Vec2 } from './vec';
 import { clamp as clamp_, findSkater as findSkater_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
@@ -35,19 +35,20 @@ export type Decision =
   | { kind: 'clear' };
 
 const T = TUNING.brain;
-const DEFAULT_TACTICS: Tactics = { forecheck: 'balanced', shiftSeconds: { forwards: 45, defence: 50 } };
 const optionScratch: Option[] = [];
+/** brainTick's copy of the carrier's situation (written by decideCarrier, read for his carry speed). */
+const sitScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false };
 
 /**
  * What the carrier does next: every option he has is valued (options.ts listOptions) and he takes the best as he sees
  * it (chooseOption), favouring what he is committed to (state.carrierPlan, when it is his).
  */
-export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, rng: Rng, tactics: Tactics = DEFAULT_TACTICS): Decision {
+export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, rng: Rng, situation: Situation = sitScratch): Decision {
   const s = findSkater(state, me.id);
   if (!s) throw new Error(`no skater ${me.id}`);
-  const opts = listOptions(state, me, defs, tactics, optionScratch);
+  const opts = listOptions(state, me, defs, optionScratch, situation);
   const plan = state.carrierPlan !== null && state.carrierPlan.id === me.id ? state.carrierPlan : null;
-  const o = chooseOption(opts, me, lastSituation, plan, rng);
+  const o = chooseOption(opts, me, situation, plan, rng);
   switch (o.kind) {
     case 'carry': return { kind: 'carry', to: { x: o.to.x, y: o.to.y }, lane: o.lane };
     case 'pass': return { kind: 'pass', toId: o.toId };
@@ -62,7 +63,7 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
  * event comes when it ends). A carrier steered by a contest (being hit, from impact on) may still pass, shoot, rim,
  * dump or clear, but his skating belongs to the contest, so a carry or protect decision changes nothing.
  */
-export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = [], tactics?: Record<Side, Tactics>): void {
+export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
   if (state.carrierId === null) { state.carrierPlan = null; return; }
   const prev = state.carrierPlan;
   const fresh = prev === null || prev.id !== state.carrierId;
@@ -74,7 +75,8 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   // A new carrier: his plan (and the seed of the errors that stay with him) starts now. It names no lane yet, so
   // nothing is favoured on his first look.
   if (fresh) state.carrierPlan = { id: s.id, kind: 'carry', lane: null, toId: null, to: null, tick: state.tick, seed: Math.floor(rng.next() * 4294967296) };
-  const d = decideCarrier(state, me, defs, rng, tactics ? tactics[s.side] : DEFAULT_TACTICS);
+  const sit = sitScratch;
+  const d = decideCarrier(state, me, defs, rng, sit);
   const plan: CarrierPlan = state.carrierPlan!;
   plan.id = s.id;
   plan.kind = d.kind;
@@ -97,7 +99,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
       // In the zone he attacks (but on a breakaway) he skates with it at T.carrySpeed.inZone of his carrying speed: he
       // looks for the play rather than outskating it.
       s.speedCap = d.lane === 'hold' ? T.protectSpeedCap
-        : clamp(T.carrySpeed.base + me.attrs.puckHandling * T.carrySpeed.perPoint, 0, 1) * (lastSituation.zone === 'O' && !lastSituation.breakaway ? T.carrySpeed.inZone : 1);
+        : clamp(T.carrySpeed.base + me.attrs.puckHandling * T.carrySpeed.perPoint, 0, 1) * (sit.zone === 'O' && !sit.breakaway ? T.carrySpeed.inZone : 1);
       return;
     case 'protect': {
       if (busy) return;

@@ -7,7 +7,7 @@ import { crossesEndBox } from '../src/lanes';
 import { DT } from '../src/constants';
 import { createRng } from '../src/rng';
 import type { GameState, PlayerDef, SkaterState } from '../src/types';
-import { def, defs, place, playmaker, skater, slotState, sniper, stateWith, tactics } from './helpers';
+import { def, defs, place, playmaker, skater, slotState, sniper, stateWith } from './helpers';
 
 /** decideCarrier for seeds 1..n with `d` (given the carrier's id and slot) as the carrier in `st`. */
 function decisions(st: GameState, d: PlayerDef, n: number): Decision[] {
@@ -17,7 +17,7 @@ function decisions(st: GameState, d: PlayerDef, n: number): Decision[] {
   const ds = new Map(defs);
   ds.set(id, me);
   const out: Decision[] = [];
-  for (let seed = 1; seed <= n; seed++) out.push(decideCarrier(st, me, ds, createRng(seed), tactics.home));
+  for (let seed = 1; seed <= n; seed++) out.push(decideCarrier(st, me, ds, createRng(seed)));
   return out;
 }
 const skaterById = (st: GameState, id: string): SkaterState => st.skaters.find((s) => s.id === id)!;
@@ -92,7 +92,7 @@ describe('the carrier values his options', () => {
     const st = stateWith({ carrier: 'home', puckX: 18, puckY: 10 }); const out: Option[] = [];
     const me = { ...sniper, id: 'home-RW', position: 'RW' as const };
     const t = performance.now();
-    for (let i = 0; i < 20_000; i++) listOptions(st, me, defs, tactics.home, out);
+    for (let i = 0; i < 20_000; i++) listOptions(st, me, defs, out);
     expect((performance.now() - t) / 20_000).toBeLessThan(0.15);
   });
   it('the pick is a draw weighted by value: a clearly better option wins most of the time, never always; the committed one is favoured', () => {
@@ -152,11 +152,11 @@ describe('what the carrier sees (Task 5 review)', () => {
   const passesSeen = (d: PlayerDef, seed: number): string[] => {
     const st = twoOpen();
     st.carrierPlan = { id: 'home-RW', kind: 'carry', lane: null, toId: null, to: null, tick: 0, seed };
-    const opts: Option[] = []; listOptions(st, { ...d, id: 'home-RW', position: 'RW' }, defs, tactics.home, opts);
+    const opts: Option[] = []; listOptions(st, { ...d, id: 'home-RW', position: 'RW' }, defs, opts);
     return opts.flatMap((o) => (o.kind === 'pass' ? [o.toId] : []));
   };
   it('vision cuts the passes by what he reads, not by what is true: a low-vision carrier sometimes misses the best one', () => {
-    const st = twoOpen(); const all: Option[] = []; listOptions(st, { ...def({ vision: 99 }), id: 'home-RW', position: 'RW' }, defs, tactics.home, all);
+    const st = twoOpen(); const all: Option[] = []; listOptions(st, { ...def({ vision: 99 }), id: 'home-RW', position: 'RW' }, defs, all);
     let best = '', bestV = -Infinity; for (const o of all) if (o.kind === 'pass' && o.value > bestV) { bestV = o.value; best = o.toId; }
     const misses = (vision: number): number => { let k = 0; for (let seed = 1; seed <= 1000; seed++) if (!passesSeen(def({ vision, iq: 50, poise: 50 }), seed).includes(best)) k++; return k / 1000; };
     const low = misses(20), high = misses(95);
@@ -167,7 +167,7 @@ describe('what the carrier sees (Task 5 review)', () => {
     place(st, 'home:C', 5, 3);
     expect(readSituation(st, skater(st, 'home', 'RW')).pressure).toBe(0);
     const value = (d: PlayerDef, pick: (o: Option) => boolean): number => {
-      const opts: Option[] = []; listOptions(st, { ...d, id: 'home-RW', position: 'RW' }, defs, tactics.home, opts);
+      const opts: Option[] = []; listOptions(st, { ...d, id: 'home-RW', position: 'RW' }, defs, opts);
       return opts.find(pick)!.value;
     };
     const toC = (o: Option): boolean => o.kind === 'pass' && o.toId === 'home-C', wide = (o: Option): boolean => o.kind === 'carry' && o.lane === 'wide';
@@ -181,7 +181,7 @@ describe('rims (Task 5 review)', () => {
     const rims = (x: number, y: number): number => {
       const st = stateWith({ carrier: 'home', puckX: x, puckY: y, carrierSlot: 'LW' }); place(st, 'away:LD', x + 0.4, y - 0.8);
       expect(readSituation(st, skater(st, 'home', 'LW')).pressuredLow).toBe(true);
-      const opts: Option[] = []; listOptions(st, { ...def({}), id: 'home-LW', position: 'LW' }, defs, tactics.home, opts);
+      const opts: Option[] = []; listOptions(st, { ...def({}), id: 'home-LW', position: 'LW' }, defs, opts);
       return opts.filter((o) => o.kind === 'rim').length;
     };
     expect(rims(24, 2)).toBe(0); expect(rims(23, -4)).toBe(0); expect(rims(24, 10.5)).toBe(1);

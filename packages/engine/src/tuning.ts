@@ -28,49 +28,34 @@ export const TUNING = deepFreeze({
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
     shotDistanceScale: 9,
     maxShotDistance: 25,
-    /** An option's skill factor: base + perPoint * the rating that drives it. */
-    skill: { base: 0.95, perPoint: 0.003 },
     /** The shoot option's own skill factor (shooting accuracy .6, power .4): base + perPoint * rating. */
     shootSkill: { base: 0.6, perPoint: 0.008 },
-    /** Calm (scales shoot, pass and carry): 1 - pressure * (base - perPoise * poise). */
+    /** Calm (scales the shot's chance): 1 - pressure * (base - perPoise * poise). */
     calm: { base: 0.555, perPoise: 0.0015 },
-    /** Error (relative, one sd) in how he judges a passing lane: base + perPoint * (100 - iq). */
-    laneNoise: { base: 0.09, perPoint: 0.001 },
     /** Speed cap while carrying: base + perPoint * puckHandling; in the zone he attacks (no breakaway) times inZone. */
     carrySpeed: { base: 0.86, perPoint: 0.001, inZone: 0.75 },
-    /** Base weight of each kind of option, before situation, skill and tendency. */
-    weight: { shoot: 0.55, pass: 1, carry: 3, dump: 0.15, protect: 0.25 },
-    /** Shoot weight is scaled by openNetWeight[0] with the goalie square, up to the sum of both with him shaded openNetShade m off. */
+    /** A shot's chance is scaled by openNetWeight[0] with the goalie square, up to the sum of both with him shaded openNetShade m off. */
     openNetWeight: [0.85, 0.5] as [number, number],
     openNetShade: 0.6,
-    /** Shoot weight is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
+    /** A shot's chance is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
     shootPressure: 3.6,
     /**
      * Largest share any one kind of option (all passing lanes together count as one kind, all carry lanes another) may
-     * have of the carrier's draw when another kind is on his list (options.ts chooseOption).
+     * have of the carrier's draw in an ordinary state when another kind is on his list (options.ts chooseOption).
      */
     maxShare: 0.97,
     /** Passes shorter or longer than this (m) are not considered. */
     passRange: [2.5, 35] as [number, number],
-    /** A dump from his own half (behind the centre line) would be icing: its weight is scaled by this. */
-    icingDump: 0.1,
-    /** Carry weight is scaled by carrySpace[0] + carrySpace[1] * space ahead (0..1). */
-    carrySpace: [0.25, 0.75] as [number, number],
-    /** Protect weight is scaled by protectBase + pressure. */
-    protectBase: 0.1,
-    /** How far ahead (m) a carrier aims each carry decision outside the offensive zone, and how far he swerves. */
+    /** How far ahead (m) a carrier aims each carry decision outside the offensive zone. */
     carryAhead: 8,
-    carrySwerve: 3,
     /** Outside the offensive zone with a teammate wholly in it, he carries no closer than this (m) to the blue line. */
     holdUpGap: 1,
     /** A teammate counts as in the zone if he will be wholly in it this many seconds from now at his speed. */
     offsideLookahead: 0.5,
     /**
-     * The longer he has had the puck the more he wants to move it on: carry and protect weights are scaled by
-     * keep = max(holdMin, exp(-seconds he has had it / holdSeconds)), shoot and pass weights by 1 + holdBoost * (1 - keep).
+     * The longer he has had the puck the more he wants to move it on: each second (TUNING.value.hold, at most holdCap)
+     * adds hold * holdBoost.shoot to a shot's value and hold * holdBoost.pass to a pass's (options.ts).
      */
-    holdSeconds: 5,
-    holdMin: 0.1,
     holdBoost: { shoot: 0.3, pass: 2 },
     /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
     protectStep: 2,
@@ -162,6 +147,41 @@ export const TUNING = deepFreeze({
     pick: { base: 0.0137, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
     stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
     goal: 0.13, shotKeep: 0.05, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
+  },
+
+  /**
+   * The weights inside the carrier's option values (options.ts), each a chance or a worth (Task 5; moved here in the
+   * Task 5 review fixes). threat(rx, ly) = threat.base + threat.ice * r^2 + threat.shot * shot quality, with r = (rx + 30)
+   * / 60 in [0, 1]. A spot within openAt.from (m) of an opponent is worth openAt.min of itself, rising to 1 over openAt.over
+   * (m) more. A pass works with chance pass.base - pass.perMetre per metre over pass.from - pressure * (pass.pressure -
+   * pass.pressurePerPoint * passing), times pass.settleMin rising to 1 over his first pass.settle (s) with the puck,
+   * times pass.narrowFactor under pass.narrow (m) of lane, times pass.crowded + space / pass.crowdedPer with an opponent
+   * within TUNING.lanes.space of the receiver; a pass across the front adds V.goal * pass.across * his shot quality *
+   * (sideways metres / pass.acrossFull, at most 1). A carry works with carry.base - pressure * (carry.pressure -
+   * carry.pressurePerPoint * puckHandling), less laneCost * (laneFrom - lane) / laneFrom under laneFrom (m) of lane. Behind
+   * the net the hold works with hold.base - pressure * hold.pressure and keeps hold.keep of his best pass out front; a
+   * wrap works with wrap.base - pressure * wrap.pressure - wrap.laneCost per metre of lane under wrap.laneFrom, and
+   * scores with V.goal * wrap.goal * (the goalie's distance from the post / wrap.open, 0.1 to 1) * skill. Protect keeps it
+   * with protect.base - pressure * (protect.loss - protect.lossPerPoint * (puckHandling, strength)) and costs protect.idle
+   * unpressured; a clear costs clearIdle unpressured. A rim to nobody gets blindRim of its race chance. A shot through a
+   * lane under shotLane (m) has shotBlocked of its chance; score effects act on a shot at scoreSoft of their size.
+   */
+  options: {
+    threat: { base: 0.005, ice: 0.035, shot: 0.15 },
+    openAt: { min: 0.6, from: 1, over: 4 },
+    pass: {
+      base: 0.97, perMetre: 0.006, from: 12, pressure: 0.3, pressurePerPoint: 0.002, settle: 1, settleMin: 0.9,
+      narrow: 0.5, narrowFactor: 0.2, crowded: 0.5, crowdedPer: 3, across: 0.6, acrossFull: 6,
+    },
+    carry: { base: 0.95, pressure: 0.35, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
+    hold: { base: 0.97, pressure: 0.1, keep: 0.9 },
+    wrap: { base: 0.9, pressure: 0.2, laneFrom: 1.5, laneCost: 0.3, goal: 0.55, open: 1.2 },
+    protect: { base: 0.97, loss: 0.4, lossPerPoint: 0.0025, idle: 0.01 },
+    clearIdle: 0.04,
+    blindRim: 0.6,
+    shotLane: [0.5, 1.0] as [number, number],
+    shotBlocked: [0.3, 0.6] as [number, number],
+    scoreSoft: 0.5,
   },
 
   /**

@@ -388,7 +388,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
     benchTick(state, setup, DT, events);
     assignJobs(state, defs, tactics);
-    brainTick(state, defs, rng, events, tactics);
+    brainTick(state, defs, rng, events);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
 
     const skaters = onIceSkaters();

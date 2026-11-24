@@ -28,7 +28,7 @@ import { isTiedUp as isTiedUp_, scoreMargin as scoreMargin_, steeredByContest as
 import { TUNING } from './tuning';
 import { dcos as dcos_, dexp as dexp_, dpow as dpow_, dsin as dsin_ } from './dmath';
 import type { Rng } from './rng';
-import type { CarrierPlan, CarryLane, GameState, PlayerDef, SkaterState, Tactics } from './types';
+import type { CarrierPlan, CarryLane, GameState, PlayerDef, SkaterState } from './types';
 import type { Vec2 } from './vec';
 // Local bindings of hot imports (a call through an imported binding costs more under the test runner). Never alias
 // in a module on an import cycle: this one is not on one (options imports nothing that imports it).
@@ -78,6 +78,11 @@ const BLUE = RINK.blueLineX;
 const B = TUNING.brain;
 const V = TUNING.value;
 const L = TUNING.lanes;
+/** The weights of the carrier's valuation (TUNING.options). */
+const O = TUNING.options;
+const RIM = TUNING.rim;
+/** A clear is valued at the spot it is aimed at (TUNING.rim.clear.x), CLEAR_LY (m) out from the middle (off the boards). */
+const CLEAR_LY = 10;
 /** The faceoff dots' rx: below them is "down low". */
 const DOTS = 21.03;
 /** Behind the net: within this far (m) of the middle. */
@@ -99,16 +104,8 @@ const LEVEL = 1;
 const LOW_PASS_MIN_RX = 15;
 /** From behind the net, passes go out front: to a teammate below this rx. */
 const OUT_FRONT_MIN_RX = 15;
-/** A pass in his first PASS_SETTLE (s) with the puck has less chance of working (SETTLE_MIN of it at once). */
-const PASS_SETTLE = 1;
 /** A rim is offered only within this far (m) of the boards, or from behind the goal line. */
 const RIM_BOARDS = 3;
-/** A rim to nobody gets this share of its race chance. */
-const BLIND_RIM = 0.6;
-const SETTLE_MIN = 0.9;
-/** A pass in the zone that moves the puck ACROSS_FULL (m) or more across adds V.goal * PASS_ACROSS * the receiver's shot quality * his skill to its worth (the goalie must move). */
-const PASS_ACROSS = 0.6;
-const ACROSS_FULL = 6;
 /** A teammate more than 100 degrees off his facing is behind his back: seen only with vision of BEHIND_VISION or more. */
 const BEHIND_COS = -0.1736;
 const BEHIND_VISION = 60;
@@ -116,9 +113,6 @@ const BEHIND_VISION = 60;
 const WRAP_RX = 26.7;
 const WRAP_LY = 1.3;
 const WRAP_SHOT = 1.0;
-/** A wrap shot's chance to score: V.goal * WRAP_GOAL * clamp(goalie's distance from the post / WRAP_OPEN, 0.1, 1) * shooting skill. */
-const WRAP_GOAL = 0.55;
-const WRAP_OPEN = 1.2;
 /** The office: (OFFICE_RX, +-OFFICE_LY), for a carrier low on the wall (rx > DOTS, |ly| > OFFICE_WALL) with nobody behind the net. */
 const OFFICE_RX = 28.3;
 const OFFICE_LY = 1.5;
@@ -126,24 +120,8 @@ const OFFICE_WALL = 4;
 /** Holding behind the net: at HOLD_RX, within HOLD_LY of the middle (the frame between him and the nearest opponent). */
 const HOLD_RX = 28.7;
 const HOLD_LY = 0.6;
-const HOLD_KEEP = 0.9;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */
 const CARRY_IN_ZONE = 5;
-/** A rim goes to the far low corner (rx GOAL - RIM_BACK, |ly| RIM_LY) with nobody named. */
-const RIM_BACK = 1;
-const RIM_LY = 8;
-/** A clear goes up the boards to (CLEAR_RX, +-CLEAR_LY). */
-const CLEAR_RX = -3.6;
-const CLEAR_LY = 10;
-const CLEAR_IDLE = 0.04;
-/** Protecting under full pressure he loses it with chance base - perPoint * (puckHandling .5, strength .5). */
-const PROTECT_LOSS = { base: 0.4, perPoint: 0.0025 };
-const PROTECT_IDLE = 0.01;
-/** A shooting lane narrower than these (m) scales the shot's chance by these. */
-const SHOT_LANE = [0.5, 1.0] as const;
-const SHOT_BLOCKED = [0.3, 0.6] as const;
-/** The share of TUNING.scoreEffects' shot factor applied to a shot's value. */
-const SCORE_SOFT = 0.5;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
 const PROTECTING = { puckHandling: 0.5, strength: 0.5 };
 
@@ -163,11 +141,11 @@ function shotQuality(rx: number, ly: number): number {
 /** How much having the puck at (rx, ly) is worth to the team that has it: about its chance to score on this possession, 0 to about 0.2. */
 export function threat(rx: number, ly: number): number {
   const r = clamp((rx + 30) / 60, 0, 1);
-  return 0.005 + 0.035 * r * r + 0.15 * shotQuality(rx, ly);
+  return O.threat.base + O.threat.ice * r * r + O.threat.shot * shotQuality(rx, ly);
 }
 
-/** A spot is worth less with an opponent near it: 0.6 with one on top of it, 1 with nobody within 5 m. */
-const openAt = (space: number): number => 0.6 + 0.4 * clamp((space - 1) / 4, 0, 1);
+/** A spot is worth less with an opponent near it: O.openAt.min with one within `from` m, 1 with nobody within from + over. */
+const openAt = (space: number): number => O.openAt.min + (1 - O.openAt.min) * clamp((space - O.openAt.from) / O.openAt.over, 0, 1);
 
 /**
  * `t` can be passed to: on the ice, not heading off, not down, not steered by a contest, and his stick not tied up by
@@ -224,8 +202,8 @@ export function readSituation(state: GameState, s: SkaterState): Situation {
   return readInto(state, s, { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false });
 }
 
-/** The situation of the last listOptions call (scratch, read by decideCarrier). */
-export const lastSituation: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false };
+/** listOptions' situation when its caller passes none (private scratch). */
+const ownSituation: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false };
 
 /**
  * A habit multiplies a value (a positive one by 0.6 + 0.8 * tendency, a negative one is divided by it) and leans it by
@@ -242,14 +220,14 @@ const tw: Vec2 = { x: 0, y: 0 };
 
 /**
  * Every option he has, each with value = chance it works * (threat it leads to - threat here) - (1 - that chance) *
- * what losing it here costs. Refills and returns `out`.
+ * what losing it here costs. Refills and returns `out`, and writes his situation into `situation`. (Tactics, Task 11,
+ * will come in as a parameter when they shade an option.)
  */
-export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, tactics: Tactics, out: Option[]): Option[] {
-  void tactics;
+export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, out: Option[], situation: Situation = ownSituation): Option[] {
   out.length = 0;
   const s = findSkater(state, me.id);
   if (s === null) { out.push({ kind: 'protect', value: 0 }); return out; }
-  const sit = readInto(state, s, lastSituation);
+  const sit = readInto(state, s, situation);
   const a = me.attrs, tend = me.tendencies;
   const side = s.side, dir = state.attackDir[side];
   const p = state.puck.pos;
@@ -267,9 +245,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const since = t.side === side && t.ids[t.ids.length - 1] === s.id ? t.ticks[t.ticks.length - 1]! : state.tick;
   const held = Math.min(V.holdCap, (state.tick - since) * DT);
   const moveOn = V.hold * held;
-  // Passing: worth less in his first PASS_SETTLE s with it (he has not settled it), more the longer he has it.
-  const passOn = V.hold * B.holdBoost.pass * (held - PASS_SETTLE), shootOn = moveOn * B.holdBoost.shoot;
-  const settled = SETTLE_MIN + (1 - SETTLE_MIN) * clamp(held / PASS_SETTLE, 0, 1);
+  // Passing: worth less in his first O.pass.settle s with it (he has not settled it), more the longer he has it.
+  const passOn = V.hold * B.holdBoost.pass * (held - O.pass.settle), shootOn = moveOn * B.holdBoost.shoot;
+  const settled = O.pass.settleMin + (1 - O.pass.settleMin) * clamp(held / O.pass.settle, 0, 1);
 
   // Offside: with the puck outside the zone, any teammate wholly in it (or about to be) puts his team offside if the
   // puck goes in now.
@@ -297,21 +275,21 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const late = state.period >= PERIODS && lead === -1 ? 1 - state.clock / PERIOD_SECONDS : 0;
       const scoreShoot = margin === 'ahead' ? se.leaderShoot : Math.min(se.maxShoot, (margin === 'behind' ? se.trailerShoot : 1) * (1 + se.latePush * late));
       g = V.goal * q * shootSkill * (B.openNetWeight[0] + B.openNetWeight[1] * open) * dpow(calm, B.shootPressure);
-      // A defender in his shooting lane blocks or smothers it: under SHOT_LANE[1] m of clear ice g is scaled by
-      // SHOT_BLOCKED[1], under SHOT_LANE[0] by SHOT_BLOCKED[0].
+      // A defender in his shooting lane blocks or smothers it: under O.shotLane[1] m of clear ice g is scaled by
+      // O.shotBlocked[1], under O.shotLane[0] by O.shotBlocked[0].
       tw.x = GOAL * dir; tw.y = 0;
       const sw = laneWidth(state, side, p, tw);
-      if (sw < SHOT_LANE[0]) g *= SHOT_BLOCKED[0]; else if (sw < SHOT_LANE[1]) g *= SHOT_BLOCKED[1];
+      if (sw < O.shotLane[0]) g *= O.shotBlocked[0]; else if (sw < O.shotLane[1]) g *= O.shotBlocked[1];
       // Half the score effect's size: on a value near zero its full size would swing shooting by far more than real
       // teams change.
-      shootScore = 1 + (scoreShoot - 1) * SCORE_SOFT;
+      shootScore = 1 + (scoreShoot - 1) * O.scoreSoft;
     }
     // Near a post (a wraparound's end): the chance comes from how far the goalie is from that post.
     const postLy = sgn(sly) * RINK.netHalfWidth;
     if (hyp(GOAL - srx, postLy - sly) <= WRAP_SHOT) {
       const gl = state.goalies[side === 'home' ? 'away' : 'home'].pos;
       const gd = hyp(gl.x * dir - GOAL, gl.y * dir - postLy);
-      g = Math.max(g, V.goal * WRAP_GOAL * clamp(gd / WRAP_OPEN, 0.1, 1) * shootSkill);
+      g = Math.max(g, V.goal * O.wrap.goal * clamp(gd / O.wrap.open, 0.1, 1) * shootSkill);
     }
     // A shot scores with chance g; one that does not leaves his team the puck TUNING.value.shotKeep of the time, down
     // low on the boards (worth threat there), and otherwise loses what he has here. Score effects then scale its
@@ -350,18 +328,20 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (mode === 'behind' && (mrx < OUT_FRONT_MIN_RX || mrx > GOAL)) continue;
     // Behind his back: seen only with good vision.
     if ((dx * fc + dy * fs) / (l || 1) < BEHIND_COS && a.vision < BEHIND_VISION) continue;
-    let chance = clamp(0.97 - 0.006 * Math.max(0, l - 12) - V.skill.pass * (100 - passSkill) - pressure * (0.3 - 0.002 * passSkill), 0.03, 0.97) * settled;
+    let chance = O.pass.base - O.pass.perMetre * Math.max(0, l - O.pass.from) - V.skill.pass * (100 - passSkill) - pressure * (O.pass.pressure - O.pass.pressurePerPoint * passSkill);
+    chance *= settled;
     // The goalie and the net frames are in the way of a pass as much as a skater is.
     const w = passLaneWidth(state, side, p, m.pos);
-    if (w < 0.5) chance *= 0.2; else if (w < L.open) chance *= V.shadowed;
+    if (w < O.pass.narrow) chance *= O.pass.narrowFactor; else if (w < L.open) chance *= V.shadowed;
     const space = spaceAt(state, side, m.pos);
-    if (space < L.space) chance *= 0.5 + space / 3;
-    // A pass across the front of the net makes the goalie move: the receiver's shot is worth more (PASS_ACROSS).
+    if (space < L.space) chance *= O.pass.crowded + space / O.pass.crowdedPer;
+    chance = clamp(chance, 0.03, 0.97);
+    // A pass across the front of the net makes the goalie move: the receiver's shot is worth more (O.pass.across).
     let to = threat(mrx, mly) * openAt(space);
     const qm = shotQuality(mrx, mly);
     if (qm > 0 && rx > BLUE) {
       const rd = defs.get(m.id);
-      to += V.goal * PASS_ACROSS * qm * clamp(Math.abs(mly - ly) / ACROSS_FULL, 0, 1) * (rd ? B.shootSkill.base + composite(rd.attrs, SHOOTING) * B.shootSkill.perPoint : 1);
+      to += V.goal * O.pass.across * qm * clamp(Math.abs(mly - ly) / O.pass.acrossFull, 0, 1) * (rd ? B.shootSkill.base + composite(rd.attrs, SHOOTING) * B.shootSkill.perPoint : 1);
     }
     let v = valueOf(chance, to);
     // From inside the zone, a pass out to a man at or outside the line, who will carry it back in while the passer
@@ -390,8 +370,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (outside && mateOffside && trx > BLUE - B.holdUpGap) trx = BLUE - B.holdUpGap;
     tw.x = trx * dir; tw.y = tly * dir;
     const w = laneWidth(state, side, s.pos, tw);
-    const block = w < 2.5 ? ((2.5 - w) / 2.5) * 0.5 : 0;
-    const chance = clamp(0.95 - V.skill.carry * (100 - ph) - pressure * (0.35 - 0.002 * ph) - block, 0.03, 0.97);
+    const block = w < O.carry.laneFrom ? ((O.carry.laneFrom - w) / O.carry.laneFrom) * O.carry.laneCost : 0;
+    const chance = clamp(O.carry.base - V.skill.carry * (100 - ph) - pressure * (O.carry.pressure - O.carry.pressurePerPoint * ph) - block, 0.03, 0.97);
     // On a breakaway a carry at the net leads to the shot or deke at its end: worth that chance to score (the goalie
     // square to him), not the threat of the spot.
     // A carry that ends inside DEKE_FROM of the net ends in a deke, with the goalie to beat at close range: V.deke of it.
@@ -420,13 +400,13 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const d = hyp(o.pos.x - s.pos.x, o.pos.y - s.pos.y);
       if (d < od) { od = d; oly = o.pos.y * dir; }
     }
-    // Holding, the frame shields him and the passes out front stay open to him: he keeps HOLD_KEEP of the best one's worth.
+    // Holding, the frame shields him and the passes out front stay open to him: he keeps O.hold.keep of the best one's worth.
     const hy = Math.abs(oly) > RINK.netHalfWidth ? -sgn(oly) * HOLD_LY : clamp(sly, -HOLD_LY, HOLD_LY);
     tw.x = HOLD_RX * dir; tw.y = hy * dir;
-    const keep = clamp(0.97 - pressure * 0.1, 0.03, 0.97);
+    const keep = clamp(O.hold.base - pressure * O.hold.pressure, 0.03, 0.97);
     let bestPass = -Infinity;
     for (const pv of passValues) if (pv > bestPass) bestPass = pv;
-    const kept = passValues.length > 0 ? Math.max(0, bestPass - passOn) * HOLD_KEEP : 0;
+    const kept = passValues.length > 0 ? Math.max(0, bestPass - passOn) * O.hold.keep : 0;
     out.push({ kind: 'carry', lane: 'hold', to: { x: tw.x + 0, y: tw.y + 0 }, value: keep * kept - (1 - keep) * loss - moveOn });
     // Wrap: to the post the goalie is further from, worth what a shot from there would be.
     const gl = state.goalies[side === 'home' ? 'away' : 'home'].pos;
@@ -435,8 +415,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     const gd = hyp(grx - GOAL, gly - wy * RINK.netHalfWidth);
     tw.x = WRAP_RX * dir; tw.y = wy * WRAP_LY * dir;
     const w = laneWidth(state, side, s.pos, tw);
-    const chance = clamp(0.9 - pressure * 0.2 - (w < 1.5 ? (1.5 - w) * 0.3 : 0), 0.03, 0.97);
-    const wrapG = V.goal * WRAP_GOAL * clamp(gd / WRAP_OPEN, 0.1, 1) * shootSkill;
+    const chance = clamp(O.wrap.base - pressure * O.wrap.pressure - (w < O.wrap.laneFrom ? (O.wrap.laneFrom - w) * O.wrap.laneCost : 0), 0.03, 0.97);
+    const wrapG = V.goal * O.wrap.goal * clamp(gd / O.wrap.open, 0.1, 1) * shootSkill;
     const v = habit(valueOf(chance, wrapG), tend.carry) - moveOn;
     out.push({ kind: 'carry', lane: 'wrap', to: { x: tw.x + 0, y: tw.y + 0 }, value: v });
   } else {
@@ -467,10 +447,10 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       if (j === 'lowSupport' || j === 'office') { to = m; break; }
     }
     let drx: number, dly: number;
-    if (to !== null) { drx = to.pos.x * dir; dly = to.pos.y * dir; } else { drx = GOAL - RIM_BACK; dly = -ps * RIM_LY; }
+    if (to !== null) { drx = to.pos.x * dir; dly = to.pos.y * dir; } else { drx = GOAL - RIM.corner.back; dly = -ps * RIM.corner.y; }
     tw.x = drx * dir; tw.y = dly * dir;
-    // Round the boards to nobody is a puck thrown away unless his team is nearer it: BLIND_RIM of the race.
-    const chance = race(state, s, tw, to) * (to === null ? BLIND_RIM : 1);
+    // Round the boards to nobody is a puck thrown away unless his team is nearer it: O.blindRim of the race.
+    const chance = clamp(race(state, s, tw, to) * (to === null ? O.blindRim : 1), 0.03, 0.97);
     const v = habit(valueOf(chance, threat(drx, dly) * openAt(spaceAt(state, side, tw))), tend.pass);
     out.push({ kind: 'rim', toId: to === null ? null : to.id, value: v });
   }
@@ -487,18 +467,19 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     out.push({ kind: 'dump', value: habit(v, tend.dump) });
   }
   if (mode === 'normal' && sit.zone === 'D') {
-    tw.x = CLEAR_RX * dir; tw.y = ps * CLEAR_LY * dir;
+    const cx = RIM.clear.x;
+    tw.x = cx * dir; tw.y = ps * CLEAR_LY * dir;
     const chance = race(state, s, tw, null);
-    const v = valueOf(chance, threat(CLEAR_RX, ps * CLEAR_LY), V.turnoverCost * threat(-CLEAR_RX, -ps * CLEAR_LY));
-    // Unpressured, a clear throws away a puck he could carry or pass out: it costs CLEAR_IDLE * (1 - pressure).
-    out.push({ kind: 'clear', value: habit(v - CLEAR_IDLE * (1 - pressure), tend.dump) });
+    const v = valueOf(chance, threat(cx, ps * CLEAR_LY), V.turnoverCost * threat(-cx, -ps * CLEAR_LY));
+    // Unpressured, a clear throws away a puck he could carry or pass out: it costs O.clearIdle * (1 - pressure).
+    out.push({ kind: 'clear', value: habit(v - O.clearIdle * (1 - pressure), tend.dump) });
   }
 
   // ---- protect ----
   if (mode === 'normal' || mode === 'low') {
-    const keep = clamp(0.97 - pressure * (PROTECT_LOSS.base - PROTECT_LOSS.perPoint * composite(a, PROTECTING)), 0.03, 0.97);
-    // Unpressured, shielding the puck only stands still: it costs PROTECT_IDLE * (1 - pressure).
-    out.push({ kind: 'protect', value: valueOf(keep, here) - moveOn - PROTECT_IDLE * (1 - pressure) });
+    const keep = clamp(O.protect.base - pressure * (O.protect.loss - O.protect.lossPerPoint * composite(a, PROTECTING)), 0.03, 0.97);
+    // Unpressured, shielding the puck only stands still: it costs O.protect.idle * (1 - pressure).
+    out.push({ kind: 'protect', value: valueOf(keep, here) - moveOn - O.protect.idle * (1 - pressure) });
   }
   if (out.length === 0) out.push({ kind: 'protect', value: 0 });
   return out;
@@ -575,8 +556,9 @@ const kindW: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
  * TUNING.value.stick when it is what he is committed to, plus the part of his judging error that stays with him for the
  * possession (persist * a fixed normal error * T, keyed by his plan's seed). The temperature T (TUNING.value.pick: base +
  * perPoint * (100 - iq) + pressure * his pressure - perPoise * poise, at least `min`) is lower for a smart, poised player,
- * who usually takes the best option, and higher for a limited one. No kind of option is taken more than
- * TUNING.brain.maxShare of the time when there is another kind on the list: the rest goes to the other kinds by weight.
+ * who usually takes the best option, and higher for a limited one. In an ordinary state (no breakaway, odd-man rush,
+ * play behind the net or pressure down low) no kind of option is taken more than TUNING.brain.maxShare of the time when
+ * there is another kind on the list: the rest goes to the other kinds by weight.
  */
 export function chooseOption(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null, rng: Rng): Option {
   const n = options.length;
@@ -640,10 +622,12 @@ function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: 
     kindW[k]! += w;
     total += w;
   }
-  // The parity cap: with more than one kind on the list, no kind gets more than maxShare of the draw.
+  // The parity cap, in an ordinary state (no breakaway, odd-man rush, play behind the net or pressure down low, whose
+  // rules narrow his list on purpose): with more than one kind on the list, no kind gets more than maxShare of the draw.
   let top = 0;
   for (let k = 1; k < kindW.length; k++) if (kindW[k]! > kindW[top]!) top = k;
-  if (kinds > 1 && kindW[top]! > B.maxShare * total) {
+  const ordinary = !sit.breakaway && !sit.oddMan && !sit.behindNet && !sit.pressuredLow;
+  if (ordinary && kinds > 1 && kindW[top]! > B.maxShare * total) {
     let rest = 0;
     for (let k = 1; k < kindW.length; k++) if (k !== top) rest += kindW[k]!;
     const topScale = (B.maxShare * total) / kindW[top]!, restScale = ((1 - B.maxShare) * total) / rest;
