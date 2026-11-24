@@ -156,6 +156,21 @@ export const TUNING = deepFreeze({
      * values the shot oneTimerBonus higher.
      */
     traffic: 0.02, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
+    /**
+     * What follows in the zone he attacks (Task 8 fix round), measured in play at 43d6dcf, seeds 1-16
+     * (task-8-report.md, "Fix round 1"): `keep`, the share of cases in which his team (or nobody) has the puck in the zone
+     * 6 s later; `rush`, the share in which the other team carries it out past centre within 6 s. A carry in the zone (and
+     * a completed pass: 0.53 / 0.09) is the baseline. These describe the engine, not a target.
+     */
+    after: {
+      carry: { keep: 0.51, rush: 0.07 },
+      passFailed: { keep: 0.29, rush: 0.32 },
+      held: { keep: 0.41, rush: 0.19 },
+      steered: { keep: 0.42, rush: 0.15 },
+      rebound: { keep: 0.32, rush: 0.13 },
+      blocked: { keep: 0.24, rush: 0.34 },
+      wide: { keep: 0.28, rush: 0.15 },
+    },
     stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
     goal: 0.13, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },

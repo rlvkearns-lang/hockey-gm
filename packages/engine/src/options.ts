@@ -130,14 +130,9 @@ const HOLD_RX = 28.7;
 const HOLD_LY = 1.4;
 /** A shot from this far (m) or more is a point shot: traffic raises it, it needs a lane (Task 7). */
 const FAR_SHOT = 11;
-/** What follows a shot that does not score (shotAfter): a rebound lands REBOUND_OUT m out; each metre nearer it than the
- * other side's nearest man is worth REBOUND_EDGE of the chance of getting it; a blocked puck is his side's BLOCKED_OURS
- * of the time; the corner and the end-zone dot, attack-relative. */
+/** A rebound lands about REBOUND_OUT m out; each metre nearer it than the other side's nearest man is worth REBOUND_EDGE of the chance of getting it (shotAfter). */
 const REBOUND_OUT = 2.5;
 const REBOUND_EDGE = 0.15;
-const BLOCKED_OURS = 0.4;
-const CORNER = { rx: 26, ly: 10 };
-const DOT = { rx: 20.1, ly: 6.7 };
 /** Traffic: a teammate with job netFront within this far (m) of the net centre. */
 const TRAFFIC_NEAR = 3;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */
@@ -248,7 +243,13 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const mode = sit.breakaway ? 'break' : sit.oddMan ? 'odd' : sit.behindNet ? 'behind' : sit.pressuredLow ? 'low' : 'normal';
 
   const here = threat(rx, ly) * (0.6 + 0.4 * (1 - pressure));
-  const loss = here + V.turnoverCost * threat(-rx, -ly);
+  // In the zone he attacks, a pass or carry that fails is often won back (Task 8 fix round, measured: TUNING.value.after):
+  // it loses the share of the possession's continuation that a failed pass loses, and their rushes the other way.
+  // Elsewhere it gives up what he has here and the other side's threat from the spot.
+  const AF = V.after;
+  const loss = rx > BLUE
+    ? here * (1 - AF.passFailed.keep / AF.carry.keep) + AF.passFailed.rush * V.turnoverCost * threat(0, 0)
+    : here + V.turnoverCost * threat(-rx, -ly);
   const valueOf = (chance: number, to: number, lose: number = loss): number => chance * (to - here) - (1 - chance) * lose;
 
   // How long he has had it: the longer, the more he wants to move it on.
@@ -313,7 +314,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // worth TUNING.value.oneTimerBonus more.
     if (g > 0) {
       const gc = clamp(g, 0, 0.97);
-      const fail = shotAfter(state, s, me, defs, gc, pBlock, traffic, dNet, pressure);
+      const fail = shotAfter(state, s, me, defs, gc, pBlock, traffic, dNet, pressure, here);
       let v = habit(gc * (1 - here) + fail - (1 - gc) * here, tend.shoot);
       v = v >= 0 ? v * shootScore : v / shootScore;
       const ot = state.oneTimerTaken;
@@ -516,11 +517,6 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
 }
 
 /** Whether a teammate of `s` with job netFront stands within TRAFFIC_NEAR (m) of the centre of the net `s` attacks. */
-/** A loose puck at (rx, ly) (attack-relative for the side valuing it) that it gets with chance `ours`: its threat if it does, the other side's (times turnoverCost) if not. */
-function loose(rx: number, ly: number, ours: number): number {
-  return ours * threat(rx, ly) - (1 - ours) * V.turnoverCost * threat(-rx, -ly);
-}
-
 /** The nearest on-ice skater of `side` (not down) to the attack-relative spot (rx, ly) of `att`'s attack (m). */
 function nearestTo(state: GameState, side: Side, att: Side, rx: number, ly: number): number {
   const dir = state.attackDir[att];
@@ -537,20 +533,18 @@ function nearestTo(state: GameState, side: Side, att: Side, rx: number, ly: numb
 const POSES_ALL: readonly SavePose[] = ['glove', 'blocker', 'pad', 'butterfly'];
 
 /**
- * What a shot by `s` that does not score is worth, as the sum over what can follow of its chance times its spot value
- * (Task 7 review, Important 2, with Task 8's outcome model): blocked (`pBlock`: a loose puck where he is, the blocker's
- * side likelier to get it); wide (TUNING.shot.wild's chance for him here: a loose puck in the corner); saved, split as
- * rebounds.ts saveOutcomeChances does for this goalie (averaged over his poses; screened with a teammate in front):
- * held (a faceoff at the end-zone dot, even), steered (a loose puck in the corner) or a rebound (a loose puck in front
- * of the goalie). A loose puck in the corner or in front is his side's with a chance from who is nearer it now (0.5 +
- * REBOUND_EDGE per metre, within [0.1, 0.9]). `gc` is the chance it scores.
+ * What a shot by `s` that does not score is worth (Task 7 review, Important 2; Task 8 fix round): the sum over what can
+ * follow it of its chance times its value. Each outcome keeps a measured share of the possession's continuation (`here`,
+ * the same spot value every option uses) and gives the other side a measured share of rushes the other way, worth their
+ * threat from centre ice times turnoverCost (TUNING.value.after, measured in play: what follows a carry in the zone is the
+ * baseline). The outcomes: blocked (`pBlock`); wide (TUNING.shot.wild's chance for him here; a miss or a post); saved,
+ * split as rebounds.ts saveOutcomeChances does for this goalie (averaged over his poses; screened with a teammate in
+ * front): held, steered, or a rebound, whose share is scaled by who is nearer the rebound spot now (0.5 + REBOUND_EDGE
+ * per metre, within [0.1, 0.9], against an even 0.5).
  */
-function shotAfter(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, gc: number, pBlock: number, traffic: boolean, dNet: number, pressure: number): number {
+function shotAfter(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, gc: number, pBlock: number, traffic: boolean, dNet: number, pressure: number, here: number): number {
   const side = s.side, opp: Side = side === 'home' ? 'away' : 'home';
-  const dir = state.attackDir[side];
-  const rx = state.puck.pos.x * dir, ly = state.puck.pos.y * dir;
-  const ps = ly >= 0 ? 1 : -1;
-  const a = me.attrs, W = TUNING.shot.wild;
+  const a = me.attrs, W = TUNING.shot.wild, AF = V.after;
   const wide = (1 - pBlock) * clamp(W.base + (100 - a.shootingAccuracy) * W.perPoint + pressure * W.pressure + dNet * W.perMetre, 0.03, 0.97);
   const saved = Math.max(0, 1 - gc - pBlock - wide);
   const gd = defs.get(state.goalies[opp].id);
@@ -561,13 +555,11 @@ function shotAfter(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<st
     const c = saveOutcomeChances({ pose, speed, screened: traffic, tipped: false, reboundControl: rc });
     held += c.held / 4; steered += c.steered / 4; rebound += c.rebound / 4;
   }
-  // A rebound lands about REBOUND_OUT m in front of the net: his side's with a chance from who is nearer it.
-  // A loose puck there is his side's with a chance from who is nearer it now (the same for the corner).
-  const oursAt = (x: number, y: number): number => clamp(0.5 + REBOUND_EDGE * (nearestTo(state, opp, side, x, y) - nearestTo(state, side, side, x, y)), 0.1, 0.9);
-  const corner = loose(CORNER.rx, ps * CORNER.ly, oursAt(CORNER.rx, ps * CORNER.ly));
-  return pBlock * loose(rx, ly, BLOCKED_OURS)
-    + wide * corner
-    + saved * (held * loose(DOT.rx, ps * DOT.ly, 0.5) + steered * corner + rebound * loose(GOAL - REBOUND_OUT, 0, oursAt(GOAL - REBOUND_OUT, 0)));
+  const rushCost = V.turnoverCost * threat(0, 0);
+  const val = (o: { keep: number; rush: number }, scale = 1): number => here * Math.min(1, (o.keep * scale) / AF.carry.keep) - o.rush * rushCost;
+  const ours = clamp(0.5 + REBOUND_EDGE * (nearestTo(state, opp, side, GOAL - REBOUND_OUT, 0) - nearestTo(state, side, side, GOAL - REBOUND_OUT, 0)), 0.1, 0.9);
+  return pBlock * val(AF.blocked) + wide * val(AF.wide)
+    + saved * (held * val(AF.held) + steered * val(AF.steered) + rebound * val(AF.rebound, ours / 0.5));
 }
 
 function netFrontMate(state: GameState, s: SkaterState): boolean {
