@@ -129,6 +129,39 @@ export function clipToNets(from: Vec2, to: Vec2, margin: number): void {
   }
 }
 
+const routeScratch: Vec2 = { x: 0, y: 0 };
+/** True when the segment from `from` to `to` meets no net frame grown by `margin`. */
+function clearOfNets(from: Vec2, x: number, y: number, margin: number): boolean {
+  routeScratch.x = x;
+  routeScratch.y = y;
+  clipToNets(from, routeScratch, margin);
+  return routeScratch.x === x && routeScratch.y === y;
+}
+
+/**
+ * Where to skate on the way from `from` to `to` so as to go round a net frame rather than into it: `to` itself when
+ * the straight line clears both frames (grown by `margin`), else a corner of the frame in the way on `from`'s side of
+ * it (`margin` + `round` out from the frame): the corner at the far end if it can be reached in a straight line, else
+ * the near one. Writes `out` and returns it.
+ */
+export function routeAroundNets(from: Vec2, to: Vec2, margin: number, round: number, out: Vec2): Vec2 {
+  out.x = to.x;
+  out.y = to.y;
+  // Neither end near a goal line: the segment cannot meet a frame.
+  const inner = RINK.goalLineX - margin;
+  if ((from.x < inner && from.x > -inner && to.x < inner && to.x > -inner) || clearOfNets(from, to.x, to.y, margin)) return out;
+  const end = from.x >= 0 ? 1 : -1;
+  const side = from.y >= 0 ? 1 : -1;
+  const m = margin + round;
+  const y = side * (RINK.netHalfWidth + m);
+  const front = end * (RINK.goalLineX - m), back = end * (NET_BACK + m);
+  const behind = from.x * end > RINK.goalLineX + RINK.netDepth / 2;
+  const far = behind ? front : back, near = behind ? back : front;
+  out.x = clearOfNets(from, far, y, margin) ? far : near;
+  out.y = y;
+  return out;
+}
+
 /** Distance (m) from a point inside the rink to the boards (to the corner arc in the corners). */
 export function distToBoards(p: Vec2): number {
   const R = RINK.cornerRadius;

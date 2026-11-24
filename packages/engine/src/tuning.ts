@@ -104,6 +104,20 @@ export const TUNING = deepFreeze({
   },
 
   /**
+   * Commitment (commit.ts). A held spot is re-issued without a trigger only after holdSeconds and once the wanted spot
+   * is more than moveEnough (m) from it; a team's committed phase follows the raw one after it has differed for
+   * phaseDelay (s); a loose-puck chaser hands over only to a teammate closer to the puck by more than chaserMargin (m).
+   */
+  commit: { holdSeconds: 0.4, moveEnough: 1.5, phaseDelay: 0.5, chaserMargin: 1 },
+  /**
+   * Effort (commit.ts): the share of top speed each effort wants. A positional job sprints to a spot more than
+   * sprintFrom (m) away and glides within glideWithin, else skates. Below sprintMinEnergy only the puck jobs sprint.
+   */
+  effort: { glide: 0.55, skate: 0.8, sprint: 1, sprintFrom: 8, glideWithin: 3, sprintMinEnergy: 0.2 },
+  /** A goalie's body (bodies.ts resolveGoalies): skaters are kept this far (m) plus their own radius from his centre. */
+  goalieBody: { radius: 0.55 },
+
+  /**
    * Score effects (team-play.ts scoreMargin, brain, poke checks), kept to real-hockey size. A margin is comfortable from
    * `lead` goals, or `lateLead` in the third period. The team comfortably ahead shoots at leaderShoot of normal and
    * presses and pokes at sitBack of normal; the team comfortably behind shoots at trailerShoot; a team down by one in

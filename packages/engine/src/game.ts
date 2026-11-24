@@ -1,6 +1,6 @@
 import { blockPickup, recordTouch, tryIntercept } from './actions';
 import { BENCH_DOORS, benchTick, finishChanges, initialBench } from './bench';
-import { resolveBodies } from './bodies';
+import { resolveBodies, resolveGoalies } from './bodies';
 import { brainTick } from './brain';
 import { DT, PERIOD_SECONDS, PERIODS } from './constants';
 import { clearContests, contestEndEvent, contestTick, puckHeldByContest, type ContestRef } from './contests/core';
@@ -9,13 +9,14 @@ import { dropPuck, FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, linedUp, restPuck, 
 import { goalieTick, resolveOnNet, trackShot, tryBlock } from './goalie';
 import { stepPuck, type PuckEvent } from './puck';
 import { refereeTick } from './referee';
-import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './rink';
+import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets, routeAroundNets } from './rink';
 import { createRng, restoreRng, type Rng } from './rng';
 import { TUNING } from './tuning';
 import { movementOf, stepSkater, type Drive, type Movement } from './skating';
 import { buildResult } from './stats';
 import { confirmTurnover } from './turnovers';
-import { assignJobs, driveFor, isTiedUp, steeredByContest } from './team-play';
+import { assignJobs, driveOf, isTiedUp, steeredByContest } from './team-play';
+import { initialPlans, initialTeamPhase } from './commit';
 import type {
   ContestState, GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
 } from './types';
@@ -43,6 +44,11 @@ const EPS = 1e-9;
 /** Scratch velocity for clamping the carried puck (its velocity is the carrier's, not bounced). */
 const noVel = { x: 0, y: 0 };
 const NO_IDS: string[] = [];
+/** A skater routes round a net frame grown by his radius plus ROUTE_SLACK (m), via a corner ROUTE_ROUND (m) further out. */
+const ROUTE_SLACK = 0.05;
+const ROUTE_ROUND = 0.4;
+/** Nobody whose position and target are both nearer centre ice than this (m) can have a net frame in his way. */
+const ROUTE_CLEAR_X = RINK.goalLineX - 1;
 
 /**
  * The energy his Movement is built from: 1 at 0.5 and above (where energy does not affect skating), else energy to the
@@ -88,6 +94,8 @@ function initialState(setup: GameSetup): GameState {
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
     lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null, turnoverWatch: null,
     bench: initialBench(setup),
+    plans: initialPlans(skaters.length),
+    teamPhase: initialTeamPhase(),
     seed: setup.seed,
     rng: [0, 0, 0, 1],
   };
@@ -174,14 +182,16 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
   const bodies = state.skaters.map((sk) => ({ def: defs.get(sk.id)!, legs: legs(sk.energy), move: movementOf(defs.get(sk.id)!, legs(sk.energy)) }));
   const bodyById = new Map(state.skaters.map((sk, i) => [sk.id, bodies[i]!]));
   const move = (id: string): Movement => bodyById.get(id)!.move;
-  /** On-ice skaters, refilled in place each tick, and their Movements (same order). */
+  /** On-ice skaters, refilled in place each tick, their Movements and their indexes in state.skaters (same order). */
   const onIceList: SkaterState[] = [];
   const onIceMoves: Movement[] = [];
+  const onIceIdx: number[] = [];
   /** Loose puck position before this tick's step (scratch). */
   const prevPuck = { x: 0, y: 0 };
   const onIceSkaters = (): SkaterState[] => {
     onIceList.length = 0;
     onIceMoves.length = 0;
+    onIceIdx.length = 0;
     const all = state.skaters;
     for (let i = 0; i < all.length; i++) {
       const sk = all[i]!;
@@ -191,6 +201,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
       if (b.legs !== l) { b.legs = l; b.move = movementOf(b.def, l); }
       onIceList.push(sk);
       onIceMoves.push(b.move);
+      onIceIdx.push(i);
     }
     return onIceList;
   };
@@ -200,17 +211,26 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     return m;
   };
 
-  /** How each skater drives this tick, as assignJobs left it (derived each live tick, emptied after use). */
-  const drives = new Map<string, Drive>();
-
-  /** Movement, body separation, boards and net frames for the on-ice skaters (onIceSkaters(), with onIceMoves). */
+  /**
+   * Movement (each skater driven as his plan says: driveOf), body separation, boards and net frames for the on-ice
+   * skaters (onIceSkaters(), with onIceMoves). The goalies' bodies come after the goalies move (settle).
+   */
   function moveSkaters(skaters: SkaterState[]): void {
     for (let i = 0; i < skaters.length; i++) {
       const s = skaters[i]!;
       if (s.downT > 0) s.downT = Math.max(0, s.downT - DT);
-      stepSkater(s, onIceMoves[i]!, DT, driveFor(state, s, drives));
+      // With a net frame in his way he skates for its corner; his target itself stays what it is.
+      const t = s.target;
+      const nearNet = s.pos.x >= ROUTE_CLEAR_X || s.pos.x <= -ROUTE_CLEAR_X || t.x >= ROUTE_CLEAR_X || t.x <= -ROUTE_CLEAR_X;
+      if (nearNet) routeAroundNets(s.pos, t, onIceMoves[i]!.radius + ROUTE_SLACK, ROUTE_ROUND, waypoint);
+      if (!nearNet || (waypoint.x === t.x && waypoint.y === t.y)) stepSkater(s, onIceMoves[i]!, DT, driveOf(state, s, onIceIdx[i]!));
+      else {
+        const tx = t.x, ty = t.y;
+        t.x = waypoint.x; t.y = waypoint.y;
+        stepSkater(s, onIceMoves[i]!, DT, routeDrive(driveOf(state, s, onIceIdx[i]!)));
+        t.x = tx; t.y = ty;
+      }
     }
-    drives.clear();
     resolveBodies(skaters, move, onIceMoves);
     for (let i = 0; i < skaters.length; i++) {
       const s = skaters[i]!;
@@ -219,6 +239,27 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
       resolveNets(s.pos, s.vel, r);
     }
   }
+
+  const waypoint = { x: 0, y: 0 };
+  const routed: Drive = { slow: 'coast', through: true };
+  /** On the way round a net he skates through the corner, slowing only as his plan says. */
+  const routeDrive = (d: Drive): Drive => { routed.slow = d.slow; return routed; };
+
+  /**
+   * After the goalies have moved: keeps the on-ice skaters (moved by moveSkaters) out of the goalies, and anyone a
+   * goalie pushed inside the boards and out of the net frames again.
+   */
+  function settle(skaters: SkaterState[]): void {
+    if (resolveGoalies(skaters, onIceMoves, goalieList()) === 0) return;
+    for (let i = 0; i < skaters.length; i++) {
+      const s = skaters[i]!;
+      const r = onIceMoves[i]!.radius;
+      resolveBoards(s.pos, s.vel, r, 0);
+      resolveNets(s.pos, s.vel, r);
+    }
+  }
+  const goalies: GoalieState[] = [];
+  const goalieList = (): GoalieState[] => { goalies.length = 0; goalies.push(state.goalies.home, state.goalies.away); return goalies; };
 
   function carryPuck(carrier: SkaterState): void {
     const p = state.puck;
@@ -276,14 +317,14 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     if (state.pickupBlock !== null && state.tick >= state.pickupBlock.untilTick) state.pickupBlock = null;
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
     benchTick(state, setup, DT, events);
-    drives.clear();
-    assignJobs(state, defs, tactics, drives);
+    assignJobs(state, defs, tactics);
     brainTick(state, defs, rng, events);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
 
     const skaters = onIceSkaters();
     moveSkaters(skaters);
     goalieTick(state, defs, DT, events);
+    settle(skaters);
 
     if (state.phase === 'live') {
       let carrier: SkaterState | null = null;
@@ -378,12 +419,14 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
         benchTick(state, setup, DT, events);
         moveSkaters(onIceSkaters());
         goalieTick(state, defs, DT, events);
+        settle(onIceList);
         if (state.phaseT >= STOPPED_SECONDS - EPS) setupFaceoff(state, state.faceoffSpot);
         break;
       case 'faceoffSetup':
         benchTick(state, setup, DT, events);
         moveSkaters(onIceSkaters());
         goalieTick(state, defs, DT, events);
+        settle(onIceList);
         if (state.phaseT >= FACEOFF_MIN_SECONDS - EPS && (state.phaseT >= FACEOFF_MAX_SECONDS - EPS || linedUp(state))) {
           finishChanges(state, setup); // at the 8 s cap a change may still be under way
           const e = dropPuck(state, defs, rng);

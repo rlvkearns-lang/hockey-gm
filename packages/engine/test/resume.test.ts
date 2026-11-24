@@ -34,6 +34,8 @@ describe('resuming a game from a snapshot', () => {
     ['with a shot in flight', (s) => s.shotInFlight !== null, 60_000],
     ['while play is stopped', (s) => s.phase === 'stopped', 70_000],
     ['in the third period, a turnover being watched', (s) => s.period === 3 && s.turnoverWatch !== null, 80_000],
+    ['mid-hold (a spot target issued under 0.2 s ago)', (s) => s.plans.some((p, i) => s.skaters[i]!.onIce && p.follow === 'spot' && s.tick - p.targetTick > 0 && s.tick - p.targetTick < 6), 20_000],
+    ['with a phase change pending', (s) => s.teamPhase.home.pending !== null || s.teamPhase.away.pending !== null, 50_000],
   ];
   for (const [name, when, from] of cases) {
     it(`restored ${name}, it plays out exactly as the straight run`, () => {

@@ -1,6 +1,7 @@
 import { recordTouch } from './actions';
 import { clearContests, effective, winProb } from './contests/core';
 import { gameEvent } from './events';
+import { holdJob, setTeamPhase, speedFor } from './commit';
 import { resolveBoards } from './rink';
 import type { Rng } from './rng';
 import { TUNING } from './tuning';
@@ -45,8 +46,8 @@ export function restPuck(state: GameState): void {
 
 /**
  * Whistle: phase `stopped`, puck at rest where it is, nobody in possession, no pass or shot pending, the touch chain
- * cleared, every contest over (its players free) and every net-front tie-up and rebound edge gone, and every on-ice skater heads for his line-up spot for the faceoff
- * at `spot`.
+ * cleared, every contest over (its players free) and every net-front tie-up and rebound edge gone, and every on-ice
+ * skater heads for his line-up spot for the faceoff at `spot` (his plan: job `lineUp`, reason `whistle`).
  */
 export function stopPlay(state: GameState, spot: Vec2): void {
   state.phase = 'stopped';
@@ -89,11 +90,14 @@ export function setupFaceoff(state: GameState, spot: Vec2): void {
 /** Every on-ice skater (but those leaving for the bench) skates toward his line-up spot for the draw at state.faceoffSpot. */
 export function headForLineup(state: GameState): void {
   const spot = state.faceoffSpot;
-  for (const s of state.skaters) {
+  const sk = state.skaters;
+  for (let i = 0; i < sk.length; i++) {
+    const s = sk[i]!;
     if (!s.onIce || s.leaving) continue;
     s.target = faceoffPosition(spot, s.slot, state.attackDir[s.side]);
     s.faceTarget = null;
-    s.speedCap = 0.8;
+    holdJob(state, i, 'lineUp', 'whistle');
+    s.speedCap = speedFor(state.plans[i]!.effort, 'lineUp', s.energy);
   }
 }
 
@@ -164,6 +168,7 @@ export function dropPuck(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   state.noChange = null;
   state.phase = 'live';
   state.phaseT = 0;
+  setTeamPhase(state);
   return gameEvent(state, {
     type: 'faceoff', side: winner, playerId: winC?.id ?? null, otherId: loseC?.id ?? null, pos: spot, detail: { spot: { x: spot.x, y: spot.y } },
   });

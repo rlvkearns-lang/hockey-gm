@@ -4,6 +4,7 @@ import { faceoffPosition } from './faceoff';
 import { zoneOf } from './rink';
 import { movementOf } from './skating';
 import { phaseFor } from './team-play';
+import { holdJob, indexOf } from './commit';
 import { TUNING } from './tuning';
 import type { BenchState, BenchUnit, GameEvent, GameSetup, GameState, Position, Side, SkaterState } from './types';
 import { hypot2, type Vec2 } from './vec';
@@ -203,6 +204,7 @@ function continueChange(state: GameState, setup: GameSetup, side: Side, unit: Un
     if (!s.leaving) {
       if (s.id === state.carrierId && !force) { busy = true; continue; }
       s.leaving = true;
+      holdJob(state, indexOf(state, s.id), 'change', null, 'stop');
       if (state.pendingPass !== null && state.pendingPass.toId === s.id) state.pendingPass = null;
     }
     if (force || hypot2(s.pos.x - door.x, s.pos.y - door.y) <= DOOR_REACH) comeOff(state, s, door);
@@ -265,4 +267,6 @@ function stepOn(state: GameState, on: SkaterState, slot: Position, door: Vec2, n
   on.contestId = null;
   on.shiftStart = now;
   state.onIce[on.side].push(on.id);
+  // His plan starts afresh: a job from team play at once if play is live, else his place in the line-up.
+  holdJob(state, indexOf(state, on.id), state.phase === 'live' ? 'shape' : 'lineUp', 'steppedOn');
 }

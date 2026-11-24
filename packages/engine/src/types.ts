@@ -75,6 +75,35 @@ export type SkatingMode = 'forward' | 'backward' | 'crossover';
 /** How a skater slows when he is going faster than he wants: glide on (`coast`), light braking (`ease`) or a hard stop (`stop`). */
 export type SlowMode = 'coast' | 'ease' | 'stop';
 
+/** Every job a skater can hold. No two skaters of a team hold the same one, except the utility jobs change, lineUp, tagUp, contest, down. */
+export type Job =
+  | 'carrier'
+  | 'lowSupport' | 'netFront' | 'highForward' | 'pointStrong' | 'pointWeak' | 'office'          // with the puck, offensive zone
+  | 'driveWide' | 'driveMiddle' | 'trailer' | 'dJoin' | 'dHold' | 'dHoldWeak'                    // with the puck, rush
+  | 'outlet' | 'centreLow' | 'stretch' | 'dPartner'                                              // with the puck, breakout
+  | 'f1' | 'f2' | 'f3' | 'dLineStrong' | 'dLineWeak'                                             // without it, their zone
+  | 'backcheckA' | 'backcheckB' | 'dGapStrong' | 'dGapWeak'                                      // without it, neutral zone
+  | 'dCorner' | 'dNet' | 'dzCentre' | 'wingStrong' | 'wingWeak'                                  // without it, own zone
+  | 'chase' | 'receive' | 'battleSupport'                                                        // the puck is loose or on its way
+  | 'press' | 'shape'                                                                            // Task 3 only; Task 4 removes both
+  | 'change' | 'lineUp' | 'tagUp' | 'contest' | 'down';                                          // utility
+/** How hard he skates: the share of his top speed he wants (TUNING.effort). */
+export type Effort = 'glide' | 'skate' | 'sprint';
+/** Why a target was last issued. `review` is the routine one (minimum hold passed and the spot moved enough); the rest are triggers. */
+export type ReplanReason = 'start' | 'possession' | 'passToMe' | 'loosePuckMine' | 'phase' | 'whistle' | 'contestEnd' | 'gotUp' | 'steppedOn' | 'offside' | 'review';
+/** What a skater has committed to (commit.ts). `state.plans[i]` belongs to `state.skaters[i]`. */
+export type SkaterPlan = {
+  job: Job; jobTick: number;
+  /** When his target was last issued and why; the side that had possession then. */
+  targetTick: number; reason: ReplanReason; possession: Side | null;
+  /** `spot`: a held place on the ice; `puck` / `man`: he tracks it every tick (`markId` for a man). */
+  follow: 'spot' | 'puck' | 'man'; markId: string | null;
+  /** How hard he skates, how he slows when going faster than that, and whether he skates through his target. */
+  effort: Effort; slow: SlowMode; through: boolean;
+};
+/** A team's committed phase (commit.ts): it follows the raw phase only once that has differed for TUNING.commit.phaseDelay (`pending` since `pendingTick`). */
+export type TeamPhaseState = { phase: TeamPhase; sinceTick: number; pending: TeamPhase | null; pendingTick: number };
+
 export type SkaterState = {
   id: string;
   side: Side;
@@ -93,7 +122,7 @@ export type SkaterState = {
    * his body to faceTarget; he squares up once his travel is more than 65 degrees off it and stops below 45.
    */
   mode: SkatingMode;
-  /** 0..1 fraction of top speed he may use this tick. */
+  /** 0..1 share of his top speed he wants now (his effort; see commit.ts speedFor), not a cap by job. */
   speedCap: number;
   energy: number;
   onIce: boolean;
@@ -294,6 +323,10 @@ export type GameState = {
   icingWatch: { side: Side; fromY: number } | null;
   /** Each team's line rotation (see bench.ts). */
   bench: Record<Side, BenchState>;
+  /** What each skater has committed to: `plans[i]` belongs to `skaters[i]` (commit.ts). */
+  plans: SkaterPlan[];
+  /** Each team's committed phase, which lags the raw one by TUNING.commit.phaseDelay (commit.ts). */
+  teamPhase: Record<Side, TeamPhaseState>;
   /** The game's seed (GameSetup.seed). */
   seed: number;
   /** The random-number generator's state after the last step: with it a snapshot resumes exactly (restoreGame). */

@@ -161,7 +161,8 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number, drive: Drive
         // Reach: the fastest speed whose turning circle (tangent to his blades) passes through the target.
         const offLine = Math.abs(wrapAngle(travel - s.facing));
         const off = Math.min(offLine, Math.PI / 2);
-        // Told to stop, he does not carve a wide circle round to a target behind him: he stops and turns.
+        // Told to stop, he does not carve a wide circle round to a target behind him: he stops and turns (a hockey
+        // stop; it is what keeps a skater held at the blue line, or heading off, from sweeping a 15-20 m arc).
         const reach = drive.slow === 'stop' && offLine > Math.PI / 2 ? 0
           : Math.sqrt((m.carve * dist) / (2 * Math.max(MIN_REACH_SIN, dsin(off))));
         if (reach < limit) limit = reach;

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assignJobs, driveFor, phaseFor, sitBack } from '../src/team-play';
-import type { Drive } from '../src/skating';
+import { assignJobs, phaseFor, sitBack } from '../src/team-play';
 import { DT } from '../src/constants';
 import { resolveNets } from '../src/rink';
 import { movementOf, stepSkater } from '../src/skating';
@@ -31,19 +30,37 @@ describe('team play', () => {
     }
     expect(reached).toBe(true);
   });
-  it('stopgap drives: the loose-puck chaser skates through the puck, a winger held at the blue line stops hard, the rest coast', () => {
-    const loose = stateWith({ carrier: null, puckX: 0 }); const drives = new Map<string, Drive>(); assignJobs(loose, defs, tactics, drives);
-    const through = loose.skaters.filter((s) => s.onIce && driveFor(loose, s, drives).through);
-    expect(through.length).toBeGreaterThanOrEqual(1); expect(through.length).toBeLessThanOrEqual(2);
-    const rush = stateWith({ carrier: 'home', puckX: 0 }); const d2 = new Map<string, Drive>();
-    const w = skater(rush, 'home', 'LW'); w.pos = { x: 5, y: 8 }; w.vel = { x: 8, y: 0 }; assignJobs(rush, defs, tactics, d2);
-    expect(driveFor(rush, w, d2)).toEqual({ slow: 'stop', through: false });
-    expect(driveFor(rush, skater(rush, 'away', 'C'), d2)).toEqual({ slow: 'coast', through: false });
+  it('drives by need: the loose-puck chaser follows the puck and skates through it, a winger held at the blue line stops hard, the rest coast', () => {
+    const loose = stateWith({ carrier: null, puckX: 0 }); assignJobs(loose, defs, tactics);
+    const chasers = loose.plans.filter((p, i) => loose.skaters[i]!.onIce && p.job === 'chase');
+    expect(chasers.length).toBe(2); expect(chasers.every((p) => p.follow === 'puck' && p.through && p.effort === 'sprint')).toBe(true);
+    const rush = stateWith({ carrier: 'home', puckX: 0 });
+    const w = skater(rush, 'home', 'LW'); w.pos = { x: 5, y: 8 }; w.vel = { x: 8, y: 0 }; assignJobs(rush, defs, tactics);
+    const plan = (s: { id: string }) => rush.plans[rush.skaters.findIndex((k) => k.id === s.id)]!;
+    expect(plan(w)).toMatchObject({ slow: 'stop', through: false });
+    expect(plan(skater(rush, 'away', 'C'))).toMatchObject({ slow: 'coast', through: false });
   });
-  it('stopgap drives: a back-checker skating fast away from his blue line is not stopped hard', () => {
-    const rush = stateWith({ carrier: 'home', puckX: 0 }); const d2 = new Map<string, Drive>();
-    const b = skater(rush, 'away', 'LW'); b.pos = { x: -3, y: 6 }; b.vel = { x: 8, y: 0 }; assignJobs(rush, defs, tactics, d2);
-    expect(driveFor(rush, b, d2)).toEqual({ slow: 'coast', through: false });
+  it('a back-checker skating fast away from his blue line is not stopped hard', () => {
+    const rush = stateWith({ carrier: 'home', puckX: 0 });
+    const b = skater(rush, 'away', 'LW'); b.pos = { x: -3, y: 6 }; b.vel = { x: 8, y: 0 }; assignJobs(rush, defs, tactics);
+    expect(rush.plans[rush.skaters.indexOf(b)]).toMatchObject({ slow: 'coast', through: false });
+  });
+  it('the chaser keeps the puck unless a teammate is clearly closer, and a held spot waits out its hold', () => {
+    const st = stateWith({ carrier: null, puckX: 0 }); assignJobs(st, defs, tactics);
+    const chaser = (side: 'home' | 'away') => st.skaters.find((s, i) => s.side === side && st.plans[i]!.job === 'chase')!;
+    const first = chaser('home'); const other = onIce(st, 'home').find((s) => s !== first && st.plans[st.skaters.indexOf(s)]!.job === 'shape')!;
+    const dFirst = Math.hypot(first.pos.x, first.pos.y);
+    other.pos = { x: (dFirst - 0.5) / Math.SQRT2, y: (dFirst - 0.5) / Math.SQRT2 }; st.tick++; assignJobs(st, defs, tactics);
+    expect(chaser('home')).toBe(first);                                          // closer by 0.5 m: no hand-over
+    other.pos = { x: 0.3, y: 0.3 }; st.tick++; assignJobs(st, defs, tactics);
+    expect(chaser('home')).toBe(other);
+  });
+  it('effort by need: a skater far from his spot sprints to it, one close to it glides', () => {
+    const st = stateWith({ carrier: 'home', puckX: 20 }); const d = skater(st, 'home', 'LD');
+    d.pos = { x: -10, y: 8 }; assignJobs(st, defs, tactics);
+    const i = st.skaters.indexOf(d); expect(st.plans[i]!.effort).toBe('sprint'); expect(d.speedCap).toBe(1);
+    d.pos = { x: d.target.x - 1, y: d.target.y }; st.tick++; assignJobs(st, defs, tactics);
+    expect(st.plans[i]!.effort).toBe('glide'); expect(d.speedCap).toBeLessThan(0.6);
   });
   it('a winger flying up ice with the carrier eases up in time to stay onside', () => {
     expect(wingerAheadOnRush()).toBeLessThan(0);

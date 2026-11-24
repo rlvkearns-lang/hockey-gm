@@ -1,5 +1,6 @@
 import type { Movement } from './skating';
-import type { SkaterState } from './types';
+import { TUNING } from './tuning';
+import type { GoalieState, SkaterState } from './types';
 import { hypot2 } from './vec';
 
 /** Reused per call so the pair loop looks movement up once per skater, not once per pair. */
@@ -46,4 +47,44 @@ export function resolveBodies(
     }
   }
   return contacts;
+}
+
+/**
+ * Goalies are solid: each on-ice skater is pushed out to TUNING.goalieBody.radius plus his own radius from each
+ * goalie's centre (only the skater moves; one between the goalie and his net is pushed out sideways, so the net frame
+ * does not push him back in), and loses the parts of his velocity (along x, along y) toward that goalie. Returns how
+ * many pushes there were.
+ */
+export function resolveGoalies(skaters: SkaterState[], moves: readonly Movement[], goalies: readonly GoalieState[]): number {
+  const gr = TUNING.goalieBody.radius;
+  let pushed = 0;
+  for (let i = 0; i < skaters.length; i++) {
+    const s = skaters[i]!;
+    if (!s.onIce) continue;
+    const min = gr + moves[i]!.radius;
+    for (const g of goalies) {
+      const dx = s.pos.x - g.pos.x, dy = s.pos.y - g.pos.y;
+      if (dx >= min || dx <= -min || dx * dx + dy * dy >= min * min) continue;
+      pushed++;
+      const d = hypot2(dx, dy);
+      let nx: number, ny: number;
+      if (dx * (g.pos.x >= 0 ? 1 : -1) > 0) {
+        // Between him and his net: out to the side, so the net frame does not push him straight back in.
+        const side = dy >= 0 ? 1 : -1;
+        s.pos.y = g.pos.y + side * Math.sqrt(min * min - dx * dx);
+        nx = dx / min;
+        ny = (s.pos.y - g.pos.y) / min;
+      } else {
+        // Coincident centres: out in front of him (up ice from his net).
+        nx = d < 1e-9 ? (g.pos.x >= 0 ? -1 : 1) : dx / d;
+        ny = d < 1e-9 ? 0 : dy / d;
+        s.pos.x = g.pos.x + nx * min;
+        s.pos.y = g.pos.y + ny * min;
+      }
+      // He loses whatever of his velocity, along x and along y, heads toward the goalie: he stops on him, not slides round.
+      if (s.vel.x * nx < 0) s.vel.x = 0;
+      if (s.vel.y * ny < 0) s.vel.y = 0;
+    }
+  }
+  return pushed;
 }

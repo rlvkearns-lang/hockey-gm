@@ -34,12 +34,13 @@ describe('hits', () => {
     expect(e.find((x) => x.type === 'turnover')).toMatchObject({ playerId: 'away-C', otherId: 'home-C', detail: { how: 'hit' } });
   });
   it('a landed hit puts the target down and frees the puck', () => { const st = hitThatLands(); expect(target(st).downT).toBeGreaterThan(0.5); expect(st.carrierId).toBeNull(); });
-  it('the target keeps playing while the hitter closes: team play still moves his target', () => {
+  it('the target keeps playing while the hitter closes: team play still gives him a job and a target', () => {
     const r = targetsDuringHitClose();
     expect(r.stages).toEqual(['close', 'close', 'close']);
     expect(r.freeIds.every((f) => f.length === 1)).toBe(true);
-    const moved = r.targets.slice(1).some((t, i) => Math.hypot(t.x - r.targets[i]!.x, t.y - r.targets[i]!.y) > 0.01);
-    expect(moved).toBe(true);
+    // Targets are held now (commit.ts), so team play moves his target when it issues one, not every tick.
+    expect(r.jobs.every((j) => j !== 'contest')).toBe(true);
+    expect(Math.hypot(r.targets[0]!.x - r.start.x, r.targets[0]!.y - r.start.y)).toBeGreaterThan(0.01);
   });
   it('nobody always or never goes for a hit', () => {
     const t = def().tendencies;

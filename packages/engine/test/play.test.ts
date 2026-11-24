@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createGame } from '../src/game';
+import { createGame, simulateGame } from '../src/game';
 import { gameSetup } from './helpers';
 import { countGames, measureGames } from './measures';
 import type { GameResult, GameState } from '../src/types';
@@ -44,5 +44,19 @@ describe('guard rails', () => {
   it('the observer sees live play: skater ticks, passes and attempts in every game set', () => {
     const c = counters();
     expect(c.liveTicks).toBeGreaterThan(3 * 50_000); expect(c.skaterTicks).toBeGreaterThan(c.liveTicks); expect(c.passes).toBeGreaterThan(0); expect(c.attempts).toBeGreaterThan(0);
+  }, 60_000);
+});
+
+describe('A1: commitment (Task 3)', () => {
+  it('A1: nobody re-issues a held target inside 0.4 s without a trigger', () => { expect(counters().holdViolations).toBe(0); }, 60_000);
+  it('A1: targets are held: under 10% of spot ticks see the target move (was 39%)', () => { expect(m().retargetShare).toBeLessThan(0.10); }, 60_000);
+  it('A1: more gliding and more top speed than before: glide over 30% (was 25%), top speed over 17% (was 14%), sprints over 1.2 s (was 0.8)', () => {
+    expect(m().glideShare).toBeGreaterThan(0.30); expect(m().topSpeedShare).toBeGreaterThan(0.17); expect(m().sprintRunSeconds).toBeGreaterThan(1.2);
+  }, 60_000);
+  it('A1: skaters never overlap a goalie, and a race win never moves the puck to the winner', () => { expect(counters().goalieOverlapTicks).toBe(0); expect(counters().raceJumpTicks).toBe(0); }, 60_000);
+  it('A1: players hold up at the blue line: under 10 offsides a game on seeds 1, 2, 3 and 8 (12 to 18 after Task 2)', () => {
+    const offsides = (r: GameResult): number => r.events.filter((e) => e.type === 'offside').length;
+    const total = games().reduce((a, r) => a + offsides(r), 0) + offsides(simulateGame(gameSetup(8)));
+    expect(total / 4).toBeLessThan(10);
   }, 60_000);
 });

@@ -19,6 +19,10 @@ const REACH = 0.9;
 /** `resolve` shows the outcome this long (s); a race not reached within RACE_MAX_SECONDS is off. */
 const RESOLVE_SECONDS = 0.1;
 const RACE_MAX_SECONDS = 2;
+/** After the draw the winner has this long (s) to get within REACH of the puck and pick it up, or the race is off. */
+const PICKUP_MAX_SECONDS = 1;
+/** The loser yields: he is steered this far (m) to his side of the winner's line to the puck. */
+const YIELD_OFFSET = 1.5;
 /** A bounce leaves the puck at this speed (m/s), any direction. */
 const BOUNCE_SPEED: [number, number] = [1, 3];
 /** Racers lead a moving puck by at most this long (s). */
@@ -119,9 +123,11 @@ function firstMen(ctx: ContestCtx): FirstMen {
  * Loose-puck race. Participants: one man of each team, both steered at the puck. `race` until one is within reach of
  * it (`leader`: the one who would get there first), then `resolve` (0.1 s; `leader`: the winner, null for a bounce).
  * The draw: winProb of the arrival-time difference times 130 per second, plus compete .4, agility .3,
- * balance .3, plus 10 for the man who just won the net-front battle. The winner takes it; with chance 0.16
- * (twice T.bounceBand; see raceChances) it is a bounce that stays loose. Someone else getting to it, a pass, or the puck speeding up or reaching the
- * boards ends it with no result.
+ * balance .3, plus 10 for the man who just won the net-front battle. The winner skates to the puck (the loser yields,
+ * steered aside) and takes it once he is within REACH of it, at least RESOLVE_SECONDS after the draw; if he is not
+ * there within PICKUP_MAX_SECONDS the race is off. With chance 0.16 (twice T.bounceBand; see raceChances) it is a
+ * bounce that stays loose. Someone else getting to it, a pass, or (before the draw) the puck speeding up or reaching
+ * the boards ends it with no result.
  */
 export const looseRaceContest: Contest<'looseRace'> = {
   kind: KIND,
@@ -169,13 +175,18 @@ export const looseRaceContest: Contest<'looseRace'> = {
       return null;
     }
     steer(c, ctx);
-    if (c.stageT < RESOLVE_SECONDS - STAGE_EPS) return null;
     const o = c.data.outcome;
     if (o === 'a' || o === 'b') {
+      // The winner skates to the puck and picks it up there; if he does not get there in time, the race is off.
       const w = o === 'a' ? a : b;
-      for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
-      return { winnerId: w.id, puck: 'toWinner', outcome: 'won' };
+      if (c.stageT >= RESOLVE_SECONDS - STAGE_EPS && dist(w.pos, p.pos) <= REACH) {
+        for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
+        return { winnerId: w.id, puck: 'toWinner', outcome: 'won' };
+      }
+      if (c.stageT >= PICKUP_MAX_SECONDS - STAGE_EPS) return end(c, ctx, null, 'off');
+      return null;
     }
+    if (c.stageT < RESOLVE_SECONDS - STAGE_EPS) return null;
     // A bounce: off both sticks, it stays loose.
     const ang = ctx.rng.range(-Math.PI, Math.PI), v = ctx.rng.range(BOUNCE_SPEED[0], BOUNCE_SPEED[1]);
     p.vel.x = dcos(ang) * v;
@@ -214,16 +225,36 @@ function decide(c: ContestStateOf<'looseRace'>, ctx: ContestCtx, a: SkaterState,
   c.leader = c.data.outcome === 'a' ? a.id : c.data.outcome === 'b' ? b.id : null;
 }
 
-/** Both skate flat out to where the puck will be. */
+/**
+ * Both skate flat out to where the puck will be. Once a winner is drawn, the loser yields: he is steered YIELD_OFFSET
+ * m to his own side of the winner's line to the puck, level with where he is along it.
+ */
 function steer(c: ContestStateOf<'looseRace'>, ctx: ContestCtx): void {
   const state = ctx.state;
   const p = state.puck;
+  const o = c.data.outcome;
+  const winnerId = o === 'a' ? c.roles.a : o === 'b' ? c.roles.b : null;
+  const w = winnerId === null ? null : skaterById(state, winnerId);
   for (const id of c.participants) {
     const s = skaterById(state, id);
+    s.faceTarget = null;
+    s.speedCap = 1;
+    if (w !== null && s !== w) { yieldTo(s, w, p.pos); continue; }
     const t = Math.min(MAX_LEAD_SECONDS, dist(s.pos, p.pos) / 8);
     s.target.x = p.pos.x + p.vel.x * t;
     s.target.y = p.pos.y + p.vel.y * t;
-    s.faceTarget = null;
-    s.speedCap = 1;
   }
+}
+
+/** Steers `s` out of the way of `w` going to `puck`: YIELD_OFFSET m to his side of that line, level with him along it. */
+function yieldTo(s: SkaterState, w: SkaterState, puck: Vec2): void {
+  const lx = puck.x - w.pos.x, ly = puck.y - w.pos.y;
+  const l = hypot2(lx, ly);
+  const ux = l > 1e-9 ? lx / l : 1, uy = l > 1e-9 ? ly / l : 0;
+  const along = Math.max(0, Math.min(l, (s.pos.x - w.pos.x) * ux + (s.pos.y - w.pos.y) * uy));
+  const fx = w.pos.x + ux * along, fy = w.pos.y + uy * along;
+  // His side of the line (to the winner's left when he is on it).
+  const side = (s.pos.x - fx) * -uy + (s.pos.y - fy) * ux >= 0 ? 1 : -1;
+  s.target.x = fx - uy * side * YIELD_OFFSET;
+  s.target.y = fy + ux * side * YIELD_OFFSET;
 }

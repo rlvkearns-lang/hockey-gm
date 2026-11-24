@@ -29,7 +29,8 @@ export type PlayCounterKey =
   | 'hitsLanded' | 'hitsKnockdown'
   | 'ozonePossessions' | 'ozoneTicks' | 'ozoneAttempts' | 'ozoneSamples' | 'ozoneTwoOpen' | 'ozoneDangerShadowed'
   | 'behindNetPossessions' | 'passesOutFront' | 'wrapAttempts'
-  | 'contactOver03' | 'puckJumpTicks';
+  | 'contactOver03' | 'puckJumpTicks'
+  | 'holdViolations' | 'goalieOverlapTicks' | 'raceJumpTicks';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -41,6 +42,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'ozonePossessions', 'ozoneTicks', 'ozoneAttempts', 'ozoneSamples', 'ozoneTwoOpen', 'ozoneDangerShadowed',
   'behindNetPossessions', 'passesOutFront', 'wrapAttempts',
   'contactOver03', 'puckJumpTicks',
+  'holdViolations', 'goalieOverlapTicks', 'raceJumpTicks',
 ];
 
 export type PlayMeasures = {
@@ -78,6 +80,12 @@ const MAN_CLEAR = 1.5;
 const DANGER_LANE = 1.2;
 const DANGER_SCALE = 9;
 const BEHIND_RX = 27.43;
+/** A held spot may be re-issued on review no sooner than this many ticks after it was last issued (TUNING.commit.holdSeconds). */
+const HOLD_TICKS = ticksOf(0.4);
+/** A goalie's body radius (TUNING.goalieBody.radius). */
+const GOALIE_RADIUS = 0.55;
+/** A race win moves the puck at most the pickup reach plus the carry reach, with this slack (m). */
+const RACE_JUMP_MAX = 0.9 + 0.6 + 0.2;
 const BEHIND_Y = 4;
 const BEHIND_TICKS = ticksOf(0.5);
 const OUT_FRONT = { rxMin: 15.13, rxMax: 26.13, y: 6 };
@@ -106,6 +114,8 @@ export function createObserver(setup: GameSetup): Observer {
 
   const c = emptyCounters();
   let maxJump = 0;
+  /** The last tick each skater's held spot was issued. */
+  const lastIssued = new Map<string, number>();
   /** Each skater's speed and target on the tick he was last seen on the ice. */
   const prev = new Map<string, { tick: number; speed: number; tx: number; ty: number }>();
   /** Last tick each skater was counted at top speed (a run goes on while this is the previous tick). */
@@ -198,6 +208,8 @@ export function createObserver(setup: GameSetup): Observer {
           if (DECIDED.has(e.detail.how) && e.playerId !== null) { c.battlesDecided++; openBattles.push({ winner: e.playerId, tick }); }
           break;
         case 'contestEnd': {
+          if (e.detail.kind === 'looseRace' && e.detail.result === 'won' && prevPuck !== null
+            && Math.hypot(st.puck.pos.x - prevPuck.x, st.puck.pos.y - prevPuck.y) > RACE_JUMP_MAX) c.raceJumpTicks++;
           if (e.detail.kind !== 'boardBattle') break;
           if (NO_WINNER.has(e.detail.result)) c.battlesNoWinner++;
           if (e.detail.puck === 'toWinner') {
@@ -258,9 +270,22 @@ export function createObserver(setup: GameSetup): Observer {
       const speed = speedOf(s.vel);
       const p = prev.get(s.id);
       const before = p !== undefined && p.tick === tick - 1 ? p : null;
+      const i = st.skaters.indexOf(s);
+      const plan = st.plans[i]!;
+      const spot = plan.follow === 'spot';
+      if (live && spot && plan.targetTick === tick && plan.reason === 'review') {
+        const last = lastIssued.get(s.id);
+        if (last !== undefined && tick - last < HOLD_TICKS) c.holdViolations++;
+      }
+      if (spot && plan.targetTick === tick) lastIssued.set(s.id, tick);
+      if (live) {
+        for (const g of [st.goalies.home, st.goalies.away]) {
+          if (Math.hypot(s.pos.x - g.pos.x, s.pos.y - g.pos.y) < GOALIE_RADIUS + (radius.get(s.id) ?? 0.38) - 1e-6) c.goalieOverlapTicks++;
+        }
+      }
       if (live && counted(st, s)) {
         c.skaterTicks++;
-        c.spotTicks++;
+        if (spot) c.spotTicks++;
         if (speed < STATIONARY_SPEED) c.stationaryTicks++;
         if (speed >= TOP_SPEED_SHARE * (topSpeed.get(s.id) ?? Infinity)) {
           c.topSpeedTicks++;
@@ -270,7 +295,7 @@ export function createObserver(setup: GameSetup): Observer {
         }
         if (before !== null) {
           if (speed >= GLIDE_MIN_SPEED && Math.abs(speed - before.speed) < GLIDE_MAX_ACCEL * DT) c.glideTicks++;
-          if (Math.hypot(s.target.x - before.tx, s.target.y - before.ty) > RETARGET_M) c.retargets++;
+          if (spot && Math.hypot(s.target.x - before.tx, s.target.y - before.ty) > RETARGET_M) c.retargets++;
         }
         if (st.possession === s.side) { c.ticksWithPuck++; if (s.mode === 'backward') c.backwardTicksWithPuck++; }
       }

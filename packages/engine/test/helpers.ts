@@ -8,7 +8,8 @@ import type { ContestState, ContestStateOf, GameEvent, GameEventOf, GameEventTyp
 import { PLAYER_TYPES } from '../src/player-types';
 import { RINK, resolveBoards } from '../src/rink';
 import { createRng, type Rng } from '../src/rng';
-import { driveFor, OZONE_SPOTS, ozoneSpotPos, supportTarget } from '../src/team-play';
+import { driveOf, OZONE_SPOTS, ozoneSpotPos, supportTarget } from '../src/team-play';
+import { initialPlans, initialTeamPhase, setTeamPhase } from '../src/commit';
 import { canReceivePass, decideCarrier, type Decision } from '../src/brain';
 import { blockPickup, executeDump, executePass, recordTouch, tryIntercept } from '../src/actions';
 import { resolveBodies } from '../src/bodies';
@@ -218,7 +219,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     }
   }
   const carrierId = o.carrier === null ? null : skaterId(o.carrier, carrierSlot);
-  return {
+  const state: GameState = {
     tick: 0, period: 1, clock: 1200, phase: 'live', phaseT: 0, attackDir,
     puck: { pos: { x: o.puckX, y: puckY }, z: 0, vel: { x: 0, y: 0 }, vz: 0 },
     carrierId, lastTouch: o.carrier === null ? null : { id: carrierId!, side: o.carrier }, possession: o.carrier, skaters,
@@ -236,8 +237,14 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
     },
+    plans: initialPlans(skaters.length), teamPhase: initialTeamPhase(),
     seed: 1, rng: [1, 2, 3, 4],
   };
+  // Everyone has been in his place a while: plans issued long ago for the side in possession, the phase committed.
+  for (const p of state.plans) { p.job = 'shape'; p.possession = o.carrier; p.targetTick = -1000; p.jobTick = -1000; }
+  setTeamPhase(state);
+  state.teamPhase.home.sinceTick = state.teamPhase.away.sinceTick = -1000;
+  return state;
 }
 
 export function skater(state: GameState, side: Side, slot: SkaterSlot): SkaterState {
@@ -612,7 +619,7 @@ function duelStep(h: Duel): void {
   s.tick++;
   contestTick(s, h.ds, h.rng, DT, h.events);
   const on = s.skaters.filter((k) => k.onIce);
-  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT, driveFor(s, k)); }
+  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT, driveOf(s, k, s.skaters.indexOf(k))); }
   resolveBodies(on, (id) => h.moves.get(id)!);
   const c = on.find((k) => k.id === s.carrierId);
   if (c) {
@@ -776,20 +783,22 @@ export function pokeOutOfReach(): { c: ContestState; events: GameEvent[]; carrie
 
 /**
  * Home RW passes to home C; away LW, 2.9 m off and closing at 3 m/s, starts a hit on him (startContest). Then three
- * live ticks of team play, contests and skating: the RW's `target` after each assignJobs, and the hit's stage then.
+ * live ticks of team play, contests and skating: the RW's `target` before and after each assignJobs, his job then, and
+ * the hit's stage then.
  */
-export function targetsDuringHitClose(): { targets: { x: number; y: number }[]; stages: string[]; freeIds: string[][] } {
+export function targetsDuringHitClose(): { start: { x: number; y: number }; targets: { x: number; y: number }[]; jobs: string[]; stages: string[]; freeIds: string[][] } {
   const state = stateWith({ carrier: 'home', puckX: 0 });
   const rw = skater(state, 'home', 'RW'), lw = skater(state, 'away', 'LW');
   lw.pos = { x: rw.pos.x + 2.9, y: rw.pos.y }; lw.vel = { x: -3, y: 0 }; lw.facing = Math.PI;
   const rng = createRng(7);
   executePass(state, rw.id, 'home-C', defs, rng);
   const c = startContest(state, defs, rng, hitContest, [lw.id, rw.id]);
-  const out = { targets: [] as { x: number; y: number }[], stages: [] as string[], freeIds: [] as string[][] };
+  const out = { start: { ...rw.target }, targets: [] as { x: number; y: number }[], jobs: [] as string[], stages: [] as string[], freeIds: [] as string[][] };
   for (let i = 0; i < 3; i++) {
     state.tick++;
     assignJobs(state, defs, tactics);
     out.targets.push({ ...rw.target });
+    out.jobs.push(state.plans[state.skaters.indexOf(rw)]!.job);
     contestTick(state, defs, rng, DT);
     out.stages.push(c.stage);
     out.freeIds.push(c.freeIds.slice());
@@ -834,7 +843,7 @@ function harnessStep(h: Harness, beforeContests?: () => void): void {
   beforeContests?.();
   contestTick(s, h.ds, h.rng, DT, h.events);
   const on = s.skaters.filter((k) => k.onIce);
-  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT, driveFor(s, k)); }
+  for (const k of on) { if (k.downT > 0) k.downT = Math.max(0, k.downT - DT); stepSkater(k, h.moves.get(k.id)!, DT, driveOf(s, k, s.skaters.indexOf(k))); }
   resolveBodies(on, (id) => h.moves.get(id)!);
   const c = on.find((k) => k.id === s.carrierId);
   if (c) {
@@ -1242,9 +1251,8 @@ export function wingerAheadOnRush(): number {
     st.tick++;
     c.pos.x += 8 * DT; c.vel = { x: 8, y: 0 };
     st.puck.pos = { x: c.pos.x + 0.6, y: c.pos.y };
-    const drives = new Map<string, Drive>();
-    assignJobs(st, defs, tactics, drives);
-    stepSkater(lw, harnessMoves.get(lw.id)!, DT, driveFor(st, lw, drives));
+    assignJobs(st, defs, tactics);
+    stepSkater(lw, harnessMoves.get(lw.id)!, DT, driveOf(st, lw, st.skaters.indexOf(lw)));
     worst = Math.max(worst, lw.pos.x - RINK.blueLineX - harnessMoves.get(lw.id)!.radius);
   }
   return worst;
