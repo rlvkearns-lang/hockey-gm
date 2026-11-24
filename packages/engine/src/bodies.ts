@@ -1,7 +1,7 @@
 import type { Movement } from './skating';
 import { TUNING as TUNING_ } from './tuning';
 import type { GoalieState, SkaterState } from './types';
-import { hypot2 as hypot2_ } from './vec';
+import { hypot2 as hypot2_, type Vec2 } from './vec';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const TUNING = TUNING_;
 const hypot2 = hypot2_;
@@ -90,4 +90,33 @@ export function resolveGoalies(skaters: SkaterState[], moves: readonly Movement[
     }
   }
   return pushed;
+}
+
+/** A skater within GOALIE_NEAR (m) of a goalie's body with it on his line skates round it, GOALIE_ROUND (m) clear of it. */
+const GOALIE_NEAR = 1;
+const GOALIE_ROUND = 0.3;
+
+/**
+ * With a goalie's body (TUNING.goalieBody.radius grown by `radius`) on the straight line from `from` to `to` and within
+ * GOALIE_NEAR of `from`, a waypoint beside that goalie on the side of the line away from him (GOALIE_ROUND m clear);
+ * else `to` is left in `out` as it was. Writes `out` only when it routes, and returns true then. Without it the goalie's
+ * body and the net frame can pin a skater in the crease.
+ */
+export function routeAroundGoalies(from: Vec2, to: Vec2, radius: number, goalies: readonly GoalieState[], out: Vec2): boolean {
+  const reach = TUNING.goalieBody.radius + radius;
+  for (const g of goalies) {
+    const gx = g.pos.x - from.x, gy = g.pos.y - from.y;
+    if (gx * gx + gy * gy > (reach + GOALIE_NEAR) * (reach + GOALIE_NEAR)) continue;
+    const dx = to.x - from.x, dy = to.y - from.y, l = Math.sqrt(dx * dx + dy * dy);
+    if (l < 1e-6) continue;
+    const along = (gx * dx + gy * dy) / l;
+    if (along <= 0 || along >= l) continue;
+    const across = (gx * dy - gy * dx) / l;          // > 0: the goalie is to the right of his line
+    if (Math.abs(across) >= reach) continue;
+    const side = across > 0 ? 1 : -1;                  // so he passes on the left of the goalie
+    out.x = g.pos.x + (-dy / l) * side * (reach + GOALIE_ROUND);
+    out.y = g.pos.y + (dx / l) * side * (reach + GOALIE_ROUND);
+    return true;
+  }
+  return false;
 }
