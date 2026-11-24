@@ -1,5 +1,5 @@
 import { DT as DT_ } from './constants';
-import { bladePos as bladePos_ } from './blade';
+import { bladePos as bladePos_, handFor as handFor_ } from './blade';
 import { forcedPass as forcedPass_, HAND_ERROR as HAND_ERROR_, interceptChance as interceptChance_, laneReach as laneReach_, planPass as planPass_, stickInterceptChance as stickInterceptChance_, type PassPlan } from './passing';
 import { crossesEndBox as crossesEndBox_ } from './lanes';
 import { boardsNormal as boardsNormal_, distToBoards as distToBoards_, RINK as RINK_ } from './rink';
@@ -8,7 +8,8 @@ import { nearestOpponentDist as nearestOpponentDist_, steeredByContest as steere
 import { TUNING as TUNING_ } from './tuning';
 import { watchTurnover as watchTurnover_ } from './turnovers';
 import { gameEvent as gameEvent_ } from './events';
-import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
+import { threat as threat_ } from './threat';
+import type { GameEvent, GameState, PlayerDef, ShotType, Side, SkaterState } from './types';
 import { hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, GRAVITY as GRAVITY_, skaterById as skaterById_ } from './util';
@@ -30,6 +31,8 @@ const steeredByContest = steeredByContest_;
 const TUNING = TUNING_;
 const watchTurnover = watchTurnover_;
 const gameEvent = gameEvent_;
+const threat = threat_;
+const handFor = handFor_;
 const hypot2 = hypot2_;
 const segDistXY = segDistXY_;
 const datan2 = datan2_;
@@ -46,6 +49,8 @@ const MAX_SHOT_LIFT = 10;
 const PASS = TUNING.pass;
 const SHOT = TUNING.shot;
 const DUMP = TUNING.dump;
+/** A one-timer pass crosses the slot (y = 0) between this rx and the goal line. */
+const ONE_TIMER_RX = 18;
 /** Scratch: the pass being made, and an opponent's blade. */
 const passPlan = {} as PassPlan;
 const bladeScratch: Vec2 = { x: 0, y: 0 };
@@ -96,10 +101,10 @@ export function blockPickup(state: GameState, ids: string[]): void {
  */
 function release(
   state: GameState, from: SkaterState, vx: number, vy: number, vz: number,
-  out: GameEvent[] | null = null, kind: 'pass' | 'shot' | 'dump' = 'pass', toId: string | null = null,
+  out: GameEvent[] | null = null, kind: 'pass' | 'shot' | 'dump' = 'pass', toId: string | null = null, shotType: ShotType | null = null,
 ): void {
   const p = state.puck;
-  if (out) out.push(gameEvent(state, { type: 'release', side: from.side, playerId: from.id, otherId: toId, pos: p.pos, detail: { kind, toId, vel: { x: vx, y: vy, z: vz } } }));
+  if (out) out.push(gameEvent(state, { type: 'release', side: from.side, playerId: from.id, otherId: toId, pos: p.pos, detail: { kind, toId, vel: { x: vx, y: vy, z: vz }, shotType } }));
   recordTouch(state, from.id, from.side); // his touch lasts until he lets it go
   state.icingWatch = p.pos.x * state.attackDir[from.side] < 0 ? { side: from.side, fromY: p.pos.y } : null;
   p.vel.x = vx;
@@ -131,11 +136,27 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
   const angle = datan2(aim.y - p.y, aim.x - p.x) + rng.gauss() * sigma;
   const l = hypot2(aim.x - p.x, aim.y - p.y);
   out.push(gameEvent(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'pass', distance: l, hand: plan.hand } }));
+  const oneTimer = isOneTimerPass(state, from, aim);
   release(state, from, dcos(angle) * plan.speed, dsin(angle) * plan.speed, 0, out, 'pass', toId);
   state.pendingPass = {
     fromId, toId, untilTick: state.tick + Math.round((plan.arriveSeconds + PASS.graceSeconds) / DT), tried: [], pressure,
-    aim: { x: aim.x, y: aim.y }, bobbled: false, cover: plan.cover,
+    aim: { x: aim.x, y: aim.y }, bobbled: false, cover: plan.cover, oneTimer,
   };
+}
+
+/**
+ * A one-timer pass: across the slot (the line from the puck to `aim` crosses y = 0 at an rx between ONE_TIMER_RX and the
+ * goal line, attack-relative for the passer's side) to a man whose spot is a scoring area (options.ts threat over
+ * TUNING.value.oneTimerThreat).
+ */
+function isOneTimerPass(state: GameState, from: SkaterState, aim: Vec2): boolean {
+  const dir = state.attackDir[from.side];
+  const p = state.puck.pos;
+  const py = p.y * dir, ay = aim.y * dir;
+  if ((py >= 0) === (ay >= 0) || py === ay) return false;
+  const t = py / (py - ay);
+  const cx = (p.x + (aim.x - p.x) * t) * dir;
+  return cx > ONE_TIMER_RX && cx < RINK.goalLineX && threat(aim.x * dir, ay) > TUNING.value.oneTimerThreat;
 }
 
 /**
@@ -152,22 +173,64 @@ export function goalieShade(state: GameState, attackingSide: Side): number {
   return clamp(p.y + ((g.y - p.y) * nx) / gx, -RINK.netHalfWidth, RINK.netHalfWidth);
 }
 
+/** Shot type effects (TUNING.shot.types): speed and spread multipliers. */
+const TYPE_SPEED: Record<ShotType, number> = { wrist: 1, slap: SHOT.types.slap.speed, oneTimer: SHOT.types.oneTimer.speed, backhand: SHOT.types.backhand.speed, wraparound: 1 };
+const TYPE_SPREAD: Record<ShotType, number> = { wrist: 1, slap: SHOT.types.slap.spread, oneTimer: SHOT.types.oneTimer.spread, backhand: SHOT.types.backhand.spread, wraparound: 1 };
+const netScratch: Vec2 = { x: 0, y: 0 };
+
+/**
+ * The type of a shot `s` lets go now, when none is given: `wraparound` (within TUNING.shot.types.wrapPost of a post off a
+ * wrap: his carrierPlan's lane is `wrap`), `oneTimer` (he took a one-timer pass at most oneTimerTicks ago), `slap` (slapFrom
+ * m or more out, pressure under slapPressure), `backhand` (the net centre is not on his forehand: blade.ts handFor), else
+ * `wrist`.
+ */
+export function shotTypeFor(state: GameState, s: SkaterState, shoots: 'L' | 'R', d: number, pressure: number): ShotType {
+  const T = SHOT.types;
+  const dir = state.attackDir[s.side];
+  const p = state.puck.pos;
+  const plan = state.carrierPlan;
+  if (plan !== null && plan.id === s.id && plan.lane === 'wrap'
+    && hypot2(dir * RINK.goalLineX - p.x, RINK.netHalfWidth - Math.abs(p.y)) <= T.wrapPost) return 'wraparound';
+  const ot = state.oneTimerTaken;
+  if (ot !== null && ot.id === s.id && state.tick - ot.tick <= T.oneTimerTicks) return 'oneTimer';
+  if (d >= T.slapFrom && pressure < T.slapPressure) return 'slap';
+  netScratch.x = dir * RINK.goalLineX; netScratch.y = 0;
+  if (handFor(s.pos, s.facing, shoots, netScratch) !== 'forehand') return 'backhand';
+  return 'wrist';
+}
+
 /**
  * Shoot at the attacked net: aim at a spot inside it (more often on the side the goalie leaves open), missed by a
  * normal spread from shootingAccuracy, distance and pressure, or now and then mishit wide or high (TUNING.shot.wild).
- * Speed TUNING.shot.speed (base + per point of power), lifted so it arrives at the aimed height. No event yet: the release is recorded in `state.shotInFlight`, and what happens to the
- * puck decides whether it is a shot on goal, a miss, a post or a block. Its `release` event goes into `out`.
+ * Speed TUNING.shot.speed (base + per point of power), lifted so it arrives at the aimed height. Its type (`shotType`,
+ * or shotTypeFor when not given) scales its speed and spread (TUNING.shot.types); a wraparound goes along the ice at the
+ * near post at TUNING.shot.types.wraparound.speed. No event yet: the release is recorded in `state.shotInFlight`, and
+ * what happens to the puck decides whether it is a shot on goal, a miss, a post or a block. Its `release` event (with its
+ * type) goes into `out`.
  */
-export function executeShot(state: GameState, shooterId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
+export function executeShot(state: GameState, shooterId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = [], shotType?: ShotType): void {
   const s = skaterById(state, shooterId);
-  const a = defs.get(shooterId)!.attrs;
+  const me = defs.get(shooterId)!;
+  const a = me.attrs;
   const dir = state.attackDir[s.side];
   const p = state.puck.pos;
   const netX = dir * RINK.goalLineX;
   const d = hypot2(netX - p.x, p.y);
   const pressure = pressureOn(state, s);
-  const sigma = SHOT.spread.base + (100 - a.shootingAccuracy) * SHOT.spread.perPoint + d * SHOT.spread.perMetre
-    + pressure * SHOT.spread.pressure;
+  const type = shotType ?? shotTypeFor(state, s, me.shoots, d, pressure);
+  const from = { x: p.x, y: p.y };
+  if (type === 'wraparound') {
+    // Along the ice at the near post, just inside it.
+    const py = p.y >= 0 ? 1 : -1;
+    const ty = py * (RINK.netHalfWidth - 0.15) + rng.gauss() * 0.1;
+    const dx = netX - p.x, dy = ty - p.y, l = hypot2(dx, dy) || 1;
+    const v = SHOT.types.wraparound.speed;
+    release(state, s, (dx / l) * v, (dy / l) * v, 0, out, 'shot', null, type);
+    state.shotInFlight = { shooterId, side: s.side, from, fromDist: d, tick: state.tick, blockTried: [], shotType: type };
+    return;
+  }
+  const sigma = (SHOT.spread.base + (100 - a.shootingAccuracy) * SHOT.spread.perPoint + d * SHOT.spread.perMetre
+    + pressure * SHOT.spread.pressure) * TYPE_SPREAD[type];
   const shade = goalieShade(state, s.side);
   const openSide = shade > 0 ? -1 : 1;
   const aimSide = rng.chance(clamp(0.5 + Math.abs(shade) * SHOT.openSidePull, 0.5, SHOT.openSideMax)) ? openSide : -openSide;
@@ -184,14 +247,13 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
     if (rng.chance(W.highShare)) z = RINK.netHeight + by;
     else y = aimSide * (RINK.netHalfWidth + by);
   }
-  const speed = SHOT.speed.base + a.shootingPower * SHOT.speed.perPoint;
+  const speed = (SHOT.speed.base + a.shootingPower * SHOT.speed.perPoint) * TYPE_SPEED[type];
   const dx = netX - p.x, dy = y - p.y;
   const l = hypot2(dx, dy) || 1;
   const t = l / speed;
-  const from = { x: p.x, y: p.y };
   // Lifted to arrive at height z, but never harder than MAX_SHOT_LIFT (from beside the net that would launch it skyward).
-  release(state, s, (dx / l) * speed, (dy / l) * speed, Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * t * t) / t), out, 'shot');
-  state.shotInFlight = { shooterId, side: s.side, from, fromDist: d, tick: state.tick, blockTried: [] };
+  release(state, s, (dx / l) * speed, (dy / l) * speed, Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * t * t) / t), out, 'shot', null, type);
+  state.shotInFlight = { shooterId, side: s.side, from, fromDist: d, tick: state.tick, blockTried: [], shotType: type };
 }
 
 /**
@@ -254,7 +316,7 @@ export function executeRim(state: GameState, fromId: string, toId: string | null
   const l = hypot2(to.x - p.x, to.y - p.y);
   out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'rim', distance: toId === null ? null : l, hand: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump', toId);
-  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], pressure, aim: { x: to.x, y: to.y }, bobbled: false, cover: 0 };
+  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], pressure, aim: { x: to.x, y: to.y }, bobbled: false, cover: 0, oneTimer: false };
 }
 
 /**

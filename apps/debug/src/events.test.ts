@@ -28,7 +28,7 @@ suite('describe', () => {
     expect(describe({ ...common, type: 'freeze', detail: { cause: 'cover' } }, defs, abbr)).toContain('Ray Carver (HBR) covered the puck');
   });
   it('bookkeeping events are not listed', () => {
-    const rel: GameEvent = { ...common, type: 'release', detail: { kind: 'shot', toId: null, vel: { x: 30, y: 0, z: 2 } } };
+    const rel: GameEvent = { ...common, type: 'release', detail: { kind: 'shot', toId: null, vel: { x: 30, y: 0, z: 2 }, shotType: 'slap' } };
     expect(listed(rel)).toBe(false); expect(describe(rel, defs, abbr)).toBeNull();
     expect(listed({ ...common, type: 'periodEnd', side: null, detail: { period: 1 } })).toBe(true);
   });

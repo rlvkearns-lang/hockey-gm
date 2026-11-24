@@ -26,6 +26,7 @@ import { canReceivePass as canReceivePass_, planPass as planPass_, type PassPlan
 import { distToBoards as distToBoards_, RINK as RINK_ } from './rink';
 import { bodyRadius as bodyRadius_ } from './skating';
 import { scoreMargin as scoreMargin_ } from './team-play';
+import { shotQuality as shotQuality_, threat as threat_ } from './threat';
 import { TUNING } from './tuning';
 import { dcos as dcos_, dexp as dexp_, dpow as dpow_, dsin as dsin_ } from './dmath';
 import type { Rng } from './rng';
@@ -53,6 +54,8 @@ const dcos = dcos_;
 const dexp = dexp_;
 const dsin = dsin_;
 const dpow = dpow_;
+const shotQuality = shotQuality_;
+const threat = threat_;
 
 export type Situation = {
   rx: number; ly: number; zone: 'D' | 'N' | 'O'; pressure: number;
@@ -124,6 +127,10 @@ const OFFICE_WALL = 4;
 /** Holding behind the net: at HOLD_RX, within HOLD_LY of the middle (the frame between him and the nearest opponent). */
 const HOLD_RX = 28.7;
 const HOLD_LY = 1.4;
+/** A shot from this far (m) or more is a point shot: traffic raises it, it needs a lane (Task 7). */
+const FAR_SHOT = 11;
+/** Traffic: a teammate with job netFront within this far (m) of the net centre. */
+const TRAFFIC_NEAR = 3;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */
 const CARRY_IN_ZONE = 5;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
@@ -133,20 +140,7 @@ const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 const sgn = (v: number): 1 | -1 => (v >= 0 ? 1 : -1);
 
-/** 0..1: the shot-quality part of threat (distance and angle to the net centre), 0 outside the zone, behind the line or beyond maxShotDistance. */
-function shotQuality(rx: number, ly: number): number {
-  const dx = GOAL - rx;
-  if (dx < 0.3 || rx < BLUE) return 0;
-  const d = hyp(dx, ly);
-  if (d > B.maxShotDistance) return 0;
-  return dexp(-d / B.shotDistanceScale) * (dx / d);
-}
-
-/** How much having the puck at (rx, ly) is worth to the team that has it: about its chance to score on this possession, 0 to about 0.2. */
-export function threat(rx: number, ly: number): number {
-  const r = clamp((rx + 30) / 60, 0, 1);
-  return O.threat.base + O.threat.ice * r * r + O.threat.shot * shotQuality(rx, ly);
-}
+export { shotQuality, threat } from './threat';
 
 /** A spot is worth less with an opponent near it: O.openAt.min with one within `from` m, 1 with nobody within from + over. */
 const openAt = (space: number): number => O.openAt.min + (1 - O.openAt.min) * clamp((space - O.openAt.from) / O.openAt.over, 0, 1);
@@ -247,6 +241,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const here = threat(rx, ly) * (0.6 + 0.4 * (1 - pressure));
   const loss = here + V.turnoverCost * threat(-rx, -ly);
   const valueOf = (chance: number, to: number, lose: number = loss): number => chance * (to - here) - (1 - chance) * lose;
+  const shotLoss = threat(rx, ly) + V.turnoverCost * threat(-rx, -ly);
 
   // How long he has had it: the longer, the more he wants to move it on.
   const held = sit.held;
@@ -267,7 +262,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
 
   // ---- shoot ----
   const shootSkill = B.shootSkill.base + composite(a, SHOOTING) * B.shootSkill.perPoint;
-  let g = 0, shootScore = 1;
+  let g = 0, shootScore = 1, noLane = false;
   const dNet = hyp(GOAL - rx, ly);
   const shootAllowed = mode === 'break' ? dNet < BREAKAWAY_SHOT : mode !== 'behind';
   if (shootAllowed) {
@@ -281,11 +276,17 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const late = state.period >= PERIODS && lead === -1 ? 1 - state.clock / PERIOD_SECONDS : 0;
       const scoreShoot = margin === 'ahead' ? se.leaderShoot : Math.min(se.maxShoot, (margin === 'behind' ? se.trailerShoot : 1) * (1 + se.latePush * late));
       g = V.goal * q * shootSkill * (B.openNetWeight[0] + B.openNetWeight[1] * open) * dpow(calm, B.shootPressure);
-      // A defender in his shooting lane blocks or smothers it: under O.shotLane[1] m of clear ice g is scaled by
-      // O.shotBlocked[1], under O.shotLane[0] by O.shotBlocked[0].
       tw.x = GOAL * dir; tw.y = 0;
       const sw = laneWidth(state, side, p, tw);
-      if (sw < O.shotLane[0]) g *= O.shotBlocked[0]; else if (sw < O.shotLane[1]) g *= O.shotBlocked[1];
+      if (dNet >= FAR_SHOT) {
+        // From the point (11 m or more, Task 7): a teammate in front of the net screens the goalie and is there for the
+        // rebound or a tip (V.traffic), and without a lane (under TUNING.block.path of clear ice) the shot is blocked:
+        // its value is halved below.
+        if (netFrontMate(state, s)) g += V.traffic;
+        noLane = sw < TUNING.block.path;
+      } else if (sw < O.shotLane[0]) g *= O.shotBlocked[0]; else if (sw < O.shotLane[1]) g *= O.shotBlocked[1];
+      // Closer in, a defender in his shooting lane blocks or smothers it: under O.shotLane[1] m of clear ice g is scaled
+      // by O.shotBlocked[1], under O.shotLane[0] by O.shotBlocked[0].
       // Half the score effect's size: on a value near zero its full size would swing shooting by far more than real
       // teams change.
       shootScore = 1 + (scoreShoot - 1) * O.scoreSoft;
@@ -297,13 +298,20 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const gd = hyp(gl.x * dir - GOAL, gl.y * dir - postLy);
       g = Math.max(g, V.goal * O.wrap.goal * clamp(gd / O.wrap.open, 0.1, 1) * shootSkill);
     }
-    // A shot scores with chance g; one that does not leaves his team the puck TUNING.value.shotKeep of the time, down
-    // low on the boards (worth threat there), and otherwise loses what he has here. Score effects then scale its
-    // value as a habit does (more eager when behind, less when comfortably ahead).
+    // A shot scores with chance g (xg); one that does not is still worth TUNING.value.rebound (a rebound, a tip, the
+    // puck kept in: Task 7), and otherwise loses what he has here. Score effects then scale its value as a habit does
+    // (more eager when behind, less when comfortably ahead). With no lane from the point its value is halved; on his
+    // first touch of a one-timer pass it is worth TUNING.value.oneTimerBonus more.
     if (g > 0) {
       const gc = clamp(g, 0, 0.97);
-      const v = habit(gc * (1 - here) + (1 - gc) * (V.shotKeep * threat(GOAL - 2, sgn(ly) * 8) - here), tend.shoot);
-      out.push({ kind: 'shoot', value: (v >= 0 ? v * shootScore : v / shootScore) + shootOn });
+      // A shot that does not go in gives the puck up: what it gives up is the whole threat here (not discounted by the
+      // pressure on him, as a pass or carry that may still work is) and what the other side can do with it.
+      let v = habit(gc * (1 - here) + (1 - gc) * (V.rebound - shotLoss), tend.shoot);
+      v = v >= 0 ? v * shootScore : v / shootScore;
+      if (noLane) v = v >= 0 ? v / 2 : v * 2;
+      const ot = state.oneTimerTaken;
+      if (ot !== null && ot.id === s.id && state.tick - ot.tick <= TUNING.shot.types.oneTimerTicks) v += V.oneTimerBonus;
+      out.push({ kind: 'shoot', value: v + shootOn });
     }
   }
 
@@ -498,6 +506,16 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   }
   if (out.length === 0) out.push({ kind: 'protect', value: 0 });
   return out;
+}
+
+/** Whether a teammate of `s` with job netFront stands within TRAFFIC_NEAR (m) of the centre of the net `s` attacks. */
+function netFrontMate(state: GameState, s: SkaterState): boolean {
+  const nx = state.attackDir[s.side] * GOAL;
+  for (const m of state.skaters) {
+    if (!m.onIce || m.side !== s.side || m === s || m.downT > 0) continue;
+    if (hyp(m.pos.x - nx, m.pos.y) <= TRAFFIC_NEAR && planOf(state, m.id).job === 'netFront') return true;
+  }
+  return false;
 }
 
 /** Whether `m` is one of his team's point men (job pointStrong or pointWeak, or a defenceman at the point). */

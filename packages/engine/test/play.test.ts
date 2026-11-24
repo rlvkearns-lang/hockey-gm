@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, simulateGame } from '../src/game';
-import { gameSetup } from './helpers';
+import { gameSetup, sum } from './helpers';
 import { countGames, measureGames } from './measures';
 import type { GameResult, GameState } from '../src/types';
 import type { PlayCounters, PlayMeasures } from './measures';
@@ -104,4 +104,19 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   it('A3: a pass almost never slides into the net: at most one goal in seeds 1-8 from a pass, rim, dump or clear with no shot', () => {
     expect(countGames([1, 2, 3, 4, 5, 6, 7, 8]).passGoals).toBeLessThanOrEqual(1);
   }, 120_000);
+});
+
+describe('A4: attempts (Task 7)', () => {
+  it('A4: the record keeps attempts: on goal + missed + blocked, for teams and players', () => {
+    for (const r of games()) {
+      for (const side of ['home', 'away'] as const) { const t = r.team[side]; expect(t.attempts).toBe(t.shots + t.missedShots + t.shotsBlocked); }
+      expect(sum(r.players.map((p) => p.attempts))).toBe(r.team.home.attempts + r.team.away.attempts); expect(r.team.home.shotsBlocked).toBe(r.team.away.blocks);
+    }
+  }, 60_000);
+  it('A4: defencemen shoot: at least 6 attempts a team a game from the defence (was 2)', () => { expect(m().defenceAttemptsPerTeam).toBeGreaterThanOrEqual(6); }, 60_000);
+  it('A4: attempts are 45 to 75 a team a game and shots on goal 22 to 40 (guard rail, not the target)', () => {
+    expect(m().attemptsPerTeam).toBeGreaterThan(45); expect(m().attemptsPerTeam).toBeLessThan(75);
+    const sog = sum(games().map((r) => r.team.home.shots + r.team.away.shots)) / 6; expect(sog).toBeGreaterThan(22); expect(sog).toBeLessThan(40);
+  }, 60_000);
+  it('A4: every release of a shot names its type', () => { for (const r of games()) for (const e of r.events) if (e.type === 'release') expect(e.detail.shotType === null).toBe(e.detail.kind !== 'shot'); }, 60_000);
 });

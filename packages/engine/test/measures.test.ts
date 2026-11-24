@@ -94,7 +94,7 @@ describe('play measures: definitions', () => {
   });
 
   it('a rebound chance is an attempt within 3 s of a save with no stoppage and no defending carrier between', () => {
-    const shot = (st: GameState): GameEvent => ev(st, 'release', { side: 'home', playerId: 'home-C', detail: { kind: 'shot', toId: null, vel: { x: 30, y: 0, z: 0 } } });
+    const shot = (st: GameState): GameEvent => ev(st, 'release', { side: 'home', playerId: 'home-C', detail: { kind: 'shot', toId: null, vel: { x: 30, y: 0, z: 0 }, shotType: 'wrist' } });
     const save = (st: GameState): GameEvent => ev(st, 'save', { side: 'away', playerId: 'away-G', otherId: 'home-RW', detail: { pose: 'pad' } });
     const st = stateWith({ carrier: 'home', puckX: 20 }); const obs = createObserver(gameSetupOf(st));
     st.carrierId = null;

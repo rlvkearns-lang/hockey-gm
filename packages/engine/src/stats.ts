@@ -3,9 +3,10 @@ import type { GameEvent, GameResult, GameSetup, PlayerLine, Side, TeamLine } fro
 const emptyLine = (id: string, toi: number): PlayerLine => ({
   id, goals: 0, assists: 0, shots: 0, hits: 0, blocks: 0, takeaways: 0, giveaways: 0, faceoffsWon: 0,
   faceoffsLost: 0, plusMinus: 0, toiSeconds: toi, battlesWon: 0, battlesLost: 0, saves: 0, shotsAgainst: 0,
+  attempts: 0, missedShots: 0, shotsBlocked: 0,
 });
 
-const emptyTeam = (): TeamLine => ({ shots: 0, hits: 0, blocks: 0, faceoffsWon: 0, giveaways: 0, takeaways: 0 });
+const emptyTeam = (): TeamLine => ({ shots: 0, hits: 0, blocks: 0, faceoffsWon: 0, giveaways: 0, takeaways: 0, attempts: 0, missedShots: 0, shotsBlocked: 0 });
 
 /** Box score from the event log. Players are listed home roster order, then away. */
 export function buildResult(setup: GameSetup, events: GameEvent[], toi: Map<string, number>): GameResult {
@@ -35,7 +36,14 @@ export function buildResult(setup: GameSetup, events: GameEvent[], toi: Map<stri
         break;
       case 'shot':
         t.shots++;
-        if (me) me.shots++;
+        t.attempts++;
+        if (me) { me.shots++; me.attempts++; }
+        break;
+      case 'miss':
+      case 'post':
+        t.missedShots++;
+        t.attempts++;
+        if (me) { me.missedShots++; me.attempts++; }
         break;
       case 'goal':
         score[side]++;
@@ -54,10 +62,16 @@ export function buildResult(setup: GameSetup, events: GameEvent[], toi: Map<stri
         t.hits++;
         if (me) me.hits++;
         break;
-      case 'block':
+      case 'block': {
+        // The blocker's team blocks it; the shooter's (otherId) attempt was blocked.
         t.blocks++;
         if (me) me.blocks++;
+        const st = team[side === 'home' ? 'away' : 'home'];
+        st.shotsBlocked++;
+        st.attempts++;
+        if (other) { other.shotsBlocked++; other.attempts++; }
         break;
+      }
       case 'takeaway':
         t.takeaways++;
         if (me) me.takeaways++;

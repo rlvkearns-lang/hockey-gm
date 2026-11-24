@@ -1,6 +1,7 @@
 import { executeClear as executeClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
 import { BRAIN_INTERVAL_TICKS as BRAIN_INTERVAL_TICKS_, DT } from './constants';
 import { chooseOption as chooseOption_, listOptions as listOptions_, readSituationInto as readSituationInto_, type Option, type Situation } from './options';
+import { RINK } from './rink';
 import { TUNING as TUNING_ } from './tuning';
 import { steeredByContest as steeredByContest_ } from './team-play';
 import type { Rng } from './rng';
@@ -41,6 +42,12 @@ const optionScratch: Option[] = [];
 const HOLD_FACE_RX = 20;
 /** brainTick's copy of the carrier's situation (written by decideCarrier, read for his carry speed). */
 const sitScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
+
+/** Whether the puck is within TUNING.shot.types.wrapPost (m) of a post of the net `s` attacks. */
+function nearPost(state: GameState, s: SkaterState): boolean {
+  const p = state.puck.pos, nx = state.attackDir[s.side] * RINK.goalLineX;
+  return hypot2(nx - p.x, RINK.netHalfWidth - Math.abs(p.y)) <= TUNING.shot.types.wrapPost;
+}
 
 const lookScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
 /** The situation as a key: its mode (the rule that narrows his options) and the zone. */
@@ -92,6 +99,8 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   const sit = sitScratch;
   const d = decideCarrier(state, me, defs, rng, sit);
   const plan: CarrierPlan = state.carrierPlan!;
+  // A shot off the wrap he was carrying out, at a post, is a wraparound (actions.ts shotTypeFor reads the plan's lane).
+  const wrap = d.kind === 'shoot' && plan.lane === 'wrap' && nearPost(state, s);
   plan.id = s.id;
   plan.kind = d.kind;
   plan.lane = d.kind === 'carry' ? d.lane : null;
@@ -101,7 +110,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   plan.read = readKey(sit);
   state.carrierPlan = plan;
   switch (d.kind) {
-    case 'shoot': executeShot(state, s.id, defs, rng, out); return;
+    case 'shoot': executeShot(state, s.id, defs, rng, out, wrap ? 'wraparound' : undefined); return;
     case 'pass': executePass(state, s.id, d.toId, defs, rng, out); return;
     case 'dump': executeDump(state, s.id, defs, rng, out); return;
     case 'rim': executeRim(state, s.id, d.toId, defs, rng, out); return;

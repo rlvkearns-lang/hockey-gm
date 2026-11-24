@@ -8,7 +8,8 @@ import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } fro
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
 import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
-import { goalieTick as goalieTick_, resolveOnNet as resolveOnNet_, trackShot as trackShot_, tryBlock as tryBlock_ } from './goalie';
+import { goalieTick as goalieTick_, resolveOnNet as resolveOnNet_ } from './goalie';
+import { trackShot as trackShot_, tryBlock as tryBlock_ } from './shots';
 import { stepPuck as stepPuck_, type PuckEvent } from './puck';
 import { refereeTick as refereeTick_ } from './referee';
 import { clipToNets as clipToNets_, FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_, routeAroundNets as routeAroundNets_ } from './rink';
@@ -174,6 +175,7 @@ function initialState(setup: GameSetup): GameState {
     bench: initialBench(setup),
     plans: initialPlans(skaters.length),
     carrierPlan: null,
+    oneTimerTaken: null,
     teamPhase: initialTeamPhase(),
     seed: setup.seed,
     rng: [0, 0, 0, 1],
@@ -458,6 +460,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
       }
     }
     if (!best) return;
+    // A one-timer pass taken by its receiver: he may shoot it at once (actions.ts shotTypeFor, options.ts).
+    if (pass !== null && pass.oneTimer && best.id === pass.toId) state.oneTimerTaken = { id: best.id, tick: state.tick };
     state.pendingPass = null;
     state.carrierId = best.id;
     state.lastTouch = { id: best.id, side: best.side };
@@ -522,6 +526,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
       state.possession = null;
       state.pickupBlock = null;
       state.pendingPass = null;
+      state.oneTimerTaken = null;
       state.shotInFlight = null;
       state.lastRelease = null;
       state.tiedUpUntil = [];

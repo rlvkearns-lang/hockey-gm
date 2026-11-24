@@ -162,6 +162,12 @@ export type GoaliePose = 'stance' | 'butterfly' | 'glove' | 'blocker' | 'pad' | 
 /** `vel` is his movement this tick (m/s); `pose` shows a save (or a cover) for `poseT` more seconds, then `stance`. */
 export type GoalieState = { id: string; pos: Vec2; vel: Vec2; facing: number; pose: GoaliePose; poseT: number };
 
+/**
+ * How a shot is taken (actions.ts executeShot): a wrist shot, a slapshot (from 11 m or more with time), a one-timer (off
+ * a pass flagged oneTimer, at once), a backhand (the net on his backhand side), a wraparound (from the wrap at a post).
+ */
+export type ShotType = 'wrist' | 'slap' | 'oneTimer' | 'backhand' | 'wraparound';
+
 /** A shot on its way, from its release until the puck reaches the net, misses, hits a post or is blocked. */
 export type ShotInFlight = {
   shooterId: string;
@@ -172,6 +178,7 @@ export type ShotInFlight = {
   tick: number;
   /** Defenders who have already had their one chance to block it. */
   blockTried: string[];
+  shotType: ShotType;
 };
 
 /** The kinds of staged contest (contests/*.ts). */
@@ -299,9 +306,12 @@ export type GameState = {
    * `tried` lists the opponents who have had their one chance to intercept it. `aim` is where it was aimed (his blade
    * where he would be when it arrived); `bobbled` is set once it has come off his stick (he takes it at the next touch).
    * `cover` (0 to 1) is how well an opponent could get his stick into its lane when it was thrown (passing.ts PassPlan.cover;
-   * 0 for a rim).
+   * 0 for a rim). `oneTimer`: a pass across the slot to a man in a scoring area (actions.ts executePass), which he may shoot
+   * at once.
    */
-  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; pressure: number; aim: Vec2; bobbled: boolean; cover: number } | null;
+  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; pressure: number; aim: Vec2; bobbled: boolean; cover: number; oneTimer: boolean } | null;
+  /** The last one-timer pass taken: by whom and on which tick (Task 7; null when none, cleared at a whistle). */
+  oneTimerTaken: { id: string; tick: number } | null;
   /**
    * A turnover that may still go in the box score (see turnovers.ts): `side`'s `playerId` won the puck off `otherId`
    * (a takeaway) or `otherId` gave it to him (a giveaway, credited to `otherId`) on `tick`; it counts once `side` has
@@ -391,7 +401,7 @@ export type EventDetails = {
   /** The draw (side, playerId: the winning team and centre; otherId: the losing centre). */
   faceoff: { spot: Vec2 };
   /** playerId let the puck go (every pass, shot and dump): velocity (m/s, z up) as it left his stick. */
-  release: { kind: 'pass' | 'shot' | 'dump'; toId: string | null; vel: { x: number; y: number; z: number } };
+  release: { kind: 'pass' | 'shot' | 'dump'; toId: string | null; vel: { x: number; y: number; z: number }; shotType: ShotType | null };
   /**
    * A pass (otherId: its intended receiver), a dump-in (no receiver), a rim (hard round the boards, to a man or an area;
    * otherId the man or null) or a clear (out of his own zone, no receiver), at its release. `hand`: how a pass was
@@ -467,9 +477,16 @@ export type PlayerLine = {
   battlesLost: number;
   saves: number;
   shotsAgainst: number;
+  /** Shot attempts: shots on goal + missedShots + shotsBlocked (Task 7). */
+  attempts: number;
+  /** His shots that missed the net or hit a post (`miss` and `post` events). */
+  missedShots: number;
+  /** His shots that a defender blocked (`blocks` is the ones he blocked). */
+  shotsBlocked: number;
 };
 
-export type TeamLine = { shots: number; hits: number; blocks: number; faceoffsWon: number; giveaways: number; takeaways: number };
+/** `attempts` = shots + missedShots + shotsBlocked; `shotsBlocked` is this team's attempts that were blocked, `blocks` the other team's it blocked. */
+export type TeamLine = { shots: number; hits: number; blocks: number; faceoffsWon: number; giveaways: number; takeaways: number; attempts: number; missedShots: number; shotsBlocked: number };
 
 export type GameResult = {
   score: { home: number; away: number };

@@ -57,6 +57,7 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.possession = null;
   state.pickupBlock = null;
   state.pendingPass = null;
+  state.oneTimerTaken = null;
   state.shotInFlight = null;
   state.touches = { side: null, ids: [], ticks: [] };
   state.lastAttackTouch = { home: null, away: null };
@@ -81,6 +82,7 @@ export function setupFaceoff(state: GameState, spot: Vec2): void {
   state.carrierPlan = null;
   state.possession = null;
   state.pendingPass = null;
+  state.oneTimerTaken = null;
   state.shotInFlight = null;
   state.touches = { side: null, ids: [], ticks: [] };
   state.lastAttackTouch = { home: null, away: null };

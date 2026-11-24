@@ -11,7 +11,7 @@ import type { GameState, ReplanReason } from '../src/types';
  */
 const TRIGGERS: [ReplanReason, (st: GameState) => string][] = [
   ['possession', (st) => { st.carrierId = 'away-C'; st.possession = 'away'; st.lastTouch = { id: 'away-C', side: 'away' }; return 'home-LD'; }],
-  ['passToMe', (st) => { st.carrierId = null; st.pendingPass = { fromId: 'home-RW', toId: 'home-LW', untilTick: st.tick + 30, tried: [], pressure: 0, aim: { x: 0, y: 0 }, bobbled: false, cover: 0 }; return 'home-LW'; }],
+  ['passToMe', (st) => { st.carrierId = null; st.pendingPass = { fromId: 'home-RW', toId: 'home-LW', untilTick: st.tick + 30, tried: [], pressure: 0, aim: { x: 0, y: 0 }, bobbled: false, cover: 0, oneTimer: false }; return 'home-LW'; }],
   ['loosePuckMine', (st) => { st.carrierId = null; skater(st, 'home', 'RW').pos = { x: -8, y: -9 }; skater(st, 'home', 'C').pos = { x: -0.5, y: 0.2 }; return 'home-C'; }],
   ['phase', (st) => { st.teamPhase.home.sinceTick = st.tick; return 'home-LD'; }],
   ['whistle', (st) => { st.plans[idx(st, 'home-LD')]!.job = 'lineUp'; return 'home-LD'; }],
@@ -46,7 +46,7 @@ describe('commitment', () => {
   });
   it('a trigger re-issues at once and names itself', () => {
     const st = stateWith({ carrier: 'home', puckX: 20 }); const i = st.skaters.findIndex((s) => s.id === 'away-C');
-    assignJobs(st, defs, tactics); st.tick++; st.carrierId = null; st.pendingPass = { fromId: 'away-LD', toId: 'away-C', untilTick: st.tick + 30, tried: [], pressure: 0, aim: { x: 0, y: 0 }, bobbled: false, cover: 0 }; st.possession = 'away';
+    assignJobs(st, defs, tactics); st.tick++; st.carrierId = null; st.pendingPass = { fromId: 'away-LD', toId: 'away-C', untilTick: st.tick + 30, tried: [], pressure: 0, aim: { x: 0, y: 0 }, bobbled: false, cover: 0, oneTimer: false }; st.possession = 'away';
     assignJobs(st, defs, tactics);
     expect(st.plans[i]!.job).toBe('receive'); expect(['passToMe', 'possession']).toContain(st.plans[i]!.reason); expect(st.plans[i]!.targetTick).toBe(st.tick);
   });

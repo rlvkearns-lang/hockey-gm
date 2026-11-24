@@ -133,8 +133,8 @@ export const TUNING = deepFreeze({
    * near the net is worth `deke` of a shot from there. A pass lane under TUNING.lanes.open is
    * worth `shadowed` of an open one. `hold`: each second he has had the puck adds this much to shooting and passing and
    * takes it off carrying and protecting (at most holdCap seconds).
-   * Builder's additions: `goal` scales a shot's chance to score (shotQuality * skill * goal), and a shot that does not
-   * score leaves his team the puck `shotKeep` of the time (a rebound or a puck kept in); a habit also leans a value by
+   * Builder's additions: `goal` scales a shot's chance to score (shotQuality * skill * goal) (what a shot that does not
+   * score is still worth is `rebound`, Task 7); a habit also leans a value by
    * habitShift * (tendency - 0.5); a pass or carry that puts
    * his team offside costs `offside`; a dump from his own half (icing) costs `icing`; a rim or dump goes to his team
    * with a chance of raceBase + racePerMetre * (how much nearer his nearest teammate is than their nearest man), at
@@ -148,8 +148,15 @@ export const TUNING = deepFreeze({
     /** A pass's chance falls by skill.pass per point of passing under 100, a carry's by skill.carry per point of puckHandling under 100, pressured or not. */
     skill: { pass: 0.001, carry: 0.001 },
     pick: { base: 0.017, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
+    /**
+     * The shot's value (Task 7): a missed or saved shot is still worth `rebound` (a rebound, a tip, the puck kept in); a
+     * shot from 11 m or more gains `traffic` with a teammate in front of the net (job netFront within 3 m of the net
+     * centre) and is halved with no lane (laneWidth to the net under TUNING.block.path). A pass across the slot to a man
+     * whose threat is over oneTimerThreat is a one-timer pass; his first decision values the shot oneTimerBonus higher.
+     */
+    rebound: 0.005, traffic: 0.02, oneTimerThreat: 0.06, oneTimerBonus: 0.08,
     stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
-    goal: 0.13, shotKeep: 0.05, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
+    goal: 0.13, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
 
   /**
@@ -270,6 +277,18 @@ export const TUNING = deepFreeze({
     /** Chance of aiming at the open side: 0.5, plus this per metre the goalie is shaded off centre, at most openSideMax. */
     openSidePull: 0.6,
     openSideMax: 0.8,
+    /**
+     * Shot types (Task 7, actions.ts executeShot): speed and spread (sigma) multipliers. A wraparound goes `speed` m/s
+     * along the ice at the near post. A slapshot is taken from slapFrom m or more under slapPressure; a one-timer within
+     * oneTimerTicks of taking a one-timer pass; a wraparound within wrapPost m of a post off a wrap.
+     */
+    types: {
+      slap: { speed: 1.12, spread: 1.15 },
+      oneTimer: { speed: 1.05, spread: 1.25 },
+      backhand: { speed: 0.75, spread: 1.4 },
+      wraparound: { speed: 9 },
+      slapFrom: 11, slapPressure: 0.3, oneTimerTicks: 2, wrapPost: 1.2,
+    },
   },
 
   /**
@@ -339,8 +358,8 @@ export const TUNING = deepFreeze({
 
   /** Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from the shooter; chance base + perPoint * shotBlocking. */
   block: {
-    maxZ: 1.1, path: 0.9, clearOfShooter: 1.5, base: 0.25, perPoint: 0.004,
-    /** A blocked puck keeps this share of its speed, turned back by up to this spread (rad, one sd). */
+    maxZ: 1.1, path: 0.55, clearOfShooter: 1.5, base: 0.40, perPoint: 0.004,
+    /** A blocked puck stops at the blocker and keeps this share of its speed, turned by up to `spread` (rad) either side of straight back. */
     keep: [0.1, 0.3] as [number, number],
     spread: 1.2,
   },

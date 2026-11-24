@@ -22,7 +22,8 @@ import { netFrontContest } from '../src/contests/net-front';
 import { looseRaceContest, timeToReach } from '../src/contests/loose-race';
 import { assignJobs } from '../src/team-play';
 import { createGame, type Game } from '../src/game';
-import { resolveOnNet, tryBlock } from '../src/goalie';
+import { resolveOnNet } from '../src/goalie';
+import { tryBlock } from '../src/shots';
 import { movementOf, stepSkater } from '../src/skating';
 import { refereeTick } from '../src/referee';
 import type { Drive, Movement } from '../src/skating';
@@ -238,7 +239,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
     },
-    plans: initialPlans(skaters.length), carrierPlan: null, teamPhase: initialTeamPhase(),
+    plans: initialPlans(skaters.length), carrierPlan: null, oneTimerTaken: null, teamPhase: initialTeamPhase(),
     seed: 1, rng: [1, 2, 3, 4],
   };
   // Everyone has been in his place a while: plans issued long ago for the side in possession, the phase committed. No
@@ -366,7 +367,7 @@ export function blockAttempt(d: PlayerDef): boolean {
   const shooter = skater(st, 'home', 'RW');
   st.carrierId = null;
   st.puck.vel = { x: 30, y: 0 };
-  st.shotInFlight = { shooterId: shooter.id, side: 'home', from: { x: 15, y: 0 }, fromDist: 12.13, tick: 0, blockTried: [] };
+  st.shotInFlight = { shooterId: shooter.id, side: 'home', from: { x: 15, y: 0 }, fromDist: 12.13, tick: 0, blockTried: [], shotType: 'wrist' };
   const blocker = skater(st, 'away', 'LD');
   for (const s of onIce(st, 'away')) if (s !== blocker) s.onIce = false;
   blocker.pos = { x: 16, y: 0 };
@@ -1211,7 +1212,7 @@ export function assistsWhenTouched(lwSecondsAgo: number): string[] {
     st.tick = now - 15;
     recordTouch(st, 'home-C', 'home');
     st.tick = now;
-    st.shotInFlight = { shooterId: 'home-C', side: 'home', from: { x: 20, y: 2 }, fromDist: 6.4, tick: now - 6, blockTried: [] };
+    st.shotInFlight = { shooterId: 'home-C', side: 'home', from: { x: 20, y: 2 }, fromDist: 6.4, tick: now - 6, blockTried: [], shotType: 'wrist' };
     const ds = new Map(defs);
     const gId = st.goalies.away.id;
     ds.set(gId, { ...def({ id: gId, position: 'G' }), goalie: g(30) });

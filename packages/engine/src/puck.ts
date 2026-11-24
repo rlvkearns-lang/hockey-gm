@@ -1,11 +1,12 @@
 import type { Vec2 } from './vec';
-import { RINK as RINK_, resolveBoards as resolveBoards_ } from './rink';
+import { boardsNormal as boardsNormal_, RINK as RINK_, resolveBoards as resolveBoards_ } from './rink';
 import { hypot2 as hypot2_ } from './vec';
 import { dexp as dexp_, hypot3 as hypot3_ } from './dmath';
 import { GRAVITY as GRAVITY_, PUCK_RADIUS as PUCK_RADIUS_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const RINK = RINK_;
 const resolveBoards = resolveBoards_;
+const boardsNormal = boardsNormal_;
 const hypot2 = hypot2_;
 const dexp = dexp_;
 const hypot3 = hypot3_;
@@ -22,7 +23,34 @@ export type PuckEvent =
 
 /** Per second, on speed, while the puck slides on the ice (its speed falls as exp(-ICE_DECAY * t)). */
 export const ICE_DECAY = 0.38;
+/**
+ * The boards give back BOARDS_RESTITUTION of the speed into them at BOARDS_SOFT (m/s) or less, falling linearly to
+ * BOARDS_HARD_RESTITUTION at BOARDS_HARD or more (a hard puck dies into them and rides round: Task 7). A real hit (BOARDS_SKIM
+ * m/s or more into them) keeps BOARDS_ALONG of the speed along them; a puck riding round them keeps all of it.
+ */
 const BOARDS_RESTITUTION = 0.55;
+const BOARDS_HARD_RESTITUTION = 0.2;
+const BOARDS_SOFT = 8;
+const BOARDS_HARD = 25;
+const BOARDS_ALONG = 0.9;
+const BOARDS_SKIM = 2;
+const boardsN = { x: 0, y: 0 };
+
+/** Keeps the puck inside the boards (rink.ts resolveBoards); on a hit, its bounce by the speed into them. Whether it hit. */
+function puckBoards(puck: Puck): boolean {
+  const vx = puck.vel.x, vy = puck.vel.y;
+  if (!resolveBoards(puck.pos, puck.vel, PUCK_RADIUS, 1)) return false;
+  const n = boardsNormal(puck.pos, boardsN);
+  const vn = vx * n.x + vy * n.y;
+  if (vn <= 0) return true;
+  const e = vn <= BOARDS_SOFT ? BOARDS_RESTITUTION : vn >= BOARDS_HARD ? BOARDS_HARD_RESTITUTION
+    : BOARDS_RESTITUTION + ((BOARDS_HARD_RESTITUTION - BOARDS_RESTITUTION) * (vn - BOARDS_SOFT)) / (BOARDS_HARD - BOARDS_SOFT);
+  const along = vn >= BOARDS_SKIM ? BOARDS_ALONG : 1;
+  const tx = vx - vn * n.x, ty = vy - vn * n.y;
+  puck.vel.x = tx * along - e * vn * n.x;
+  puck.vel.y = ty * along - e * vn * n.y;
+  return true;
+}
 const NET_RESTITUTION = 0.3;
 const POST_RESTITUTION = 0.6;
 const POST_RADIUS = 0.03;
@@ -102,7 +130,8 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
       }
     }
 
-    if (resolveBoards(puck.pos, puck.vel, PUCK_RADIUS, BOARDS_RESTITUTION)) boardsHit = true;
+    // A lifted puck that reaches the boards (or the glass above them) keeps its height and falls: it stays in the rink.
+    if (puckBoards(puck)) boardsHit = true;
 
     // Goal-line crossing from the front, between the posts.
     for (const end of ENDS) {

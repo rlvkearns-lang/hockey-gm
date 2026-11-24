@@ -1,4 +1,3 @@
-import { recordTouch as recordTouch_ } from './actions';
 import type { GoalieAttrs } from './attributes';
 import { DT as DT_ } from './constants';
 import { gameEvent as gameEvent_ } from './events';
@@ -9,11 +8,10 @@ import type { Rng } from './rng';
 import { wrapAngle as wrapAngle_ } from './skating';
 import { TUNING as TUNING_ } from './tuning';
 import type { GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, Side } from './types';
-import { dist as dist_, hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
+import { dist as dist_, hypot2 as hypot2_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dexp as dexp_, dsin as dsin_, dtanh as dtanh_ } from './dmath';
 import { clamp as clamp_, findSkater as findSkater_, other as other_, PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
-const recordTouch = recordTouch_;
 const DT = DT_;
 const gameEvent = gameEvent_;
 const stopPlay = stopPlay_;
@@ -24,7 +22,6 @@ const wrapAngle = wrapAngle_;
 const TUNING = TUNING_;
 const dist = dist_;
 const hypot2 = hypot2_;
-const segDistXY = segDistXY_;
 const datan2 = datan2_;
 const dcos = dcos_;
 const dexp = dexp_;
@@ -39,7 +36,6 @@ const SIDES = SIDES_;
 const GOAL = RINK.goalLineX;
 
 const G = TUNING.goalie;
-const BLOCK = TUNING.block;
 /** He never stands closer than this to the goal line (m), nor wider than POST_Y from the middle (m). */
 const LINE_GAP = 0.3;
 const POST_Y = 0.75;
@@ -53,10 +49,6 @@ const RB_START = 0.45;
 /** A save above this height (m) is a glove or blocker save; below it, a pad save when this far (m) off his centre, else butterfly. */
 const HIGH_SAVE_Z = 0.5;
 const PAD_OFFSET = 0.35;
-
-/** A shot that slows below this (m/s), or is still going after this long (s), has missed. */
-const MISS_SPEED = 3;
-const SHOT_MAX_SECONDS = 3;
 
 const logistic = (x: number): number => 1 / (1 + dexp(-x));
 
@@ -196,64 +188,6 @@ export function goalieTick(state: GameState, defs: Map<string, PlayerDef>, dt: n
   for (const side of SIDES) {
     if (tryCover(state, side, state.goalies[side], (-state.attackDir[side]) as 1 | -1, out)) return;
   }
-}
-
-/**
- * While a shot is in flight below BLOCK.maxZ: each defending skater within BLOCK.path m of the puck's path this tick,
- * and more than BLOCK.clearOfShooter m from the shooter, gets one chance per shot to block it,
- * `clamp(BLOCK.base + shotBlocking * BLOCK.perPoint, 0.03, 0.97)` (TUNING.block).
- * A block emits `block` into `out`, ends the shot and leaves the puck loose, slowed and turned back.
- */
-export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): boolean {
-  const shot = state.shotInFlight;
-  const pk = state.puck;
-  if (shot === null || pk.z >= BLOCK.maxZ) return false;
-  const shooter = findSkater(state, shot.shooterId);
-  const ax = pk.pos.x, ay = pk.pos.y, bx = ax + pk.vel.x * DT, by = ay + pk.vel.y * DT;
-  for (const s of state.skaters) {
-    if (!s.onIce || s.leaving || s.side === shot.side || s.downT > 0 || shot.blockTried.includes(s.id)) continue;
-    if (segDistXY(s.pos.x, s.pos.y, ax, ay, bx, by) > BLOCK.path) continue;
-    if (shooter && dist(s.pos, shooter.pos) <= BLOCK.clearOfShooter) continue;
-    shot.blockTried.push(s.id);
-    if (!rng.chance(clamp(BLOCK.base + defs.get(s.id)!.attrs.shotBlocking * BLOCK.perPoint, 0.03, 0.97))) continue;
-    const speed = hypot2(pk.vel.x, pk.vel.y) * rng.range(BLOCK.keep[0], BLOCK.keep[1]);
-    const angle = datan2(pk.vel.y, pk.vel.x) + Math.PI + rng.gauss() * BLOCK.spread;
-    pk.vel.x = dcos(angle) * speed;
-    pk.vel.y = dsin(angle) * speed;
-    pk.z = 0;
-    pk.vz = 0;
-    state.shotInFlight = null;
-    state.lastTouch = { id: s.id, side: s.side };
-    recordTouch(state, s.id, s.side);
-    out.push(gameEvent(state, { type: 'block', side: s.side, playerId: s.id, otherId: shot.shooterId, pos: pk.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick } }));
-    return true;
-  }
-  return false;
-}
-
-/**
- * Ends a shot in flight that did not reach the net this tick: `post` when it hit a post of the attacked net, `miss`
- * when it went wide or over, hit the boards, turned away from the net, slowed below 3 m/s, was picked up, or is still
- * going after 3 s. Call after the puck step and pickup (an `onNet` goes to resolveOnNet instead).
- */
-export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEvent[] = []): void {
-  const shot = state.shotInFlight;
-  if (shot === null) return;
-  const end = state.attackDir[shot.side];
-  const pk = state.puck;
-  let post = false, gone = false;
-  for (const ev of puckEvents) {
-    if (ev.kind === 'post' && ev.end === end) post = true;
-    else if (ev.kind === 'boards' || ev.kind === 'overNet') gone = true;
-  }
-  if (!post) {
-    gone = gone || state.carrierId !== null || pk.pos.x * end > GOAL || pk.vel.x * end <= 0
-      || hypot2(pk.vel.x, pk.vel.y) < MISS_SPEED || (state.tick - shot.tick) * DT > SHOT_MAX_SECONDS;
-    if (!gone) return;
-  }
-  state.shotInFlight = null;
-  const e = { side: shot.side, playerId: shot.shooterId, otherId: state.goalies[other(shot.side)].id, pos: pk.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick } };
-  out.push(post ? gameEvent(state, { type: 'post', ...e }) : gameEvent(state, { type: 'miss', ...e }));
 }
 
 /**
