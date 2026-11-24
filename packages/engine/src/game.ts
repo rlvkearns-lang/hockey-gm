@@ -8,7 +8,7 @@ import { BRAIN_INTERVAL_TICKS, DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PER
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
 import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
-import { goalieTick as goalieTick_, scoreFacedShot as scoreFacedShot_, whistleFacedShot as whistleFacedShot_ } from './goalie';
+import { goaliePlaysPass as goaliePlaysPass_, goalieTick as goalieTick_, scoreFacedShot as scoreFacedShot_, whistleFacedShot as whistleFacedShot_ } from './goalie';
 import { moveLoosePuck as moveLoosePuck_, trackShot as trackShot_ } from './shots';
 import type { PuckEvent } from './puck';
 import { refereeTick as refereeTick_ } from './referee';
@@ -59,6 +59,7 @@ const restPuck = restPuck_;
 const setupFaceoff = setupFaceoff_;
 const snapToLineup = snapToLineup_;
 const goalieTick = goalieTick_;
+const goaliePlaysPass = goaliePlaysPass_;
 const scoreFacedShot = scoreFacedShot_;
 const whistleFacedShot = whistleFacedShot_;
 const trackShot = trackShot_;
@@ -539,6 +540,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         state.carrierId = null;
         // Tips, blocks, the goalie's save at his plane, the puck's step and the net (shots.ts moveLoosePuck).
         const { puckEvents, onNet } = moveLoosePuck(state, defs, rng, events, prevPuck);
+        // A pass through the goalie's crease: he gets one try at it (Task 8b review, Important 2).
+        if (!onNet && state.phase === 'live') goaliePlaysPass(state, defs, rng, prevPuck, events);
         if (!onNet && state.phase === 'live') {
           // Nobody touches a shot that is past the goalie on its way in, nor the puck on the tick of a save (it is at the
           // goalie; it comes out next tick).

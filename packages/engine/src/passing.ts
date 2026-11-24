@@ -13,6 +13,7 @@ import { planOf as planOf_ } from './commit';
 import { dcos as dcos_, dlog as dlog_, dsin as dsin_ } from './dmath';
 import { crossesNet as crossesNet_, passLaneWidth as passLaneWidth_ } from './lanes';
 import { ICE_DECAY } from './puck';
+import { slideStopChance } from './slide';
 import { RINK as RINK_ } from './rink';
 import { isTiedUp as isTiedUp_, steeredByContest as steeredByContest_ } from './team-play';
 import { TUNING } from './tuning';
@@ -190,17 +191,21 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
   if (check) {
     if (d < TUNING.brain.passRange[0] || d > HAND_RANGE[hand] || arriveSpeed < MIN_ARRIVE || arriveSpeed > PASS.maxReceiveSpeed + 1e-9) return null;
     if (crossesNet(p, aim)) return null;
-    // Task 8b close-out (no-shot goals traced on seeds 1-16). A pass is never aimed so that, missed, it slides on into a
-    // net: its line, carried on up to PASS.netBeyond m past the aim, does not reach a goal line inside the posts (with
-    // PASS.netCone m of margin per metre travelled: its direction error). And a backhand or blind pass is not thrown
+    // Task 8b close-out (no-shot goals traced on seeds 1-16). A pass is never aimed so that, missed, it slides on into his
+    // own net: its line, carried on up to PASS.netBeyond m past the aim, does not reach his own goal line inside the posts
+    // (with PASS.netCone m of margin per metre travelled: its direction error). And a backhand or blind pass is not thrown
     // across the front of his own net (within PASS.ownNetClear m of its centre): two own goals came that way.
-    for (let end = -1; end <= 1; end += 2) {
+    // (Task 8b review, Important 2: the net he attacks is no reason to refuse a pass: a lead pass to a man driving it is
+    // a real play, and the goalie plays a puck that slides at him, goalie.ts slideStopChance.)
+    {
+      const end = -dir;
       const gx = end * RINK.goalLineX, vx = aim.x - p.x;
-      if (vx * end <= 0) continue;
-      const u = (gx - p.x) / vx;
-      const l = u * d;
-      // (Before the aim too: a pass from in front to a man behind the goal line goes by the post, not through the mouth.)
-      if (l - d < PASS.netBeyond && Math.abs(p.y + (aim.y - p.y) * u) < RINK.netHalfWidth + PASS.netCone * l) return null;
+      if (vx * end > 0) {
+        const u = (gx - p.x) / vx;
+        const l = u * d;
+        // (Before the aim too: a pass from in front to a man behind the goal line goes by the post, not through the mouth.)
+        if (l - d < PASS.netBeyond && Math.abs(p.y + (aim.y - p.y) * u) < RINK.netHalfWidth + PASS.netCone * l) return null;
+      }
     }
     if (hand !== 'forehand' && segDist(-dir * RINK.goalLineX, 0, p.x, p.y, aim.x, aim.y) < PASS.ownNetClear) return null;
     // A body standing in the lane stops the pass (no option); an opponent who can get a stick into it before the puck
@@ -229,6 +234,16 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
       if (off < BODY_IN_LANE) return null;
       const r = laneReach(off, slideSeconds(u * d, speed));
       if (r > cover) cover = r;
+    }
+    // The goalie defending against the passer: a lane through his reach (a feed across his crease) is covered by his stick,
+    // as goalie.ts goaliePlaysPass plays it (Task 8b review, Important 2).
+    {
+      const gl = state.goalies[from.side === 'home' ? 'away' : 'home'].pos;
+      const u = l2 === 0 ? 0 : ((gl.x - p.x) * ax + (gl.y - p.y) * ay) / l2;
+      if (u > 0 && u < 1) {
+        const off = hyp(gl.x - (p.x + ax * u), gl.y - (p.y + ay * u));
+        if (off <= TUNING.goalie.slide.reach) { const r = slideStopChance(speed - K * u * d, off); if (r > cover) cover = r; }
+      }
     }
     out.cover = cover;
     out.contest = contest;

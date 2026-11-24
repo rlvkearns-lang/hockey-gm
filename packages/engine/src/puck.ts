@@ -19,7 +19,7 @@ export type Puck = { pos: Vec2; z: number; vel: Vec2; vz: number };
 export type PuckEvent =
   | { kind: 'boards' }
   | { kind: 'post'; end: 1 | -1 }
-  | { kind: 'onNet'; end: 1 | -1; y: number; z: number; speed: number }
+  | { kind: 'onNet'; end: 1 | -1; y: number; z: number; speed: number; /** Its velocity on the ice as it reached the line (m/s). */ vx?: number; vy?: number }
   | { kind: 'overNet'; end: 1 | -1 };
 
 /** Per second, on speed, while the puck slides on the ice (its speed falls as exp(-ICE_DECAY * t)). */
@@ -143,7 +143,7 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
       if (Math.abs(y) >= RINK.netHalfWidth) continue;
       const z = pz + (puck.z - pz) * t;
       if (z < RINK.netHeight) {
-        const sp = hypot3(puck.vel.x, puck.vel.y, puck.vz);
+        const sp = hypot3(puck.vel.x, puck.vel.y, puck.vz), vx = puck.vel.x, vy = puck.vel.y;
         puck.pos.x = gx;
         puck.pos.y = y;
         puck.z = z;
@@ -151,7 +151,7 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
         puck.vel.y = 0;
         puck.vz = 0;
         if (boardsHit) events.unshift({ kind: 'boards' });
-        events.push({ kind: 'onNet', end, y, z, speed: sp });
+        events.push({ kind: 'onNet', end, y, z, speed: sp, vx, vy });
         return events;
       }
       events.push({ kind: 'overNet', end });

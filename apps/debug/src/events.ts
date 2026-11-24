@@ -35,6 +35,7 @@ export function describe(e: GameEvent, defs: Map<string, PlayerDef>, abbr: Recor
       case 'pass': return e.detail.kind === 'dump' ? `${me} dumped the puck in` : `${me} passed to ${other}`;
       case 'shot': return `Shot: ${me}${metres(e.detail.distance)}`;
       case 'save': return `Save: ${me} stopped ${other}'s shot ${SAVE_HOW[e.detail.pose]}`;
+      case 'stop': return `${me} stopped the puck ${SAVE_HOW[e.detail.pose]} (${other} had let it go; no shot)`;
       case 'goal': {
         const assists = e.assistIds.length === 0 ? 'unassisted' : `assisted by ${e.assistIds.map(name).join(' and ')}`;
         return `GOAL! ${me} scores${metres(e.detail.distance)}, ${assists}`;

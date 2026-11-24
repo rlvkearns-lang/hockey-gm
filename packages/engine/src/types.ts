@@ -472,6 +472,13 @@ export type EventDetails = {
   post: { distance: number; releaseTick: number; tippedFrom: string | null };
   /** playerId deflected otherId's shot in front (pos: where); `vel` is the puck's velocity after it (m/s, z up). */
   tip: { releaseTick: number; vel: { x: number; y: number; z: number } };
+  /**
+   * The goalie (playerId) stopped a puck that was not shot (otherId: who last let it go) as it slid over his goal line
+   * between the posts: a pass, a centring feed or a loose puck (Task 8b review, Important 2). It is no shot on goal (only
+   * a released shot is an attempt), so no `save`: he covered it (`held`, followed by a `freeze` with cause 'cover'),
+   * steered it to a corner or left it loose in front (`rebound`). `speed`: its speed then (m/s).
+   */
+  stop: { pose: SavePose; kind: SaveKind; speed: number };
   /** playerId blocked otherId's shot. */
   block: { distance: number; releaseTick: number };
   hit: { result: 'landed' | 'absorbed' | 'bounced'; contestId: number };

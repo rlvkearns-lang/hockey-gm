@@ -271,10 +271,16 @@ describe('no pass is aimed at a net (Task 8b close-out)', () => {
     place(st, 'home:LW', to[0], to[1]); const lw = skater(st, 'home', 'LW'); lw.vel = { x: toVel[0], y: toVel[1] }; lw.facing = Math.atan2(from[1] - to[1], from[0] - to[0]);
     return planPass(st, c, lw, defs, {} as PassPlan);
   };
-  it('a pass that would slide on into the net he attacks if missed is no option; the same pass to a man who is not going there is', () => {
+  // Task 8b review, Important 2: a lead pass to a man driving the net he attacks is a real option (the goalie plays a
+  // puck that slides at him: goalie.ts slideStopChance); only his own net is out.
+  it('a pass to a man driving the net he attacks is an option; one that would slide on into his own net if missed is not', () => {
     // From the corner to a man driving the net: his blade will be in the goal mouth's line when it arrives.
-    expect(plan([24, -9], Math.PI / 2, [23.5, -2.5], [5, 2.5])).toBeNull();
+    expect(plan([24, -9], Math.PI / 2, [23.5, -2.5], [5, 2.5])).not.toBeNull();
     expect(plan([24, -9], Math.PI / 2, [19, 0])).not.toBeNull();
+    // A pass to a man at the top of the crease whose line, missed, runs on into the goal mouth: fine at the net he
+    // attacks, refused at his own (home defends -27.13).
+    expect(plan([15, 0.4], 0, [24, 0.4])).not.toBeNull();
+    expect(plan([-15, 0.4], Math.PI, [-24, 0.4])).toBeNull();
   });
   it('a backhand or blind pass across the front of his own net is no option; a forehand one is', () => {
     // Home defends the net at -27.13. From beside it to a man on the other side, 2.5 m out from the goal line.

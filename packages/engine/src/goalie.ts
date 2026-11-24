@@ -8,6 +8,7 @@ import type { Rng } from './rng';
 import { wrapAngle as wrapAngle_ } from './skating';
 import { TUNING as TUNING_ } from './tuning';
 import { saveOutcome as saveOutcome_ } from './rebounds';
+import { slideStopChance } from './slide';
 import type { Crossing, EventDetails, GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, ShotInFlight, Side } from './types';
 import { dist as dist_, hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
 import { datan2 as datan2_, dexp as dexp_, dtanh as dtanh_, hypot3 as hypot3_ } from './dmath';
@@ -111,6 +112,47 @@ export function saveChance(input: SaveInput): number {
     - G.save.perStretchMetre * Math.max(0, lm - G.save.stretch)
     - G.save.perHighMetre * Math.max(0, input.height - G.save.highFrom);
   return clamp(logistic(logit), 0.03, 0.97);
+}
+
+export { slideStopChance } from './slide';
+
+/**
+ * A pass on the ice that slides within G.slide.reach of the goalie defending against its passer this tick (from `prev` to
+ * the puck now: a feed through his crease) gets one try from him (pendingPass.tried): slideStopChance by its speed and how
+ * far its line passes from his centre (Task 8b review, Important 2). Stopped: the puck goes back to the point of its path
+ * nearest him, a `stop` event, and he covers it (`freeze`), steers it away or leaves it loose in front (saveOutcome). No
+ * shot on goal. Returns whether he stopped it. Events go into `out`.
+ */
+export function goaliePlaysPass(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, prev: Vec2, out: GameEvent[]): boolean {
+  const pass = state.pendingPass;
+  const pk = state.puck;
+  if (pass === null || state.shotInFlight !== null || pk.z > G.cover.maxZ) return false;
+  let passer: Side | null = null;
+  for (const s of state.skaters) if (s.id === pass.fromId) { passer = s.side; break; }
+  if (passer === null) return false;
+  const defSide = other(passer);
+  const g = state.goalies[defSide];
+  if (pass.tried.includes(g.id)) return false;
+  const off = segDistXY(g.pos.x, g.pos.y, prev.x, prev.y, pk.pos.x, pk.pos.y);
+  if (off > G.slide.reach) return false;
+  pass.tried.push(g.id);
+  const speed = hypot2(pk.vel.x, pk.vel.y);
+  if (!rng.chance(slideStopChance(speed, off))) return false;
+  // Where its path came nearest him.
+  const mx = pk.pos.x - prev.x, my = pk.pos.y - prev.y, m2 = mx * mx + my * my;
+  const t = m2 === 0 ? 0 : clamp(((g.pos.x - prev.x) * mx + (g.pos.y - prev.y) * my) / m2, 0, 1);
+  pk.pos.x = prev.x + mx * t;
+  pk.pos.y = prev.y + my * t;
+  const end = (-state.attackDir[defSide]) as 1 | -1;
+  const pose = savePose(g, defs.get(g.id)?.catches ?? 'L', pk.pos.y, 0, end);
+  g.pose = pose;
+  g.poseT = POSE_SECONDS;
+  state.pendingPass = null;
+  const stop = gameEvent(state, { type: 'stop', side: defSide, playerId: g.id, otherId: pass.fromId, pos: pk.pos, detail: { pose, kind: 'rebound', speed } });
+  out.push(stop);
+  const cross: Crossing = { side: (pk.pos.y - g.pos.y) * -end, height: 0 };
+  stop.detail.kind = saveOutcome(state, defSide, { pose, speed, screened: false, tipped: false, reboundControl: goalieAttrs(defs, g.id).reboundControl }, cross, rng, out, 'cover');
+  return true;
 }
 
 /** Where `g` (defending the net at `end`) wants to be for the puck at `p`. Writes `out`. */
@@ -454,7 +496,9 @@ export function resolveOnNet(
   const t = state.touches;
   const shooterId = shot ? shot.tippedBy ?? shot.shooterId : t.side === attSide ? t.ids[t.ids.length - 1] ?? creditFor(state, attSide) : creditFor(state, attSide);
   const netX = end * GOAL;
-  const fx = shot ? shot.from.x : netX - end * 3, fy = shot ? shot.from.y : ev.y;
+  // A puck that was not shot came along its own line (its velocity at the line), else straight in from 3 m out.
+  const sv = shot ? 0 : hypot2(ev.vx ?? 0, ev.vy ?? 0);
+  const fx = shot ? shot.from.x : sv > 0 ? netX - (ev.vx! / sv) * 3 : netX - end * 3, fy = shot ? shot.from.y : sv > 0 ? ev.y - (ev.vy! / sv) * 3 : ev.y;
   const distance = hypot2(netX - fx, ev.y - fy);
   // A puck that was not shot (a pass or a loose puck sliding in) has been on its way since it was last let go: he has
   // had that long to see it coming.
@@ -471,7 +515,9 @@ export function resolveOnNet(
     || (shot !== null && screenedOnLine(state, attSide, shot.shooterId, shot.tippedBy, netX, ev.y, lx / ll, ly / ll));
   const tipped = shot !== null && shot.tippedBy !== null;
   // A shot whose line passes beyond his reach cannot be saved (Task 8 review, Minor 1): a save needs his body, glove or pad there.
-  const p = shot !== null && offLine > SAVE_REACH ? 0 : saveChance({
+  // A puck that was not shot is played with stick or pad by its speed and how square he is to it (slideStopChance), not as
+  // a shot (Task 8b review, Important 2); beyond his reach neither can be stopped.
+  const p = offLine > SAVE_REACH ? 0 : !shot ? slideStopChance(ev.speed, offLine + squareErr * G.squareMissPerRad) : saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
     screened, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
     night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
@@ -489,10 +535,13 @@ export function resolveOnNet(
     const pose = savePose(g, defs.get(g.id)?.catches ?? 'L', ev.y, ev.z, end);
     if (!shot) {
       // A puck that was not shot: he covers it, steers it away or leaves it loose, as his pose and its speed have it
-      // (Task 8 review, Minor 5: every one he stopped was a whistle). No `save`: it was no shot on goal.
+      // (Task 8 review, Minor 5: every one he stopped was a whistle). No `save`: it was no shot on goal; a `stop` says
+      // what he did (Task 8b review, Important 2).
       g.pose = pose;
       g.poseT = POSE_SECONDS;
-      saveOutcome(state, defSide, { pose, speed: ev.speed, screened, tipped: false, reboundControl: ga.reboundControl }, cross, rng, out, 'cover');
+      const stop = gameEvent(state, { type: 'stop', side: defSide, playerId: g.id, otherId: rel !== null ? rel.id : shooterId, pos: state.puck.pos, detail: { pose, kind: 'rebound', speed: ev.speed } });
+      out.push(stop);
+      stop.detail.kind = saveOutcome(state, defSide, { pose, speed: ev.speed, screened, tipped: false, reboundControl: ga.reboundControl }, cross, rng, out, 'cover');
       return 'save';
     }
     g.pose = pose;

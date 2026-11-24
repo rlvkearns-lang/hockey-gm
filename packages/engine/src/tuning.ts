@@ -351,9 +351,9 @@ export const TUNING = deepFreeze({
     maxReceiveSpeed: 16,
     pointInside: 1.5,
     /**
-     * Task 8b close-out (passing.ts planPass): no pass whose line, carried on up to netBeyond m past its aim, reaches a goal
-     * line inside the posts, with netCone m of margin per metre travelled; no backhand or blind pass within ownNetClear m of
-     * the centre of his own net.
+     * Task 8b close-out (passing.ts planPass): no pass whose line, carried on up to netBeyond m past its aim, reaches his
+     * own goal line inside the posts, with netCone m of margin per metre travelled (Task 8b review, Important 2: not the net
+     * he attacks); no backhand or blind pass within ownNetClear m of the centre of his own net.
      */
     netBeyond: 4.5, netCone: 0.06, ownNetClear: 3.5,
     /** The cover (0 to 1) a pass has when the stick blade of a man level with or behind the puck is within stickLane of its lane (Task 8b close-out). */
@@ -460,6 +460,14 @@ export const TUNING = deepFreeze({
     depth: { min: 0.4, max: 1.3, near: 2, perMetre: 0.06 },
     /** He covers a loose puck slower than speed (m/s), within reach (m) of him and in his crease, when an opponent is within threat (m) of it. */
     cover: { speed: 3, reach: 1.0, threat: 2.5, maxZ: 0.3 },
+    /**
+     * A puck that was not shot (a pass, a centring feed, a loose puck) sliding over his goal line between the posts (Task 8b
+     * review, Important 2): he stops it with stick or pad with chance logistic(base - perSpeed * its speed - perMetre * (how
+     * far its line passes from his centre, plus his squareness error, beyond `body` m)), within [0.03, 0.97]. A pass that
+     * slides within `reach` (m) of him on its way (through his crease) gets the same one try, its line's distance from him
+     * the miss.
+     */
+    slide: { base: 4.5, perSpeed: 0.2, body: 0.3, perMetre: 2, reach: 1.1 },
     /**
      * Save chance, as a logistic: base, plus perReactionSecond per second the puck takes to arrive (at most 1 s
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].

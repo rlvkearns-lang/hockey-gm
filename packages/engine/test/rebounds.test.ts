@@ -7,7 +7,7 @@ import { DT } from '../src/constants';
 import type { GameEvent, GameState, SaveKind, SavePose } from '../src/types';
 import { g, shareOf, skater, stateWith } from './helpers';
 import { eventsOf, flyShot, withGoalies } from './shot-lab';
-import { lateSave, resolveOnNet, whistleFacedShot } from '../src/goalie';
+import { lateSave, resolveOnNet, slideStopChance, whistleFacedShot } from '../src/goalie';
 import { moveLoosePuck } from '../src/shots';
 
 const POSES: SavePose[] = ['glove', 'blocker', 'pad', 'butterfly'];
@@ -217,8 +217,32 @@ describe('saves with an outcome (Task 8)', () => {
       if (out.some((e) => e.type === 'goal')) { goals++; expect(out.find((e) => e.type === 'goal')!.detail).toMatchObject({ releaseTick: null }); }
       else if (out.some((e) => e.type === 'freeze' && e.detail.cause === 'cover')) { covered++; expect(st.phase).toBe('stopped'); }
       else { loose++; expect(st.phase).toBe('live'); expect(st.puck.vel.x).toBeLessThanOrEqual(0); expect(Math.hypot(st.puck.vel.x, st.puck.vel.y)).toBeGreaterThan(2); }
+      // Task 8b review, Important 2: whatever he did with it, a `stop` says so (no `save`: it was no shot on goal).
+      if (!out.some((e) => e.type === 'goal')) {
+        const stop = out.find((e) => e.type === 'stop');
+        expect(stop).toMatchObject({ playerId: 'away-G', otherId: 'home-C', side: 'away' });
+        if (stop?.type === 'stop') expect(stop.detail.kind === 'held').toBe(out.some((e) => e.type === 'freeze'));
+      }
     }
     expect(covered).toBeGreaterThan(40); expect(loose).toBeGreaterThan(40); expect(goals).toBeLessThan(40);
+  });
+  // Task 8b review, Important 2: a puck that slides at him without being a shot is played as such (not as a shot).
+  it('a pass or loose puck sliding at the goalie is stopped by its speed and how square he is, never certainly', () => {
+    const slowSquare = slideStopChance(4, 0), hardSquare = slideStopChance(15, 0), hardWide = slideStopChance(15, 1.2);
+    expect(slowSquare).toBeGreaterThan(0.95); expect(slowSquare).toBeLessThanOrEqual(0.97);
+    expect(hardSquare).toBeLessThan(slowSquare); expect(hardSquare).toBeGreaterThan(0.6);
+    expect(hardWide).toBeLessThan(hardSquare - 0.2); expect(hardWide).toBeGreaterThanOrEqual(0.03);
+    expect(slideStopChance(60, 3)).toBe(0.03);
+    // In the game: a slow pass sliding straight at a set goalie gets by him rarely.
+    let goals = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      const st = empty(); st.tick = 900; const ds = withGoalies({ goalie: g(70) }); const out: GameEvent[] = [];
+      st.puck.pos = { x: GOAL_X, y: 0.1 }; st.lastRelease = { id: 'home-C', tick: 885 };
+      st.skaters.find((k) => k.id === 'home-C')!.onIce = true; st.skaters.find((k) => k.id === 'home-C')!.pos = { x: 10, y: 8 };
+      resolveOnNet(st, { kind: 'onNet', end: 1, y: 0.1, z: 0, speed: 4, vx: 4, vy: 0 }, ds, createRng(seed), out);
+      if (out.some((e) => e.type === 'goal')) goals++;
+    }
+    expect(goals).toBeLessThan(20);
   });
   // Task 8 review, Minor 9: the fallback save of a shot past him ends as any save does.
   it('a late save of a shot past the goalie is held, steered or a rebound from where the puck is: it never slides on into the net', () => {
