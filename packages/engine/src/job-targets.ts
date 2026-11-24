@@ -587,6 +587,19 @@ const routeProbe: Vec2 = { x: 0, y: 0 };
  * Where to skate for a loose puck (written into `out`): where it will be, leading it by the time it takes to get
  * there. With a net in the way he heads for the corner of the frame on his side and the puck's end of it first.
  */
+/**
+ * Whether a rebound (state.lastSave of kind 'rebound') is loose within REBOUND_RANGE (m) of the net `side` attacks
+ * (`attacking`) or defends.
+ */
+function reboundInFront(state: GameState, side: Side, attacking: boolean): boolean {
+  const ls = state.lastSave;
+  if (ls === null || ls.kind !== 'rebound' || state.carrierId !== null) return false;
+  if ((ls.side === side) === attacking) return false;
+  const nx = (attacking ? state.attackDir[side] : -state.attackDir[side]) * GOAL;
+  return hyp(state.puck.pos.x - nx, state.puck.pos.y) <= REBOUND_RANGE;
+}
+const REBOUND_RANGE = 6;
+
 function chaseSpot(state: GameState, s: SkaterState, out: Vec2): void {
   const p = state.puck;
   const t = Math.min(MAX_LEAD_SECONDS, distV(s.pos, p.pos) / CHASE_SPEED);
@@ -887,6 +900,8 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
       pointSpot(state, s, job, a, p);
       return out;
     case 'netFront':
+      // A rebound loose in front of the net he attacks (Task 8): he goes for it.
+      if (reboundInFront(state, s.side, true)) { chaseSpot(state, s, p); out.follow = 'puck'; out.through = true; out.effort = 'sprint'; out.face = null; return out; }
       p.x = a.x; p.y = a.y;
       return out;
     case 'driveWide': case 'driveMiddle':
@@ -967,6 +982,8 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
       return out;
     }
     case 'dNet': {
+      // A rebound loose in front of his own net (Task 8): he goes for it.
+      if (reboundInFront(state, s.side, false)) { chaseSpot(state, s, p); out.follow = 'puck'; out.through = true; out.effort = 'sprint'; out.face = null; return out; }
       // His man stays his while he is still in front (within NET_FRONT_RANGE of it), unless another is much nearer the net.
       const rule = netFrontMark(state, s.side);
       const kept = stickyMark(state, s, rule);

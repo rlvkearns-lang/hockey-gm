@@ -526,8 +526,10 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
         // Tips, blocks, the goalie's save at his plane, the puck's step and the net (shots.ts moveLoosePuck).
         const { puckEvents, onNet } = moveLoosePuck(state, defs, rng, events, prevPuck);
         if (!onNet && state.phase === 'live') {
-          // Nobody touches a shot that is past the goalie on its way in.
-          if (state.shotInFlight === null || !state.shotInFlight.faced) {
+          // Nobody touches a shot that is past the goalie on its way in, nor the puck on the tick of a save (it is at the
+          // goalie; it comes out next tick).
+          const savedNow = state.lastSave !== null && state.lastSave.tick === state.tick;
+          if (!savedNow && (state.shotInFlight === null || !state.shotInFlight.faced)) {
             const caught = tryIntercept(state, defs, rng, prevPuck);
             if (caught) {
               events.push(caught.event);

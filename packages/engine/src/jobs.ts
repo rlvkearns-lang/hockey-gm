@@ -128,7 +128,7 @@ const SPARE_F: readonly Job[] = ['trailer', 'backcheckA', 'backcheckB'];
  * The jobs to hand out to `side`'s free skaters now, most important first (never `carrier`, never a utility job).
  * With the puck loose the first forechecker's job is left out (the loose-puck chaser is the first man). When `side`
  * has the puck and his group (forwards or defencemen) has more jobs than free men, the carrier does the job of his
- * group whose anchor is nearest him, and it is left out.
+ * group whose anchor is nearest him, and it is left out (never netFront: someone stays at the net).
  */
 export function jobsFor(state: GameState, side: Side, tactics: Tactics): Job[] {
   const carrier = carrierOf(state);
@@ -147,7 +147,8 @@ function jobsWith(state: GameState, side: Side, tactics: Tactics, carrier: Skate
   if (mine <= free) return jobs;
   let drop = -1, best = Infinity;
   for (let k = 0; k < jobs.length; k++) {
-    if (DEFENCE.has(jobs[k]!) !== d) continue;
+    // (Task 8 fix round: the net-front man is never the one left out; the carrier takes another forward's job.)
+    if (DEFENCE.has(jobs[k]!) !== d || jobs[k] === 'netFront') continue;
     const a = jobAnchor(state, side, jobs[k]!, tactics, anchorScratch);
     const dd = hyp(a.x - carrier.pos.x, a.y - carrier.pos.y);
     if (dd < best) { best = dd; drop = k; }
@@ -170,7 +171,7 @@ function stickyNearest(state: GameState, pool: number[], job: Job, to: Vec2): nu
 
 const poolScratch: number[] = [];
 const netScratch: Vec2 = { x: 0, y: 0 };
-const shotPool: number[] = [];
+const chasePool: number[] = [];
 /** Jobs are handed out afresh every ASSIGN_TICKS ticks (0.2 s), and at once on a trigger or a change of the list. */
 const ASSIGN_TICKS = 6;
 const outHome: (Job | null)[] = [];
@@ -212,24 +213,22 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
     return out;
   }
   if (carrier === null) {
-    // A shot on its way to a net (Task 8): the man of each side nearest that net goes there for the rebound (the puck's
-    // own way); otherwise the man nearest the puck chases it.
-    // The net-front men (the attackers' netFront, the defenders' dNet) stay on their spots: a screen, a tip, a man marked.
+    // The net-front men (the attackers' netFront in the offensive zone, the defenders' dNet in their own) keep their jobs
+    // through a loose puck in the zone (Task 8 fix round: a save, a rebound, a block or a bobble must not reshuffle
+    // them): the screen, the tip and the rebound are theirs (job-targets.ts sends them to a rebound in front). Someone
+    // else chases: while a shot is on its way to a net, the man nearest that net (for the rebound); otherwise the man
+    // nearest the puck.
+    const phase = committedPhase(state, side);
+    const stay: Job | null = phase === 'ozone' ? 'netFront' : phase === 'dzone' ? 'dNet' : null;
     const shot = state.shotInFlight;
+    chasePool.length = 0;
+    for (const i of pool) if (stay === null || state.plans[i]!.job !== stay) chasePool.push(i);
+    const from = chasePool.length > 0 ? chasePool : pool;
     let puckMan: number;
     if (shot !== null) {
       netScratch.x = state.attackDir[shot.side] * RINK.goalLineX; netScratch.y = 0;
-      const stay: Job = shot.side === side ? 'netFront' : 'dNet';
-      shotPool.length = 0;
-      for (const i of pool) if (state.plans[i]!.job !== stay) shotPool.push(i);
-      puckMan = stickyNearest(state, shotPool.length > 0 ? shotPool : pool, 'chase', netScratch);
-    } else puckMan = stickyNearest(state, pool, 'chase', state.puck.pos);
-    // A rebound loose in front (Task 8): the attackers' net-front man and the defenders' net defenceman go for it.
-    const ls = state.lastSave;
-    if (ls !== null && ls.kind === 'rebound') {
-      const want: Job = ls.side === side ? 'dNet' : 'netFront';
-      for (const i of pool) if (state.plans[i]!.job === want) puckMan = i;
-    }
+      puckMan = stickyNearest(state, from, 'chase', netScratch);
+    } else puckMan = stickyNearest(state, from, 'chase', state.puck.pos);
     let job: Job | null = 'chase';
     const pass = state.pendingPass;
     if (pass !== null) for (const i of pool) if (sk[i]!.id === pass.toId) { puckMan = i; job = 'receive'; }
@@ -263,8 +262,9 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
       if (isDefenceman(s) !== DEFENCE.has(job)) continue;
       if (job === 'dJoin' && (defs.get(s.id)?.tendencies.joinRush ?? 0) < JOIN_RUSH_MIN) continue;
       const held = state.plans[i]!.job;
-      // The man at the net stays there: another job costs him keepNet more.
-      const cost = hyp(s.pos.x - a.x, s.pos.y - a.y) - (held === job ? TUNING.jobs.keep : 0) + (held === 'dNet' && job !== 'dNet' ? TUNING.jobs.keepNet : 0);
+      // The man at the net stays there: another job costs him keepNet more (the defenders' dNet, and since Task 8's fix
+      // round the attackers' netFront).
+      const cost = hyp(s.pos.x - a.x, s.pos.y - a.y) - (held === job ? TUNING.jobs.keep : 0) + ((held === 'dNet' || held === 'netFront') && job !== held ? TUNING.jobs.keepNet : 0);
       if (cost < bestCost) { bestCost = cost; best = i; }
     }
     if (best >= 0) { out[best] = job; used[k] = true; }
