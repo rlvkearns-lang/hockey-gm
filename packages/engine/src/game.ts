@@ -5,6 +5,7 @@ import { BENCH_DOORS as BENCH_DOORS_, benchTick as benchTick_, finishChanges as 
 import { type EngagedPair, resolveBodies as resolveBodies_, resolveGoalies as resolveGoalies_, routeAroundGoalies as routeAroundGoalies_ } from './bodies';
 import { brainTick as brainTick_ } from './brain';
 import { resolveTactics } from './tactics';
+import { pickupReachOf } from './engage-state';
 import { BRAIN_INTERVAL_TICKS, DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
@@ -115,8 +116,7 @@ const PERIOD_TICKS = Math.round(PERIOD_SECONDS / DT);
 const STOPPED_SECONDS = 1.5;
 /** While play is stopped a skater in a goalie's way is moved out at most this far (m) a tick (bodies.ts resolveGoalies). */
 const STOPPED_PUSH = 0.4;
-/** A loose puck is taken with the blade within TUNING.blade.pickupReach (m) of it, or in his feet: his centre within IN_FEET (m). */
-const PICKUP_REACH = TUNING_.blade.pickupReach;
+/** A loose puck is taken with the blade within his pickup reach of it (engage-state.ts pickupReachOf), or in his feet: his centre within IN_FEET (m). */
 const IN_FEET = 0.45;
 /** A puck in his feet goes to his stick only from within this far (m) of the blade (the most a pickup moves it). */
 const MAX_KICK = 1.2;
@@ -488,7 +488,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         const tie = state.engagements.length > 0 ? tieOf(state, s.id) : 0;
         // (A tied-up receiver's reach is not cut, Task 10 review Important 2: the shorter reach is for loose pucks; his
         // catch is cut by receiveChance below, the chance the carrier's valuation sees.)
-        if (segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y) > PICKUP_REACH) break;
+        if (segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y) > pickupReachOf(state, s.id, true)) break;
         if (!pass.bobbled) {
           const speed = hypot2(p.vel.x, p.vel.y);
           // An opponent on him as it arrives contests the catch.
@@ -520,7 +520,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         const b = bladePos(s.pos, s.facing, bodyById.get(s.id)!.def.shoots, bladeScratch);
         const db = segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y), dc = dist(s.pos, p.pos);
         // A tied-up man (Task 10) reaches less far for it: times 1 - TUNING.engage.limits.reach * his tie.
-        const reach = state.engagements.length > 0 ? PICKUP_REACH * (1 - TUNING.engage.limits.reach * tieOf(state, s.id)) : PICKUP_REACH;
+        const reach = pickupReachOf(state, s.id, false);
         // In his feet he kicks it up to his stick: only when the blade is within MAX_KICK of it.
         const d = db <= reach ? db : dc <= IN_FEET && dist(b, p.pos) <= MAX_KICK ? dc : Infinity;
         if (d < bestD) { bestD = d; best = s; }

@@ -1,9 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { createGame, createGameWith, simulateGame } from '../src/game';
 import { gameSetup, sum } from './helpers';
-import { countGames, measureGames } from './measures';
+import { countGames, measureGames, observeGame } from './measures';
+import type { GameSetup, TeamDef } from '../src/types';
 import type { GameEvent, GameResult, GameState } from '../src/types';
 import type { PlayCounters, PlayMeasures } from './measures';
+
+/** `s` with both teams on the default tactics (the optional fields absent, a balanced forecheck): Task 11. */
+const plain = (t: TeamDef): TeamDef => ({ ...t, tactics: { forecheck: 'balanced', shiftSeconds: t.tactics.shiftSeconds } });
+const defaultTactics = (s: GameSetup): GameSetup => ({ ...s, home: plain(s.home), away: plain(s.away) });
 
 /** Whole-game behaviour on seeds 1, 2, 3 (each played once per file): the guard rails every task keeps, and each task's numbers. */
 function lazy<T>(f: () => T): () => T { let v: { x: T } | null = null; return () => (v ??= { x: f() }).x; }
@@ -223,7 +228,10 @@ describe('A4: saves, rebounds and tips (Task 8)', () => {
     // Task 9 close-out ruling 3: pooled over seeds 1-16, at least 4. On 16 seeds it was under 6 at every recent commit (5.31
     // before the Task 8b review fix, 5.5 after it, about 4.5 after Task 9); Task 14 tunes rebounds to the design's target
     // (about a fifth to a quarter of goals from rebounds and tips together).
-    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m16().reboundChancesPerGame).toBeGreaterThanOrEqual(4);
+    // Task 11 close-out ruling 1: at least 3 (3.25 at the close-out). Collapse defenders holding the front of the net and
+    // point men no longer chasing every loose puck are correct hockey and cost second chances; Task 14 tunes rebounds
+    // and second chances to the design's target.
+    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m16().reboundChancesPerGame).toBeGreaterThanOrEqual(3);
   }, 240_000);
   it('A4: tips happen: at least 2 a game, some on goal', () => {
     // Task 9 review fix: read pooled over seeds 1-16 (seeds 1-3 read 1.33 after it, 3.0 before, while seeds 1-16 went 2.94
@@ -321,4 +329,12 @@ describe('A5: battles the winner wins (Task 9)', () => {
   it('no teleport: on a live tick the puck never moves further than its speed allows, 1.2 m when it changes hands (seeds 1-16)', () => {
     expect(countGames(Array.from({ length: 16 }, (_, i) => i + 1)).puckJumpTicks).toBe(0); expect(m16().maxPuckJump).toBeLessThanOrEqual(1.2);
   }, 240_000);
+  // Task 11 close-out ruling 6: the same on both teams playing the default tactics (the natural ones are the set above).
+  // Three jump ticks there were pucks knocked loose by a poke that bounced off a post the same tick: the measure now
+  // takes the loose speed from the contestEnd event (detail.looseSpeed).
+  it('no teleport with both teams on the default tactics (seeds 1-16)', () => {
+    const games16 = Array.from({ length: 16 }, (_, i) => observeGame(defaultTactics(gameSetup(i + 1))));
+    expect(games16.reduce((a, g) => a + g.counters.puckJumpTicks, 0)).toBe(0);
+    expect(Math.max(...games16.map((g) => g.maxPuckJump))).toBeLessThanOrEqual(1.2);
+  }, 600_000);
 });

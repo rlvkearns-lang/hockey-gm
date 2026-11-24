@@ -91,9 +91,12 @@ describe('tactics: the players bend them', () => {
 });
 
 describe('tactics: two teams look different', () => {
-  it('a dump-and-chase team and a carry-in team (8 games each): dump-ins over 45% of one\'s entries, under 25% of the other\'s, and 1.6 times the share', () => {
+  it('a dump-and-chase team and a carry-in team (8 games each): the one dumps at least 1.6 times as often, a quarter of its entries or more', () => {
+    // Task 11 close-out ruling 3a: the binding bar is the ratio between the two teams (at least 1.6) with the dump team
+    // at 0.25 or more (the brief's "over 45%" took a draw-weight factor of 600 on the dump; certainty before the cap is
+    // held under 0.15 for every tactic instead). The carry team stays under a quarter.
     const dump = home({ zoneEntry: 'dump' }, 8).dumpInShare, carry = home({ zoneEntry: 'carry' }, 8).dumpInShare;
-    expect(dump).toBeGreaterThan(0.45); expect(carry).toBeLessThan(0.25); expect(dump).toBeGreaterThan(carry * 1.6);
+    expect(dump).toBeGreaterThanOrEqual(0.25); expect(carry).toBeLessThan(0.25); expect(dump).toBeGreaterThanOrEqual(carry * 1.6);
   }, LONG);
 });
 

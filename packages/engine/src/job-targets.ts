@@ -1039,7 +1039,8 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
       return out;
     case 'dGapStrong': case 'dGapWeak': {
       const ball = opp;
-      const gap = gapOf(state, defs.get(s.id), dir);
+      // (Task 11: a trap, the passive forecheck, meets the carrier in the neutral zone with a tighter gap.)
+      const gap = gapOf(state, defs.get(s.id), dir) * (tactics.forecheck === 'passive' ? TT.passiveF1.trapGap : 1);
       const crx = ball ? ball.pos.x * dir : pr;
       // Once the carrier is inside the blue line the gap closes to a contain (CONTAIN_GAP goal-side).
       const rx = Math.max(-24, crx - (crx < -BLUE ? Math.min(gap, CONTAIN_GAP) : gap));

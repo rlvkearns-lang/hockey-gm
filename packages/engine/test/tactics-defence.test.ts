@@ -29,8 +29,12 @@ describe('tactics: two teams look different (defence, pinching)', () => {
     expect(pr.dzoneTwoShare).toBeGreaterThan(co.dzoneTwoShare);
     expect(pr.slotToPoint).toBeGreaterThan(co.slotToPoint);
   }, LONG);
-  it('against a carrier behind the net a pressure team chases and a collapse team holds the front', () => {
-    expect(home({ defence: 'pressure' }, 8).chaseShare).toBeGreaterThan(0.7); expect(home({ defence: 'collapse' }, 8).chaseShare).toBeLessThan(0.3);
+  it('against a carrier behind the net a pressure team chases (twice as often as a collapse team, and over half the time) and a collapse team holds the front', () => {
+    // Task 11 close-out ruling 2: the brief's "over 0.7" is replaced by what matters, pressure at least twice collapse and
+    // over 0.5 (0.576 against 0.234 on seeds 1-16 at the close-out: from where the pressing men are, getting behind the
+    // goal line takes about a second). Collapse stays under 0.3.
+    const pr = home({ defence: 'pressure' }, 8).chaseShare, co = home({ defence: 'collapse' }, 8).chaseShare;
+    expect(pr).toBeGreaterThan(0.5); expect(pr).toBeGreaterThanOrEqual(2 * co); expect(co).toBeLessThan(0.3);
   }, LONG);
   it('point men pinch more when told to, and only with a forward above them', () => {
     const often = homeCounts({ pinch: 'often' }, 8), rarely = homeCounts({ pinch: 'rarely' }, 8), some = homeCounts({ pinch: 'sometimes' }, 8);

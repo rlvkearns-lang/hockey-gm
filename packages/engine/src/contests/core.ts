@@ -7,7 +7,7 @@ import type {
   ContestKind, ContestOutcome, ContestStages, ContestState, ContestStateOf, GameEvent, GameEventOf, GameEventType, GameSetup, GameState, PlayerDef,
   SkaterState,
 } from '../types';
-import type { Vec2 } from '../vec';
+import { hypot2, type Vec2 } from '../vec';
 import { boardBattleContest, dropGoneSupport } from './board-battle';
 import { hitContest } from './hit';
 import { looseRaceContest } from './loose-race';
@@ -251,7 +251,10 @@ export function contestTick(
     }
     if (r === null) { i++; continue; }
     applyResult(ctx, c, r);
-    ctx.emit(contestEndEvent(state, c, r.outcome, r.winnerId, r.puck, puckToOf(state, c, r)));
+    const end = contestEndEvent(state, c, r.outcome, r.winnerId, r.puck, puckToOf(state, c, r));
+    // (Task 11 close-out: a puck knocked loose leaves at the result's speed, which the no-teleport measure needs.)
+    if (r.puck === 'loose' && r.looseVel !== undefined) end.detail.looseSpeed = hypot2(r.looseVel.x, r.looseVel.y);
+    ctx.emit(end);
     for (const id of c.participants) { const s = skaterById(state, id); if (s.contestId === c.id) s.contestId = null; }
     state.contests.splice(i, 1);
   }

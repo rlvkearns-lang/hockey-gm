@@ -565,6 +565,8 @@ export type EventDetails = {
     contestId: number; kind: ContestKind; result: ContestOutcome; winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged';
     /** Who has or is being passed the puck as a result (null: nobody). */
     puckTo: string | null;
+    /** With `puck` 'loose': the speed (m/s) it was knocked loose at (Task 11 close-out). */
+    looseSpeed?: number;
   };
 };
 

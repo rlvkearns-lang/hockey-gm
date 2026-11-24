@@ -37,3 +37,15 @@ export function tiedChance(p: number, tie: number, share: number): number {
   return v < 0.03 ? 0.03 : v > 0.97 ? 0.97 : v;
 }
 
+
+/**
+ * How far (m) `id`'s blade reaches for the puck at a pickup (game.ts): TUNING.blade.pickupReach, cut by
+ * TUNING.engage.limits.reach * his tie for a loose puck (Task 10). For a pass he is the receiver of (`pass`), the full
+ * reach: a tied-up receiver is limited by his catch (passing.ts receiveChance with his tie), the chance the carrier's
+ * valuation sees (Task 10 review, Important 2).
+ */
+export function pickupReachOf(state: GameState, id: string, pass: boolean): number {
+  const r = TUNING.blade.pickupReach;
+  if (pass || state.engagements.length === 0) return r;
+  return r * (1 - E.limits.reach * tieOf(state, id));
+}

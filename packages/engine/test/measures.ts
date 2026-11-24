@@ -613,6 +613,8 @@ export function createObserver(setup: GameSetup): Observer {
       // same tick moved at its release speed), and a carrier's.
       let vmax = Math.max(prevPuck.speed, speed, cs !== undefined ? speedOf(cs.vel) : 0);
       for (const e of events) if (e.type === 'release') vmax = Math.max(vmax, Math.hypot(e.detail.vel.x, e.detail.vel.y));
+      // A puck a contest knocked loose this tick moved at its loose speed (it may have slowed off a post or a body since).
+      for (const e of events) if (e.type === 'contestEnd' && e.detail.looseSpeed !== undefined) vmax = Math.max(vmax, e.detail.looseSpeed);
       const move = Math.hypot(p.pos.x - prevPuck.x, p.pos.y - prevPuck.y);
       let excess: number, limit = JUMP_SLACK;
       if (cs !== undefined && cs.id === prevPuck.carrier) {
@@ -764,6 +766,7 @@ export function countGames(seeds: number[]): PlayCounters {
  * - ozonePossessions / ozoneTicks: as the play measures (its possession, the puck in the offensive zone), for it alone;
  *   ozoneLowTicks: of those, with the puck below the faceoff dots (rx > 21.03); lowPasses: a pass or rim it releases
  *   below the dots, a pass going to a teammate also below them (the cycle).
+ * - shotsOnGoal / goals: its `shot` and `goal` events.
  * - attempts / pointAttempts (released from the point: above the tops of the circles, rx < 14) / defenceAttempts.
  * - forecheckTicks: live ticks 2 s or more into its committed forecheck phase (its men have taken their spots) with the opposing carrier deep in its offensive zone
  *   (below the far hash marks, rx > 21: where a forecheck is one man or two); forecheckTwoDeep: of those, with two or more of its forwards below the hash
@@ -784,12 +787,12 @@ export function countGames(seeds: number[]): PlayCounters {
 export type TacticCounters = Record<TacticCounterKey, number>;
 export type TacticCounterKey =
   | 'games' | 'carryIns' | 'dumpIns' | 'ozonePossessions' | 'ozoneTicks' | 'ozoneLowTicks' | 'lowPasses'
-  | 'attempts' | 'pointAttempts' | 'defenceAttempts' | 'forecheckTicks' | 'forecheckTwoDeep' | 'forecheckDeep'
+  | 'attempts' | 'shotsOnGoal' | 'goals' | 'pointAttempts' | 'defenceAttempts' | 'forecheckTicks' | 'forecheckTwoDeep' | 'forecheckDeep'
   | 'dzoneCarrierTicks' | 'dzoneCarrierPressed' | 'dzoneCarrierTwo' | 'allowedSlot' | 'allowedPoint' | 'behindSpells' | 'behindChased'
   | 'pinches' | 'pinchesWithoutCover';
 const TACTIC_KEYS: readonly TacticCounterKey[] = [
   'games', 'carryIns', 'dumpIns', 'ozonePossessions', 'ozoneTicks', 'ozoneLowTicks', 'lowPasses',
-  'attempts', 'pointAttempts', 'defenceAttempts', 'forecheckTicks', 'forecheckTwoDeep', 'forecheckDeep',
+  'attempts', 'shotsOnGoal', 'goals', 'pointAttempts', 'defenceAttempts', 'forecheckTicks', 'forecheckTwoDeep', 'forecheckDeep',
   'dzoneCarrierTicks', 'dzoneCarrierPressed', 'dzoneCarrierTwo', 'allowedSlot', 'allowedPoint', 'behindSpells', 'behindChased',
   'pinches', 'pinchesWithoutCover',
 ];
@@ -829,6 +832,8 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
           const to = e.otherId === null ? undefined : st.skaters.find((k) => k.id === e.otherId);
           if (e.detail.kind === 'rim' || (to !== undefined && to.pos.x * dir > DOTS_RX)) c.lowPasses++;
         }
+        if (e.type === 'shot' && e.side === side) c.shotsOnGoal++;
+        if (e.type === 'goal' && e.side === side) c.goals++;
         if (e.type === 'release' && e.detail.kind === 'shot' && e.side !== null) {
           const d = st.attackDir[e.side], rx = e.pos.x * d, ly = e.pos.y * d, far = Math.hypot(GOAL - rx, ly) >= TUNING.options.farShot;
           if (e.side === side) {

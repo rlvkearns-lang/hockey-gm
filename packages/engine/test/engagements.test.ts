@@ -194,3 +194,24 @@ describe('engagements: battling for position (Task 10)', () => {
   }, 60_000);
 });
 
+
+describe('a tied-up man\'s reach (Task 10 review, Important 2; Task 11 close-out ruling 7)', () => {
+  it('a tied-up receiver reaches as far for his pass as a free one (his catch is cut by the reception chance only); for a loose puck his reach is cut', async () => {
+    const { pickupReachOf } = await import('../src/engage-state');
+    const { TUNING } = await import('../src/tuning');
+    const s = gameSetup(1);
+    const g = createGame(s);
+    const st = g.state;
+    const [a, b] = st.skaters.filter((k) => k.onIce).map((k) => k.id) as [string, string];
+    const full = TUNING.blade.pickupReach;
+    expect(pickupReachOf(st, a, true)).toBe(full); expect(pickupReachOf(st, a, false)).toBe(full);
+    st.engagements = [{ a, b, sinceTick: 0, kind: 'lean', inside: null, tieA: 1, tieB: 0 }] as Engagement[];
+    // Receiving a pass: the full reach, and his catch is the reception chance cut by his tie.
+    expect(pickupReachOf(st, a, true)).toBe(full);
+    const d = s.home.players[0]!;
+    expect(receiveChance(d, 10, false, 0, 1)).toBeLessThan(receiveChance(d, 10, false, 0, 0));
+    // A loose puck: his reach is cut by TUNING.engage.limits.reach of itself; a free man's is not.
+    expect(pickupReachOf(st, a, false)).toBeCloseTo(full * (1 - TUNING.engage.limits.reach), 10);
+    expect(pickupReachOf(st, b, false)).toBe(full);
+  });
+});

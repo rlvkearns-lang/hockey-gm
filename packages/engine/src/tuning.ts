@@ -301,7 +301,8 @@ export const TUNING = deepFreeze({
    * - entry: factors on the carrier's neutral-zone options (options.ts): `carryIn` on a carry toward the zone, `dump` on
    *   the dump. Set from play, far above the brief's 1.25 / 0.6 and 0.8 / 1.6: before tactics a team dumped about 4% of
    *   its entries (a dump sits 0.02 to 0.07 below his best option at the line, three to five temperatures); a weight
-   *   factor of 30 on the dump gave 28%, 240 gave 32 to 40%. Measured numbers in task-11-report.md.
+   *   factor of 30 on the dump gave 28%, 240 gave 32 to 40%, 3,000 gave 45%. Close-out ruling: the binding bar is the
+   *   dump team at least 1.6 times the carry team's share and 0.25 or more, so 60 / 0.25. Numbers in task-11-report.md.
    * - bend: the men on the ice bend an entry tactic: its factor f becomes f ** e, e = max(min, perHabit * h), h the
    *   mean habit of the on-ice forwards for what the tactic asks for (tend.carry under 'carry', tend.dump under 'dump').
    *   An average line (0.5) plays it as written; a line that does not like it (grinders asked to carry) plays it less.
@@ -317,7 +318,9 @@ export const TUNING = deepFreeze({
    * - pointIn (m): with pointShots the point men hold this much further in.
    * - joinRush: the joinRush tendency a defenceman needs for the dJoin job (rush tactic: `rush`; otherwise `other`).
    * - passiveF1 (rx, m): with a passive forecheck the first forechecker holds at the top of the circles (`hold`, on the
-   *   carrier's line, within `holdLy` m of the middle) while the carrier is below it.
+   *   carrier's line, within `holdLy` m of the middle) while the carrier is below it; the gap defencemen then meet the
+   *   carrier in the neutral zone at `trapGap` of their usual gap (close-out: unpressured, the other side's carry in
+   *   the neutral zone was certain in 39% of its decisions there, and certainty over all decisions read 0.153).
    * - pressure: defence 'pressure' (job-targets.ts): the wingers cover their point men at `gap` m; the corner man and the
    *   centre both go at a carrier below the dots (the second `second` m off him toward the slot); the man who has a
    *   carrier behind the net goes round after him at once. 'collapse': one man has the carrier (pressing below the dots,
@@ -331,17 +334,17 @@ export const TUNING = deepFreeze({
    */
   tactics: {
     temp: 0.0136,
-    entry: { carry: { carryIn: 1.25, dump: 0.6 }, mixed: { carryIn: 1, dump: 1 }, dump: { carryIn: 0.2, dump: 600 } },
+    entry: { carry: { carryIn: 1.25, dump: 0.6 }, mixed: { carryIn: 1, dump: 1 }, dump: { carryIn: 0.25, dump: 60 } },
     bend: { perHabit: 2, min: 0.2 },
     offence: {
       cycle: { lowCycle: 1.3, pointPass: 1, pointShot: 0.8, rushShot: 1, hold: 1.2 },
       pointShots: { lowCycle: 1, pointPass: 2, pointShot: 4, rushShot: 1, hold: 1 },
       rush: { lowCycle: 0.8, pointPass: 0.9, pointShot: 1, rushShot: 1.3, hold: 0.8 },
     },
-    patience: { cycle: 1, pointShots: 0.9, rush: 0.5 },
+    patience: { cycle: 1, pointShots: 1, rush: 0.5 },
     pointIn: 1,
     joinRush: { rush: 0.45, other: 0.6 },
-    passiveF1: { hold: 15.5, holdLy: 6 },
+    passiveF1: { hold: 15.5, holdLy: 6, trapGap: 0.6 },
     pressure: { gap: 1.2, second: 2.2 },
     pinch: { often: 9, sometimes: 6, rarely: 3 },
     pinchEager: { often: 5, sometimes: 0, rarely: -4 },
