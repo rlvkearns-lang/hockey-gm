@@ -245,6 +245,7 @@ export function patienceOf(state: GameState, s: SkaterState, me: PlayerDef, oddM
  * carry that leads to a covered man's look is worth that look, not a free one.
  */
 function lookLeft(space: number, poise: number): number {
+  if (space >= 5) return 1;
   const pressure = clamp((5 - space) / 4, 0, 1);
   const calm = 1 - pressure * (B.calm.base - poise * B.calm.perPoise);
   const r = clamp((RU.reach - space) / (RU.reach - RU.full), 0, 1);

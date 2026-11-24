@@ -153,6 +153,8 @@ export const HAND_ERROR: Record<PassHand, number> = { forehand: 1, backhand: PAS
 
 const futScratch: Vec2 = { x: 0, y: 0 };
 const bladeScratch2: Vec2 = { x: 0, y: 0 };
+/** Only a man within this far (m) of the puck, level with or behind it, can have his stick in the lane ahead of it. */
+const CHECKER_NEAR = 2.5;
 
 /**
  * Fills `out` with the pass from the puck (on `from`'s blade) to `to`: aimed at his blade where he will be when it
@@ -215,6 +217,7 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
       // it (close-out: since the Task 8 review fix the passer's checker tries for the pass once it is off the blade, 21
       // picked off a game; the passer now sees that stick as cover).
       if (u <= 0) {
+        if (hyp(o.pos.x - p.x, o.pos.y - p.y) > CHECKER_NEAR) continue;
         const od = defs.get(o.id);
         const ob = bladePos(o.pos, o.facing, od ? od.shoots : 'L', bladeScratch2);
         const ub = l2 === 0 ? 0 : ((ob.x - p.x) * ax + (ob.y - p.y) * ay) / l2;
