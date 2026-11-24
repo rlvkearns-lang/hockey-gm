@@ -26,12 +26,15 @@ export const TUNING = deepFreeze({
   /** The carrier's decision (brain.ts). */
   brain: {
     /**
-     * Decision points (brain.ts, Task 8 fix round 2): after a pick he holds his plan holdZone s in the zone he attacks
-     * (hold s elsewhere), times 1 - holdPressure * pressure; pressure arrives at `pressed`; a carry's target is reached
-     * within `arrive` m; an option seen as worth `margin` more than his plan makes him choose again; the slot is rx
-     * slotRx or more within slotLy m of the middle.
+     * Decision points (brain.ts, Task 8 fix round 2; Task 8b). After a pick he holds his plan holdZone s in the zone he
+     * attacks (hold s elsewhere), times 1 - holdPressure * pressure; a carry's target is reached within `arrive` m; an
+     * option seen as worth `margin` more than his plan makes him choose again (marginHeld once the hold has run out:
+     * while his plan is still the best he sees he keeps at it); the slot is rx slotRx or more within
+     * slotLy m of the middle. Pressure (Task 8b): a checker is on him once within pressIn m and until beyond pressOut m
+     * (hysteresis); his arrival is a decision point once, and no other arrival is one for pressCooldown s after it; a
+     * change of his situation is not a decision point within readGap s of his last decision.
      */
-    decide: { holdZone: 1.2, hold: 0.8, holdPressure: 0.6, pressed: 0.5, arrive: 1.5, margin: 0.03, slotRx: 17, slotLy: 6 },
+    decide: { holdZone: 1.2, hold: 0.8, holdPressure: 0.3, pressed: 0.5, arrive: 1.5, margin: 0.03, marginHeld: 0, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 1.5, readGap: 0.5 },
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
     shotDistanceScale: 9,
     maxShotDistance: 25,
@@ -45,7 +48,7 @@ export const TUNING = deepFreeze({
     openNetWeight: [0.85, 0.5] as [number, number],
     openNetShade: 0.6,
     /** A shot's chance is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
-    shootPressure: 3.6,
+    shootPressure: 2.0,
     /**
      * Largest share any one kind of option (all passing lanes together count as one kind, all carry lanes another) may
      * have of the carrier's draw in an ordinary state when another kind is on his list (options.ts chooseOption).
@@ -152,7 +155,7 @@ export const TUNING = deepFreeze({
     deke: 0.6,
     /** A pass's chance falls by skill.pass per point of passing under 100, a carry's by skill.carry per point of puckHandling under 100, pressured or not. */
     skill: { pass: 0.001, carry: 0.001 },
-    pick: { base: 0.017, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
+    pick: { base: 0.015, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
     /**
      * The shot's value (Task 7; Task 7 review, Important 2): P(goal) * (1 - here) plus, for each thing that can follow a
      * shot that does not score (blocked, wide, held, steered to a corner, a rebound: Task 8's outcome model), its chance
@@ -178,7 +181,7 @@ export const TUNING = deepFreeze({
       wide: { keep: 0.28, rush: 0.15 },
     },
     stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
-    goal: 0.13, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
+    goal: 0.2, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
 
   /**
@@ -204,7 +207,7 @@ export const TUNING = deepFreeze({
     farShot: 11, trafficNear: 3,
     /** A rebound lands about rebound.out m out; each metre nearer it than the other side's nearest man is worth rebound.edge of the chance of getting it (options.ts shotAfter). */
     rebound: { out: 2.5, edge: 0.15 },
-    threat: { base: 0.005, ice: 0.035, shot: 0.15 },
+    threat: { base: 0.005, ice: 0.035, shot: 0.23 },
     openAt: { min: 0.6, from: 1, over: 4 },
     pass: {
       base: 0.97, perMetre: 0.006, from: 12, pressure: 0.3, pressurePerPoint: 0.002, settle: 1, settleMin: 0.9,
@@ -229,6 +232,24 @@ export const TUNING = deepFreeze({
     shotBlocked: [0.3, 0.6] as [number, number],
     scoreSoft: 0.5,
   },
+
+  /**
+   * Patience (Task 8b, a controller ruling; options.ts patienceOf). Real players do not compute exact expected value:
+   * they wait for a good enough look. In the zone he attacks, the puck is worth to the carrier at least patience * the
+   * best look the possession can realistically still produce: the worth of the puck in the low slot, `look` m out from
+   * the net (threat there). It holds for where he is and for every spot in the zone an option leads to, so it is in
+   * every option comparison alike and not in the shot's own value: a shot that does not score gives up part of a
+   * possession worth that much, a risky pass or carry risks it.
+   * patience = (base - perShoot * (his shoot tendency - 0.5)) * situation * tacticFactor, within [0, max]:
+   * - a shooter is less patient (perShoot);
+   * - situation: what the possession can still produce. On an odd-man rush, `rush`. Otherwise from `alone` (none of his
+   *   team in the zone with him: a lone rush builds nothing better) up to `setUp` once `setUp` teammates are in the zone
+   *   (men in their jobs can produce a slot chance). On a breakaway there is no floor (his carry is worth its own end);
+   * - tacticFactor: 1 until Task 11's offensive-zone tactic sets it (cycle low more patient, shoot from the point less,
+   *   rush least).
+   * Set once so Task 8b's guards pass; Task 14 tunes it to NHL attempt numbers (see task-8b-report.md).
+   */
+  patience: { base: 1.2, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, tacticFactor: 1, max: 2 },
 
   /**
    * Score effects (team-play.ts scoreMargin, brain, poke checks), kept to real-hockey size. A margin is comfortable from
@@ -311,6 +332,17 @@ export const TUNING = deepFreeze({
      * `spread` m wide of the post on his aiming side, or (highShare of them) that far over the bar.
      */
     wild: { base: 0.06, perPoint: 0.002, pressure: 0.15, perMetre: 0.004, clear: 0.12, spread: 0.6, highShare: 0.3 },
+    /**
+     * A rushed shot (Task 8b; actions.ts shotRush): with a checker within `reach` m of him the shooter has no time. How
+     * rushed, 0 to 1: (reach - the checker's distance) / (reach - full), so fully at `full` m or closer. Fully rushed, it
+     * leaves at 1 - speed of its speed, with 1 + spread times its spread and `wild` more chance of missing the net outright,
+     * aimed 1 - aim as far from the middle of the net (he just gets it on net);
+     * and the checker gets his stick on it with chance (stick.base + stick.perPoint * (stickChecking - 50)) * how rushed
+     * (within [0.03, 0.97]): stick.block of those are blocked at his stick (a `block`), the rest go on deflected wide at
+     * stick.keep of their speed. The valuation (options.ts) takes the same stick chance off the shot's chance to score,
+     * and `value` * how rushed more for the lost speed and accuracy (set from play: see task-8b-report.md).
+     */
+    rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.6, wild: 0.15, aim: 0.6, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.5 },
     /** Shooters aim this far (m) from the centre of the net, either side, and this high. */
     aimY: [0.3, 0.65] as [number, number],
     aimZ: [0.1, 0.8] as [number, number],

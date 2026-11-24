@@ -14,6 +14,7 @@
 import { createGame } from '../src/game';
 import { movementOf, bodyRadius } from '../src/skating';
 import { RINK } from '../src/rink';
+import { TUNING } from '../src/tuning';
 import { listOptions, readSituation, topKindShare, type Option } from '../src/options';
 import { BRAIN_INTERVAL_TICKS } from '../src/constants';
 import { DT } from '../src/constants';
@@ -38,7 +39,8 @@ export type PlayCounterKey =
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
   | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals'
   | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
-  | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear';
+  | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear'
+  | 'attemptsInReach' | 'attemptsOddManFar' | 'attemptsOddManClose' | 'attemptsLowClose' | 'attemptsLowFar' | 'attemptsNormalFar' | 'attemptsNormalClose' | 'attemptsBreakaway' | 'attemptsOther';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -57,6 +59,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
   'netFrontHolds', 'netFrontHoldsLong', 'pointShotSaves', 'pointShotSavesNear',
+  'attemptsInReach', 'attemptsOddManFar', 'attemptsOddManClose', 'attemptsLowClose', 'attemptsLowFar', 'attemptsNormalFar', 'attemptsNormalClose', 'attemptsBreakaway', 'attemptsOther',
 ];
 
 /** Counters that hold a largest value, not a sum: games combine by taking the largest. */
@@ -242,6 +245,14 @@ export function createObserver(setup: GameSetup): Observer {
           lastRel = { side: e.side, kind: e.detail.kind };
           if (e.detail.kind !== 'shot' || e.playerId === null) break;
           c.attempts++;
+          // Task 8b: its source (the shooter's situation on the tick before he let it go: carrierMind) and whether a checker
+          // was within stick reach of him then.
+          if (prevShooter !== null && prevShooter.id === e.playerId) {
+            if (prevShooter.near <= TUNING.shot.rushed.reach) c.attemptsInReach++;
+            const far = prevShooter.dNet >= TUNING.options.farShot;
+            c[prevShooter.mode === 'break' ? 'attemptsBreakaway' : prevShooter.mode === 'odd' ? (far ? 'attemptsOddManFar' : 'attemptsOddManClose')
+              : prevShooter.mode === 'low' ? (far ? 'attemptsLowFar' : 'attemptsLowClose') : prevShooter.mode === 'normal' ? (far ? 'attemptsNormalFar' : 'attemptsNormalClose') : 'attemptsOther']++;
+          } else c.attemptsOther++;
           const s = skaterById(st, e.playerId);
           if (s && (s.slot === 'LD' || s.slot === 'RD')) c.defenceAttempts++;
           if (lastSave !== null && e.side === lastSave.attack && tick - lastSave.tick <= REBOUND_TICKS) c.reboundChances++;
@@ -417,6 +428,7 @@ export function createObserver(setup: GameSetup): Observer {
    * breakaway (options.ts readSituation: a clear path to the net past his own blue line, nobody within 4 m of him)
    * for the next tick's passes.
    */
+  let prevShooter: { id: string; mode: string; dNet: number; near: number } | null = null;
   function carrierMind(st: GameState): void {
     const plan = st.phase === 'live' ? st.carrierPlan ?? null : null;
     if (plan !== null && plan.tick === st.tick) {
@@ -425,9 +437,12 @@ export function createObserver(setup: GameSetup): Observer {
     }
     prevPlan = plan === null ? null : { id: plan.id, kind: plan.kind, lane: plan.lane };
     const cs = st.phase === 'live' ? skaterById(st, st.carrierId) : undefined;
-    if (cs === undefined) { prevBreakaway = null; return; }
+    if (cs === undefined) { prevBreakaway = null; prevShooter = null; return; }
     const rx = rxOf(st, cs.side, cs.pos.x);
     const sit = readSituation(st, cs);
+    let near = Infinity;
+    for (const o of st.skaters) if (o.onIce && o.side !== cs.side && o.downT === 0) near = Math.min(near, Math.hypot(o.pos.x - cs.pos.x, o.pos.y - cs.pos.y));
+    prevShooter = { id: cs.id, mode: sit.breakaway ? 'break' : sit.oddMan ? 'odd' : sit.behindNet ? 'behind' : sit.pressuredLow ? 'low' : 'normal', dNet: Math.hypot(RINK.goalLineX - sit.rx, sit.ly), near };
     const clear = sit.breakaway;
     // A decision point in normal mode (no situation rule applies), sampled on the brain's cadence: the share of the
     // draw its most likely kind of option gets.

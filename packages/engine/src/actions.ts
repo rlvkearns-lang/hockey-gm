@@ -218,6 +218,31 @@ export function shotTypeFor(state: GameState, s: SkaterState, shoots: 'L' | 'R',
   return 'wrist';
 }
 
+/** shotRush's result (scratch): how rushed he is (0 to 1), the checker, and the chance his stick gets on the shot. */
+export type ShotRush = { rushed: number; checker: SkaterState | null; stick: number };
+const rushScratch: ShotRush = { rushed: 0, checker: null, stick: 0 };
+
+/**
+ * How rushed a shot by `s` is now (Task 8b, TUNING.shot.rushed): his nearest standing opponent within `reach` m is the
+ * checker on him; `rushed` rises from 0 at `reach` to 1 at `full` m or closer, and the checker's stick gets on the shot
+ * with chance (stick.base + stick.perPoint * (stickChecking - 50)) * rushed, within [0.03, 0.97] (0 with no checker).
+ * Written into `out` (a shared scratch by default). executeShot plays it; options.ts values it.
+ */
+export function shotRush(state: GameState, s: SkaterState, defs: Map<string, PlayerDef>, out: ShotRush = rushScratch): ShotRush {
+  const R = SHOT.rushed;
+  let near: SkaterState | null = null, nd = R.reach;
+  for (const o of state.skaters) {
+    if (!o.onIce || o.side === s.side || o.downT > 0) continue;
+    const d = hypot2(o.pos.x - s.pos.x, o.pos.y - s.pos.y);
+    if (d < nd) { nd = d; near = o; }
+  }
+  out.checker = near;
+  if (near === null) { out.rushed = 0; out.stick = 0; return out; }
+  out.rushed = clamp((R.reach - nd) / (R.reach - R.full), 0, 1);
+  out.stick = clamp((R.stick.base + R.stick.perPoint * ((defs.get(near.id)?.attrs.stickChecking ?? 50) - 50)) * out.rushed, 0.03, 0.97);
+  return out;
+}
+
 /**
  * Shoot at the attacked net: aim at a spot inside it (more often on the side the goalie leaves open), missed by a
  * normal spread from shootingAccuracy, distance and pressure, or now and then mishit wide or high (TUNING.shot.wild).
@@ -225,7 +250,8 @@ export function shotTypeFor(state: GameState, s: SkaterState, shoots: 'L' | 'R',
  * or shotTypeFor when not given) scales its speed and spread (TUNING.shot.types); a wraparound goes along the ice at the
  * near post at TUNING.shot.types.wraparound.speed. No event yet: the release is recorded in `state.shotInFlight`, and
  * what happens to the puck decides whether it is a shot on goal, a miss, a post or a block. Its `release` event (with its
- * type) goes into `out`.
+ * type) goes into `out`. With a checker in stick reach it is rushed (Task 8b, shotRush): slower, wilder, and the checker's
+ * stick may block it as it leaves (a `block` at once, the puck loose off his stick) or deflect it wide.
  */
 export function executeShot(state: GameState, shooterId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = [], shotType?: ShotType): void {
   const s = skaterById(state, shooterId);
@@ -248,31 +274,53 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
     state.shotInFlight = newShot(state, shooterId, s.side, from, d, type);
     return;
   }
+  const rush = shotRush(state, s, defs);
+  const rushed = rush.rushed, checker = rush.checker;
+  // The checker's stick on it: blocked at his stick, or deflected wide.
+  const sticked = checker !== null && rng.chance(rush.stick);
+  const stickBlock = sticked && rng.chance(SHOT.rushed.stick.block);
   const sigma = (SHOT.spread.base + (100 - a.shootingAccuracy) * SHOT.spread.perPoint + d * SHOT.spread.perMetre
-    + pressure * SHOT.spread.pressure) * TYPE_SPREAD[type];
+    + pressure * SHOT.spread.pressure) * TYPE_SPREAD[type] * (1 + SHOT.rushed.spread * rushed);
   const shade = goalieShade(state, s.side);
   const openSide = shade > 0 ? -1 : 1;
   const aimSide = rng.chance(clamp(0.5 + Math.abs(shade) * SHOT.openSidePull, 0.5, SHOT.openSideMax)) ? openSide : -openSide;
   // A weaker shooter aims nearer the middle: he just wants it on net.
-  const aimY = aimSide * rng.range(SHOT.aimY[0], SHOT.aimY[1]) * (SHOT.aimReach.base + SHOT.aimReach.perPoint * a.shootingAccuracy);
+  const aimY = aimSide * rng.range(SHOT.aimY[0], SHOT.aimY[1]) * (SHOT.aimReach.base + SHOT.aimReach.perPoint * a.shootingAccuracy) * (1 - SHOT.rushed.aim * rushed);
   const aimZ = rng.range(SHOT.aimZ[0], SHOT.aimZ[1]);
   let y = aimY + rng.gauss() * sigma;
   let z = Math.max(0.02, aimZ + rng.gauss() * sigma * 0.7);
   // Besides that spread, some shots are mishit or rushed and miss the net outright, wide of the post he aimed beside
   // or over the bar (more often for a poor shooter under pressure, from far out): most missed shots come from here.
   const W = SHOT.wild;
-  if (rng.chance(clamp(W.base + (100 - a.shootingAccuracy) * W.perPoint + pressure * W.pressure + d * W.perMetre, 0.03, 0.97))) {
+  if (rng.chance(clamp(W.base + (100 - a.shootingAccuracy) * W.perPoint + pressure * W.pressure + d * W.perMetre + rushed * SHOT.rushed.wild, 0.03, 0.97)) || (sticked && !stickBlock)) {
     const by = W.clear + Math.abs(rng.gauss()) * W.spread;
     if (rng.chance(W.highShare)) z = RINK.netHeight + by;
     else y = aimSide * (RINK.netHalfWidth + by);
   }
-  const speed = (SHOT.speed.base + a.shootingPower * SHOT.speed.perPoint) * TYPE_SPEED[type];
+  const speed = (SHOT.speed.base + a.shootingPower * SHOT.speed.perPoint) * TYPE_SPEED[type] * (1 - SHOT.rushed.speed * rushed) * (sticked ? SHOT.rushed.stick.keep : 1);
   const dx = netX - p.x, dy = y - p.y;
   const l = hypot2(dx, dy) || 1;
   const t = l / speed;
   // Lifted to arrive at height z, but never harder than MAX_SHOT_LIFT (from beside the net that would launch it skyward).
   release(state, s, (dx / l) * speed, (dy / l) * speed, Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * t * t) / t), out, 'shot', null, type);
-  state.shotInFlight = newShot(state, shooterId, s.side, from, d, type);
+  const shot = newShot(state, shooterId, s.side, from, d, type);
+  if (stickBlock && checker !== null) {
+    // Blocked at the checker's stick as it leaves his blade: the puck stays where it was let go and comes off the stick
+    // loose, as off a blocker's body (TUNING.block.keep and spread); the attempt ends here.
+    const pk = state.puck;
+    const v = speed * rng.range(TUNING.block.keep[0], TUNING.block.keep[1]);
+    const ang = datan2(pk.vel.y, pk.vel.x) + Math.PI + rng.range(-TUNING.block.spread, TUNING.block.spread);
+    pk.vel.x = dcos(ang) * v;
+    pk.vel.y = dsin(ang) * v;
+    pk.z = 0;
+    pk.vz = 0;
+    state.lastTouch = { id: checker.id, side: checker.side };
+    recordTouch(state, checker.id, checker.side);
+    blockPickup(state, [shooterId, checker.id]);
+    out.push(gameEvent(state, { type: 'block', side: checker.side, playerId: checker.id, otherId: shooterId, pos: pk.pos, detail: { distance: d, releaseTick: state.tick } }));
+    return;
+  }
+  state.shotInFlight = shot;
 }
 
 /** A shot just released: a rebound shot when released within TUNING.rebound.windowSeconds of a save on that net (Task 8). */

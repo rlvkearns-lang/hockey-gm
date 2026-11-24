@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { decideCarrier } from '../src/brain';
+import { brainTick, decideCarrier } from '../src/brain';
 import { createRng } from '../src/rng';
 import type { GameState } from '../src/types';
-import { def, defs, heldFor, meanMiss, place, playmaker, rate, slotState, sniper, stateWith, withScore } from './helpers';
+import { def, defs, heldFor, meanMiss, place, playmaker, rate, skater, slotState, sniper, stateWith, withScore } from './helpers';
 
 /**
  * Home C with the puck high in the zone at (14, 4), the two away defencemen low by the net and the rest of them away
@@ -61,5 +61,46 @@ describe('player brain', () => {
     };
     const low = receivers(20), high = receivers(95);
     expect(low).toBeLessThanOrEqual(1); expect(high).toBeGreaterThan(low + 0.5);
+  });
+});
+
+describe('decision points do not flicker (Task 8b)', () => {
+  /**
+   * The home LW carries low on the wall for `seconds`, the puck put back on his stick whenever he lets it go (his plan
+   * is kept), with the away LD `far` (6 m off) or on him (1.4 m off) as `where(t)` says: each decision's trigger.
+   */
+  function triggers(seconds: number, where: (t: number) => 'far' | 'on'): string[] {
+    const st = stateWith({ carrier: 'home', puckX: 22, puckY: 9, carrierSlot: 'LW' });
+    place(st, 'home:C', 24.5, 0.5); place(st, 'home:RW', 18, -9); place(st, 'home:LD', 10, 7); place(st, 'home:RD', 10, -7);
+    place(st, 'away:RD', 24.5, -2); place(st, 'away:C', 18, 0); place(st, 'away:LW', 12, 4); place(st, 'away:RW', 12, -5);
+    const lw = skater(st, 'home', 'LW'), ld = skater(st, 'away', 'LD');
+    const home = { x: lw.pos.x, y: lw.pos.y }, puck = { x: st.puck.pos.x, y: st.puck.pos.y };
+    const rng = createRng(5); const why: string[] = [];
+    for (let t = 0; t < Math.round(seconds * 30); t++) {
+      st.tick++;
+      // Everyone stays where he is: only the checker comes and goes.
+      lw.pos = { ...home }; lw.vel = { x: 0, y: 0 }; st.puck.pos = { ...puck }; st.puck.vel = { x: 0, y: 0 };
+      ld.pos = where(t / 30) === 'on' ? { x: home.x + 1.0, y: home.y - 1.0 } : { x: home.x - 1, y: home.y - 6 };
+      st.carrierId = 'home-LW'; st.pendingPass = null; st.shotInFlight = null; st.pickupBlock = null; st.phase = 'live';
+      brainTick(st, defs, rng, []);
+      const plan = st.carrierPlan;
+      if (plan !== null && plan.tick === st.tick) why.push(plan.why ?? '?');
+      // What he let go comes back to him; his plan stays his.
+      if (st.carrierId === null && plan !== null) { st.carrierId = 'home-LW'; st.carrierPlan = plan; }
+    }
+    return why;
+  }
+  it('a checker who arrives and stays within reach for 3 s is one pressure decision, and steady pressure is under 1.5 decisions a second', () => {
+    const why = triggers(4, (t) => (t >= 1 ? 'on' : 'far'));
+    expect(why.filter((w) => w === 'pressure').length).toBe(1);
+    const steady = triggers(6, () => 'on');
+    expect(steady.filter((w) => w === 'pressure').length).toBe(0);
+    expect(steady.length / 6).toBeLessThan(1.5); expect(steady.length).toBeGreaterThanOrEqual(1);
+  });
+  it('pressure that leaves is no decision point, and a checker hovering at the edge of reach does not re-trigger', () => {
+    // On him for a second, then gone: one arrival, nothing when he leaves.
+    expect(triggers(4, (t) => (t >= 1 && t < 2 ? 'on' : 'far')).filter((w) => w === 'pressure').length).toBe(1);
+    // In and out every 0.2 s for 3 s: the cooldown lets through at most one arrival a second and a half.
+    expect(triggers(4, (t) => (t >= 1 && Math.floor(t * 5) % 2 === 0 ? 'on' : 'far')).filter((w) => w === 'pressure').length).toBeLessThanOrEqual(2);
   });
 });

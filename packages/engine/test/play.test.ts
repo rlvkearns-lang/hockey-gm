@@ -229,3 +229,16 @@ describe('A2/A4: the net front (Task 8 fix round 2)', () => {
     const c = counters(); expect(c.pointShotSaves).toBeGreaterThan(30); expect(c.pointShotSavesNear / c.pointShotSaves).toBeGreaterThanOrEqual(0.4);
   }, 60_000);
 });
+
+describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
+  it('A3: the carrier decides at most 3,200 times a game (was 5,300; 6,700 on a clock)', () => { expect(counters().carrierDecisions / 3).toBeLessThanOrEqual(3200); }, 60_000);
+  it('A4: a pressured shot is a poor shot: under 20% of attempts are let go with a checker in stick reach (was 49%)', () => {
+    const c = counters(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.20);
+  }, 60_000);
+  it('A4: no source floods the net: odd-man rushes from 11 m or more, pressure down low in close and normal play from 11 m or more are each under 25 attempts a game (were 42, 97 and 45)', () => {
+    const c = counters();
+    expect(c.attemptsOddManFar / 3).toBeLessThan(25); expect(c.attemptsLowClose / 3).toBeLessThan(25); expect(c.attemptsNormalFar / 3).toBeLessThan(25);
+    // The sources are reported whole: every attempt has one.
+    expect(c.attemptsOddManFar + c.attemptsOddManClose + c.attemptsLowClose + c.attemptsLowFar + c.attemptsNormalFar + c.attemptsNormalClose + c.attemptsBreakaway + c.attemptsOther).toBe(c.attempts);
+  }, 60_000);
+});

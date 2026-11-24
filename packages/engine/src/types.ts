@@ -123,6 +123,19 @@ export type CarrierPlan = {
   until?: number;
   /** Whether he was under pressure (TUNING.brain.decide.pressed) when he chose it. */
   pressed?: boolean;
+  /**
+   * Task 8b: what made his last decision (brain.ts): 'gain' (he got the puck), 'read' (his situation changed), 'hold'
+   * (his plan's minimum hold ran out), 'pressure' (a checker arrived), 'arrive' (his carry's target reached) or 'better'
+   * (an option clearly better than his plan, or his plan gone from his list).
+   */
+  why?: 'gain' | 'read' | 'hold' | 'pressure' | 'arrive' | 'better';
+  /**
+   * Task 8b: the checker on him (an opponent who came within TUNING.brain.decide.pressIn m and has not gone beyond
+   * pressOut m since), or null. Pressure arriving is a decision point once: not again while this man stays on him, and
+   * not before tick `pressUntil` (the trigger's cooldown).
+   */
+  checker?: string | null;
+  pressUntil?: number;
 };
 /** A team's committed phase (commit.ts): it follows the raw phase only once that has differed for TUNING.commit.phaseDelay (`pending` since `pendingTick`). */
 export type TeamPhaseState = { phase: TeamPhase; sinceTick: number; pending: TeamPhase | null; pendingTick: number };

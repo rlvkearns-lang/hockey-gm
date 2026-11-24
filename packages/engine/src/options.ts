@@ -17,7 +17,7 @@
  * Positions here are attack-relative for the carrier's side: rx toward the net he attacks (goal line 27.13, blue line
  * 7.62), ly to his left.
  */
-import { goalieShade as goalieShade_, pressureOn as pressureOn_ } from './actions';
+import { goalieShade as goalieShade_, pressureOn as pressureOn_, shotRush as shotRush_ } from './actions';
 import { composite as composite_ } from './attributes';
 import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { planOf as planOf_ } from './commit';
@@ -37,6 +37,7 @@ import type { Vec2 } from './vec';
 // in a module on an import cycle: this one is not on one (options imports nothing that imports it).
 const goalieShade = goalieShade_;
 const pressureOn = pressureOn_;
+const shotRush = shotRush_;
 const composite = composite_;
 const DT = DT_;
 const PERIOD_SECONDS = PERIOD_SECONDS_;
@@ -146,6 +147,13 @@ const TRAFFIC_NEAR = O.trafficNear;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */
 const CARRY_IN_ZONE = 5;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
+/** Patience (Task 8b, TUNING.patience). */
+const PT = TUNING.patience;
+/** The best look a possession can realistically still produce: the worth of the puck in the low slot, PT.look m out. */
+const PROSPECT = threat(GOAL - PT.look, 0);
+/** The share of the possession a shot gives up when it does not score (a saved or wide shot against a carry: TUNING.value.after). */
+const SHOT_GIVES_UP = 1 - (2 * SAVED_KEEP + TUNING.value.after.wide.keep / TUNING.value.after.carry.keep) / 3;
+const RU = TUNING.shot.rushed;
 const PROTECTING = { puckHandling: 0.5, strength: 0.5 };
 
 const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);
@@ -205,6 +213,24 @@ function defenderGoalSide(state: GameState, s: SkaterState): boolean {
   return false;
 }
 
+/**
+ * How patient the carrier is with the puck in the zone he attacks (Task 8b, TUNING.patience): base less perShoot per
+ * point of his shoot tendency over 0.5 (a shooter is less patient), times what the possession can still produce (on an
+ * odd-man rush `situation.rush`; otherwise from `situation.alone`, nobody of his in the zone with him, up to
+ * `situation.setUp` with `setUp` teammates in it), times tacticFactor (Task 11's offensive-zone tactic), within [0, max].
+ * The puck in the zone is then worth at least patience * PROSPECT to him (listOptions).
+ */
+export function patienceOf(state: GameState, s: SkaterState, me: PlayerDef, oddMan: boolean): number {
+  let by: number = PT.situation.rush;
+  if (!oddMan) {
+    const dir = state.attackDir[s.side];
+    let mates = 0;
+    for (const m of state.skaters) if (m.onIce && m.side === s.side && m !== s && !m.leaving && m.pos.x * dir > BLUE) mates++;
+    by = PT.situation.alone + (PT.situation.setUp - PT.situation.alone) * clamp(mates / PT.setUp, 0, 1);
+  }
+  return clamp((PT.base - PT.perShoot * (me.tendencies.shoot - 0.5)) * by * PT.tacticFactor, 0, PT.max);
+}
+
 /** The carrier's situation now, written into `out`. */
 export function readSituationInto(state: GameState, s: SkaterState, out: Situation): Situation { return readInto(state, s, out); }
 
@@ -250,7 +276,25 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const outside = rx <= BLUE;
   const mode = sit.breakaway ? 'break' : sit.oddMan ? 'odd' : sit.behindNet ? 'behind' : sit.pressuredLow ? 'low' : 'normal';
 
-  const here = threat(rx, ly) * (0.6 + 0.4 * (1 - pressure));
+  // Patience (Task 8b): in the zone he attacks (no breakaway: there his carry is worth the chance at its end) the puck is
+  // worth at least `floor`, his patience times the best look the possession can still produce. The same floor holds for
+  // every spot in the zone an option leads to (keepAt, worthAt), so it shifts every comparison alike: an option is worth
+  // taking for what it adds to, or risks of, a possession worth that much.
+  const floor = rx > BLUE && mode !== 'break' ? patienceOf(state, s, me, sit.oddMan) * PROSPECT : 0;
+  const spot = threat(rx, ly) * (0.6 + 0.4 * (1 - pressure));
+  const here = spot > floor ? spot : floor;
+  /** A spot in the zone worth `v` by itself is worth at least the floor. */
+  const keepAt = (v: number, drx: number): number => (drx > BLUE && v < floor ? floor : v);
+  /**
+   * What the puck is worth at a spot in the zone worth `v` by itself, from which a shot would score with chance `gd`: with
+   * the floor, at least the floor plus what that shot adds to it (it gives up SHOT_GIVES_UP of the possession when it
+   * does not score): he sees the good look a pass or a carry leads to.
+   */
+  const worthAt = (v: number, gd: number, drx: number): number => {
+    if (floor === 0 || drx <= BLUE) return v;
+    const w = floor + Math.max(0, gd - SHOT_GIVES_UP * floor);
+    return w > v ? w : v;
+  };
   // In the zone he attacks, a pass or carry that fails is often won back (Task 8 fix round, measured: TUNING.value.after):
   // it loses the share of the possession's continuation that a failed pass loses, and their rushes the other way.
   // Elsewhere it gives up what he has here and the other side's threat from the spot.
@@ -280,6 +324,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   // ---- shoot ----
   const shootSkill = B.shootSkill.base + composite(a, SHOOTING) * B.shootSkill.perPoint;
   let g = 0, shootScore = 1, pBlock = 0, traffic = false;
+  const rush = shotRush(state, s, defs);
+  const rushed = rush.rushed, rushStick = rush.stick;
   const dNet = hyp(GOAL - rx, ly);
   const shootAllowed = mode === 'break' ? dNet < BREAKAWAY_SHOT : mode !== 'behind';
   if (shootAllowed) {
@@ -293,6 +339,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const late = state.period >= PERIODS && lead === -1 ? 1 - state.clock / PERIOD_SECONDS : 0;
       const scoreShoot = margin === 'ahead' ? se.leaderShoot : Math.min(se.maxShoot, (margin === 'behind' ? se.trailerShoot : 1) * (1 + se.latePush * late));
       g = V.goal * q * shootSkill * (B.openNetWeight[0] + B.openNetWeight[1] * open) * dpow(calm, B.shootPressure);
+      // A rushed shot (Task 8b, actions.ts shotRush: a checker in stick reach): his stick gets on it with chance
+      // rush.stick, and what gets by him is slower and wilder (RU.value of its chance at full rush).
+      g *= (1 - rushStick) * (1 - RU.value * rushed);
       tw.x = GOAL * dir; tw.y = 0;
       const sw = laneWidth(state, side, p, tw);
       traffic = netFrontMate(state, s);
@@ -322,7 +371,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // worth TUNING.value.oneTimerBonus more.
     if (g > 0) {
       const gc = clamp(g, 0, 0.97);
-      const fail = shotAfter(state, s, me, defs, gc, pBlock, traffic, dNet, pressure, here);
+      const fail = shotAfter(state, s, me, defs, gc, pBlock, traffic, dNet, pressure, here, rushed, rushStick);
       let v = habit(gc * (1 - here) + fail - (1 - gc) * here, tend.shoot);
       v = v >= 0 ? v * shootScore : v / shootScore;
       const ot = state.oneTimerTaken;
@@ -376,12 +425,14 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (space < L.space) chance *= O.pass.crowded + space / O.pass.crowdedPer;
     chance = clamp(chance, 0.03, 0.97);
     // A pass across the front of the net makes the goalie move: the receiver's shot is worth more (O.pass.across).
-    let to = threat(mrx, mly) * openAt(space);
-    const qm = shotQuality(mrx, mly);
+    const qm = shotQuality(mrx, mly), opn = openAt(space);
+    let to = threat(mrx, mly) * opn;
     if (qm > 0 && rx > BLUE) {
       const rd = defs.get(m.id);
-      to += V.goal * O.pass.across * qm * clamp(Math.abs(mly - ly) / O.pass.acrossFull, 0, 1) * (rd ? B.shootSkill.base + composite(rd.attrs, SHOOTING) * B.shootSkill.perPoint : 1);
-    }
+      const gm = V.goal * qm * (rd ? B.shootSkill.base + composite(rd.attrs, SHOOTING) * B.shootSkill.perPoint : 1);
+      to = worthAt(to, gm * B.openNetWeight[0] * opn, mrx);
+      to += gm * O.pass.across * clamp(Math.abs(mly - ly) / O.pass.acrossFull, 0, 1);
+    } else to = keepAt(to, mrx);
     let v = valueOf(chance, to);
     // From inside the zone, a pass out to a man at or outside the line, who will carry it back in while the passer
     // (and whoever else) is still inside, puts them offside.
@@ -416,9 +467,11 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // A carry that ends inside DEKE_FROM of the net ends in a deke, with the goalie to beat at close range: V.deke of it.
     // (Task 8 fix round 2: valued as the shot is, so the shot that ends it keeps what a saved shot keeps, not nothing.)
     const gEnd = V.goal * shotQuality(trx, tly) * shootSkill * B.openNetWeight[0] * (hyp(GOAL - trx, tly) < DEKE_FROM ? V.deke : 1);
-    const to = mode === 'break'
-      ? gEnd + (1 - gEnd) * endKeep(a.shootingAccuracy, hyp(GOAL - trx, tly)) * threat(trx, tly)
-      : threat(trx, tly) * openAt(spaceAt(state, side, tw));
+    let to: number;
+    // (Task 8b: what the shot at its end keeps is a share of the possession he has now, `here`, as for the shot option;
+    // the worth of the spot at its end counted that shot a second time.)
+    if (mode === 'break') to = gEnd + (1 - gEnd) * endKeep(a.shootingAccuracy, hyp(GOAL - trx, tly)) * here;
+    else { const opn = openAt(spaceAt(state, side, tw)); to = worthAt(threat(trx, tly) * opn, gEnd * opn, trx); }
     let v = valueOf(chance, to);
     v = habit(v, tend.carry) - moveOn;
     out.push({ kind: 'carry', lane, to: { x: tw.x + 0, y: tw.y + 0 }, value: v });
@@ -458,10 +511,14 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     const w = laneWidth(state, side, s.pos, tw);
     const chance = clamp(O.wrap.base - pressure * O.wrap.pressure - (w < O.wrap.laneFrom ? (O.wrap.laneFrom - w) * O.wrap.laneCost : 0), 0.03, 0.97);
     const wrapG = V.goal * O.wrap.goal * clamp(gd / O.wrap.open, 0.1, 1) * shootSkill;
-    const v = habit(valueOf(chance, wrapG), tend.carry) - moveOn;
+    // A wrap ends in a shot: it scores, or keeps what a shot that does not score keeps of the possession (Task 8b).
+    const v = habit(valueOf(chance, wrapG + (1 - wrapG) * (1 - SHOT_GIVES_UP) * here), tend.carry) - moveOn;
     out.push({ kind: 'carry', lane: 'wrap', to: { x: tw.x + 0, y: tw.y + 0 }, value: v });
   } else {
-    if (mode !== 'low') {
+    // Pressured low (Task 8b): he can skate it away from the man on him toward the corner (it was shoot or protect only
+    // off the wall: 97 attempts a game came from there).
+    if (mode === 'low') carry('wide', Math.min(srx + CARRY_IN_ZONE, GOAL - 1), ps * Math.min(Math.abs(sly) + 3, 10.5));
+    else {
       if (sit.zone === 'O') {
         const tx = GOAL - NET_LANE_OUT, l = hyp(tx - srx, -sly) || 1, k = Math.min(1, CARRY_IN_ZONE / l);
         carry('net', srx + (tx - srx) * k, sly - sly * k);
@@ -492,7 +549,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     tw.x = drx * dir; tw.y = dly * dir;
     // Round the boards to nobody is a puck thrown away unless his team is nearer it: O.blindRim of the race.
     const chance = clamp(race(state, s, tw, to) * (to === null ? O.blindRim : 1), 0.03, 0.97);
-    const v = habit(valueOf(chance, threat(drx, dly) * openAt(spaceAt(state, side, tw))), tend.pass);
+    const v = habit(valueOf(chance, keepAt(threat(drx, dly) * openAt(spaceAt(state, side, tw)), drx)), tend.pass);
     out.push({ kind: 'rim', toId: to === null ? null : to.id, value: v });
   }
 
@@ -517,7 +574,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   }
 
   // ---- protect ----
-  if (mode === 'normal' || mode === 'low') {
+  // (Task 8b: on an odd-man rush too. With a man on him he can shield it and wait for help; it was shoot or carry on.)
+  if (mode === 'normal' || mode === 'low' || mode === 'odd') {
     const keep = clamp(O.protect.base - pressure * (O.protect.loss - O.protect.lossPerPoint * composite(a, PROTECTING)), 0.03, 0.97);
     // Unpressured, shielding the puck only stands still: it costs O.protect.idle * (1 - pressure).
     out.push({ kind: 'protect', value: valueOf(keep, here) - moveOn - O.protect.idle * (1 - pressure) });
@@ -547,19 +605,23 @@ const POSES_ALL: readonly SavePose[] = ['glove', 'blocker', 'pad', 'butterfly'];
  * follow it of its chance times its value. Each outcome keeps a measured share of the possession's continuation (`here`,
  * the same spot value every option uses) and gives the other side a measured share of rushes the other way, worth their
  * threat from centre ice times turnoverCost (TUNING.value.after, measured in play: what follows a carry in the zone is the
- * baseline). The outcomes: blocked (`pBlock`); wide (TUNING.shot.wild's chance for him here; a miss or a post); saved,
+ * baseline). The outcomes: blocked (`laneBlock`, or by the stick of the checker rushing him); wide (TUNING.shot.wild's chance for him here; a miss or a post); saved,
  * split as rebounds.ts saveOutcomeChances does for this goalie (averaged over his poses; screened with a teammate in
  * front): held, steered, or a rebound, whose share is scaled by who is nearer the rebound spot now (0.5 + REBOUND_EDGE
  * per metre, within [0.1, 0.9], against an even 0.5).
  */
-function shotAfter(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, gc: number, pBlock: number, traffic: boolean, dNet: number, pressure: number, here: number): number {
+function shotAfter(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, gc: number, laneBlock: number, traffic: boolean, dNet: number, pressure: number, here: number, rushed: number, rushStick: number): number {
   const side = s.side, opp: Side = side === 'home' ? 'away' : 'home';
   const a = me.attrs, W = TUNING.shot.wild, AF = V.after;
-  const wide = (1 - pBlock) * clamp(W.base + (100 - a.shootingAccuracy) * W.perPoint + pressure * W.pressure + dNet * W.perMetre, 0.03, 0.97);
+  // A rushed shot (Task 8b): the checker's stick blocks RU.stick.block of the shots it gets on and deflects the rest wide;
+  // what gets by him is wilder (RU.wild) and slower (RU.speed).
+  const pBlock = rushStick * RU.stick.block + (1 - rushStick) * laneBlock;
+  const wide = rushStick * (1 - RU.stick.block)
+    + (1 - rushStick) * (1 - laneBlock) * clamp(W.base + (100 - a.shootingAccuracy) * W.perPoint + pressure * W.pressure + dNet * W.perMetre + rushed * RU.wild, 0.03, 0.97);
   const saved = Math.max(0, 1 - gc - pBlock - wide);
   const gd = defs.get(state.goalies[opp].id);
   const rc = gd?.goalie?.reboundControl ?? 70;
-  const speed = TUNING.shot.speed.base + TUNING.shot.speed.perPoint * a.shootingPower;
+  const speed = (TUNING.shot.speed.base + TUNING.shot.speed.perPoint * a.shootingPower) * (1 - RU.speed * rushed);
   let held = 0, steered = 0, rebound = 0;
   for (const pose of POSES_ALL) {
     const c = saveOutcomeChances({ pose, speed, screened: traffic, tipped: false, reboundControl: rc });

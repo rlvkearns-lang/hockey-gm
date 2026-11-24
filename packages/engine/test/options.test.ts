@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { chooseOption, listOptions, readSituation, threat, topKindShare, type Option } from '../src/options';
 import { decideCarrier, type Decision } from '../src/brain';
 import { contestTick } from '../src/contests/core';
-import { executeRim } from '../src/actions';
+import { executeRim, executeShot } from '../src/actions';
 import { crossesEndBox } from '../src/lanes';
 import { DT } from '../src/constants';
 import { createRng } from '../src/rng';
-import type { GameState, PlayerDef, SkaterState } from '../src/types';
+import type { GameState, Job, PlayerDef, SkaterState } from '../src/types';
+import { eventsOf, flyShot, withGoalies } from './shot-lab';
 import { def, defs, firstLook, place, playmaker, skater, slotState, sniper, stateWith } from './helpers';
 
 /** His first look (helpers.ts firstLook: the seeded path a game takes) for seeds 1..n with `d` (given the carrier's id and slot) as the carrier in `st`. */
@@ -223,4 +224,51 @@ describe('behind the net', () => {
     contestTick(st, defs, createRng(1), DT);
     expect(st.contests.filter((c) => c.kind === 'boardBattle').length).toBe(1);
   });
+});
+
+describe('patience and pressured shots (Task 8b)', () => {
+  const setJob = (st: GameState, id: string, job: Job): void => { st.plans[st.skaters.findIndex((k) => k.id === id)]!.job = job; };
+  /**
+   * A set-up possession in the zone: all five home skaters in it, in their jobs, the away five in a box and one. `who` has
+   * the puck: the left defenceman at the point, 14 m out, nobody within 5 m of him and a clear lane (the net-front man at
+   * the top of the crease with `screen`, in the far corner without), or the centre in the slot, 6.5 m out.
+   */
+  const setUp = (who: 'point' | 'slot', screen = false): GameState => {
+    const st = who === 'point' ? stateWith({ carrier: 'home', puckX: 13.5, puckY: 3, carrierSlot: 'LD' }) : stateWith({ carrier: 'home', puckX: 20.8, puckY: 1.5, carrierSlot: 'C' });
+    if (who === 'point') { place(st, 'home:C', screen ? 25.3 : 26, screen ? 0.3 : -10); setJob(st, 'home-C', screen ? 'netFront' : 'lowSupport'); } else place(st, 'home:LD', 10, 7);
+    place(st, 'home:RD', 9.5, -8); place(st, 'home:LW', 24, 10); place(st, 'home:RW', 17, -10.5);
+    place(st, 'away:LD', 24.5, -3.5); place(st, 'away:RD', 24.5, 4.5); place(st, 'away:C', 19.5, -5.5); place(st, 'away:LW', 12, 9.5); place(st, 'away:RW', 12, -6);
+    return st;
+  };
+  const shoots = (st: GameState, d: PlayerDef = def({})): number => decisions(st, d, 2000).filter((x) => x.kind === 'shoot').length / 2000;
+  it('a set-up possession waits for a good look: from 14 m with nobody in front under 10% shots, at least three times as many with a screen, and at least 60% from the slot with a clear lane', () => {
+    for (const st of [setUp('point'), setUp('point', true), setUp('slot')]) {
+      const sit = readSituation(st, st.skaters.find((k) => k.id === st.carrierId)!);
+      expect(sit.pressure).toBe(0); expect(sit.breakaway || sit.oddMan || sit.pressuredLow || sit.behindNet).toBe(false);
+    }
+    const bare = shoots(setUp('point')), screened = shoots(setUp('point', true)), slot = shoots(setUp('slot'));
+    expect(bare).toBeLessThan(0.10); expect(screened).toBeGreaterThanOrEqual(bare * 3); expect(screened).toBeGreaterThan(0.05); expect(slot).toBeGreaterThanOrEqual(0.60);
+  });
+  it('patience follows the shoot habit: a shooter lets the bare point shot go more often than a pass-first player', () => {
+    const shooter = def({ tendencies: { ...def().tendencies, shoot: 0.9 } }), passer = def({ tendencies: { ...def().tendencies, shoot: 0.2 } });
+    expect(shoots(setUp('point'), shooter)).toBeGreaterThan(shoots(setUp('point'), passer) * 2);
+  });
+  it('a checker in stick reach: he shoots at most half as often, and the shot he does take is slower and on net less', () => {
+    const free = setUp('slot'), pressed = setUp('slot');
+    place(pressed, 'away:C', 20.2, 2.6); // 1.1 m from him, beside him: not in his lane to the net
+    expect(shoots(free)).toBeGreaterThan(0.3); expect(shoots(pressed)).toBeLessThanOrEqual(shoots(free) * 0.5);
+    const taken = (st0: GameState): { speed: number; onNet: number } => {
+      let speed = 0, onNet = 0; const n = 600;
+      for (let seed = 1; seed <= n; seed++) {
+        const st = structuredClone(st0); const ds = withGoalies(); const rng = createRng(seed);
+        executeShot(st, 'home-C', ds, rng, []);
+        speed += Math.hypot(st.puck.vel.x, st.puck.vel.y) / n;
+        const ev = st.shotInFlight === null ? [] : eventsOf(flyShot(st, ds, rng));
+        if (ev.some((e) => e.type === 'shot')) onNet += 1 / n;
+      }
+      return { speed, onNet };
+    };
+    const f = taken(free), pr = taken(pressed);
+    expect(pr.speed).toBeLessThan(f.speed * 0.9); expect(pr.onNet).toBeLessThan(f.onNet * 0.75); expect(pr.onNet).toBeGreaterThan(0.03);
+  }, 60_000);
 });
