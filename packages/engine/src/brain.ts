@@ -1,6 +1,6 @@
 import { atWrapPost as atWrapPost_, executeClear as executeClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
 import { BRAIN_INTERVAL_TICKS as BRAIN_INTERVAL_TICKS_, DT } from './constants';
-import { chooseOption as chooseOption_, listOptions as listOptions_, readSituationInto as readSituationInto_, type Option, type Situation } from './options';
+import { chooseOption as chooseOption_, listOptions as listOptions_, planBeaten as planBeaten_, readSituationInto as readSituationInto_, type Option, type Situation } from './options';
 import { RINK } from './rink';
 import { TUNING as TUNING_ } from './tuning';
 import { steeredByContest as steeredByContest_ } from './team-play';
@@ -20,6 +20,7 @@ const BRAIN_INTERVAL_TICKS = BRAIN_INTERVAL_TICKS_;
 const chooseOption = chooseOption_;
 const listOptions = listOptions_;
 const readSituationInto = readSituationInto_;
+const planBeaten = planBeaten_;
 const TUNING = TUNING_;
 const steeredByContest = steeredByContest_;
 const clamp = clamp_;
@@ -44,11 +45,25 @@ const HOLD_FACE_RX = 20;
 /** brainTick's copy of the carrier's situation (written by decideCarrier, read for his carry speed). */
 const sitScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
 
-const lookScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
-/** The situation as a key: its mode (the rule that narrows his options) and the zone. */
+/** The situation as a key: its mode (the rule that narrows his options), the zone, and whether he is in the slot. */
 function readKey(sit: Situation): string {
   const mode = sit.breakaway ? 'break' : sit.oddMan ? 'odd' : sit.behindNet ? 'behind' : sit.pressuredLow ? 'low' : 'normal';
-  return mode + ':' + sit.zone;
+  const slot = sit.zone === 'O' && sit.rx >= D.slotRx && Math.abs(sit.ly) <= D.slotLy;
+  return mode + ':' + sit.zone + (slot ? ':slot' : '');
+}
+
+const D = TUNING.brain.decide;
+const decideScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
+
+/** Whether the carrier `s`, carrying out `plan`, has reached a decision point (brainTick). */
+function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, plan: CarrierPlan): boolean {
+  const sit = readSituationInto(state, s, decideScratch);
+  if (plan.read === undefined || readKey(sit) !== plan.read) return true;
+  if (plan.until === undefined || state.tick >= plan.until) return true;
+  if (plan.pressed === false && sit.pressure >= D.pressed) return true;
+  if (plan.kind === 'carry' && plan.to !== null && hypot2(plan.to.x - s.pos.x, plan.to.y - s.pos.y) <= D.arrive) return true;
+  const opts = listOptions(state, me, defs, optionScratch, sit);
+  return planBeaten(opts, me, sit, plan, D.margin);
 }
 
 /**
@@ -70,22 +85,25 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
 }
 
 /**
- * Runs the carrier's decision and carries it out: on his first tick with the puck, then every BRAIN_INTERVAL_TICKS once
- * he has carried out his last pick for TUNING.value.lookSeconds or his situation (its mode or zone: readKey) has changed.
- * Writes state.carrierPlan (cleared while nobody carries). Its events (release, and pass) go into `out` (a shot's own
- * event comes when it ends). A carrier steered by a contest (being hit, from impact on) may still pass, shoot, rim,
- * dump or clear, but his skating belongs to the contest, so a carry or protect decision changes nothing.
+ * Runs the carrier's decision and carries it out (Task 8 fix round 2: decisions happen at decision points, not on a
+ * clock). He draws a pick (decideCarrier, the full-temperature draw) when he gains the puck; when his situation changes
+ * (readKey: breakaway, odd-man, behind the net, pressured low; the zone; into the slot); when pressure arrives (it was
+ * under TUNING.brain.decide.pressed at his last pick and is not now); when his carry's target is reached (within
+ * decide.arrive m); when the minimum hold of his plan (CarrierPlan.until) runs out; or when an option he sees is worth
+ * more than his plan by decide.margin (or his plan is gone from his list). He looks for these every `lookTicks` ticks
+ * (BRAIN_INTERVAL_TICKS); between them he carries out his plan. Writes state.carrierPlan (cleared while nobody carries).
+ * Its events (release, and pass) go into `out` (a shot's own event comes when it ends). A carrier steered by a contest
+ * (being hit, from impact on) may still pass, shoot, rim, dump or clear, but his skating belongs to the contest, so a
+ * carry or protect decision changes nothing.
  */
-export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
+export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = [], lookTicks: number = BRAIN_INTERVAL_TICKS): void {
   if (state.carrierId === null) { state.carrierPlan = null; return; }
   const prev = state.carrierPlan;
   const fresh = prev === null || prev.id !== state.carrierId;
-  if (!fresh && state.tick % BRAIN_INTERVAL_TICKS !== 0) return;
+  if (!fresh && state.tick % lookTicks !== 0) return;
   const s = findSkater(state, state.carrierId);
   if (!s || !s.onIce || s.downT > 0) return;
-  // Commitment: he carries out what he picked for TUNING.value.lookSeconds, unless his situation has changed.
-  if (!fresh && prev.read !== undefined && (state.tick - prev.tick) * DT < TUNING.value.lookSeconds
-    && readKey(readSituationInto(state, s, lookScratch)) === prev.read) return;
+  if (!fresh && !decisionPoint(state, s, defs.get(s.id)!, defs, prev)) return;
   const busy = steeredByContest(state, s);
   const me = defs.get(s.id)!;
   // A new carrier: his plan (and the seed of the errors that stay with him) starts now. It names no lane yet, so
@@ -103,6 +121,10 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   plan.to = d.kind === 'carry' ? { x: d.to.x, y: d.to.y } : null;
   plan.tick = state.tick;
   plan.read = readKey(sit);
+  plan.pressed = sit.pressure >= D.pressed;
+  // His minimum hold: longer for a carry in the zone he attacks, shorter under pressure.
+  const hold = (sit.zone === 'O' ? D.holdZone : D.hold) * (1 - D.holdPressure * sit.pressure);
+  plan.until = state.tick + Math.round(hold / DT);
   state.carrierPlan = plan;
   switch (d.kind) {
     case 'shoot': executeShot(state, s.id, defs, rng, out, wrap ? 'wraparound' : undefined); return;

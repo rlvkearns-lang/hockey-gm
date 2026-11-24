@@ -109,16 +109,20 @@ export type SkaterPlan = {
 };
 /** Where a carrier carries the puck (options.ts): at the net, wide down the boards, through the middle, to the office behind the net, round the net on a wraparound, or holding behind it. */
 export type CarryLane = 'net' | 'wide' | 'middle' | 'office' | 'wrap' | 'hold';
-/** What the carrier has committed to (the brain re-values every BRAIN_INTERVAL_TICKS; the committed option gets TUNING.value.stick). */
+/** What the carrier has committed to (the brain looks for a decision point every BRAIN_INTERVAL_TICKS; the committed option gets TUNING.value.stick). */
 export type CarrierPlan = {
   id: string; kind: 'carry' | 'pass' | 'shoot' | 'dump' | 'protect' | 'rim' | 'clear'; lane: CarryLane | null; toId: string | null; to: Vec2 | null; tick: number;
   /** Drawn when he gets the puck: keys the part of his error in judging each option that stays with him while he has it (builder's addition). */
   seed?: number;
   /**
    * The situation he chose in (brain.ts: 'break', 'odd', 'behind', 'low' or 'normal', then the zone, e.g. 'normal:O'):
-   * he carries out what he picked until TUNING.value.lookSeconds have passed or this changes (Task 7, Task 6 review).
+   * a change of it is a decision point (Task 7, Task 6 review; Task 8 fix round 2).
    */
   read?: string;
+  /** Task 8 fix round 2: he holds this plan until this tick unless an event makes a decision point (brain.ts). */
+  until?: number;
+  /** Whether he was under pressure (TUNING.brain.decide.pressed) when he chose it. */
+  pressed?: boolean;
 };
 /** A team's committed phase (commit.ts): it follows the raw phase only once that has differed for TUNING.commit.phaseDelay (`pending` since `pendingTick`). */
 export type TeamPhaseState = { phase: TeamPhase; sinceTick: number; pending: TeamPhase | null; pendingTick: number };

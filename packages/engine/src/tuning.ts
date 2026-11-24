@@ -25,6 +25,13 @@ function deepFreeze<T>(o: T): DeepReadonly<T> {
 export const TUNING = deepFreeze({
   /** The carrier's decision (brain.ts). */
   brain: {
+    /**
+     * Decision points (brain.ts, Task 8 fix round 2): after a pick he holds his plan holdZone s in the zone he attacks
+     * (hold s elsewhere), times 1 - holdPressure * pressure; pressure arrives at `pressed`; a carry's target is reached
+     * within `arrive` m; an option seen as worth `margin` more than his plan makes him choose again; the slot is rx
+     * slotRx or more within slotLy m of the middle.
+     */
+    decide: { holdZone: 1.2, hold: 0.8, holdPressure: 0.6, pressed: 0.5, arrive: 1.5, margin: 0.03, slotRx: 17, slotLy: 6 },
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
     shotDistanceScale: 9,
     maxShotDistance: 25,
@@ -141,8 +148,6 @@ export const TUNING = deepFreeze({
    */
   value: {
     noise: { persist: 0.95, readSeconds: 4 },
-    /** brain.ts: he carries out a pick this long (s) before he chooses again, unless his situation changes (Task 6 review). */
-    lookSeconds: 0.3,
     deke: 0.6,
     /** A pass's chance falls by skill.pass per point of passing under 100, a carry's by skill.carry per point of puckHandling under 100, pressured or not. */
     skill: { pass: 0.001, carry: 0.001 },

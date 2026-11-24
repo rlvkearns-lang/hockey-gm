@@ -4,7 +4,7 @@ import { comesFromBehind as comesFromBehind_, receiveChance as receiveChance_, r
 import { BENCH_DOORS as BENCH_DOORS_, benchTick as benchTick_, finishChanges as finishChanges_, initialBench as initialBench_ } from './bench';
 import { resolveBodies as resolveBodies_, resolveGoalies as resolveGoalies_, routeAroundGoalies as routeAroundGoalies_ } from './bodies';
 import { brainTick as brainTick_ } from './brain';
-import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
+import { BRAIN_INTERVAL_TICKS, DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
 import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
@@ -212,8 +212,16 @@ function noNegativeZero(state: GameState): void {
   for (const g of [state.goalies.home, state.goalies.away]) { z(g.pos); z(g.vel); g.facing += 0; }
 }
 
+/** Engine-internal options (not exported from index.ts): `lookTicks`, how often the carrier looks for a decision point (default BRAIN_INTERVAL_TICKS). For tests. */
+export type GameOptions = { lookTicks?: number };
+
 /** A new game of `setup` (validated first: a bad setup throws a SetupError naming the problem). */
 export function createGame(setup: GameSetup): Game {
+  return createGameWith(setup, {});
+}
+
+/** createGame with engine-internal options (test/play.test.ts: the result does not depend on the look interval). */
+export function createGameWith(setup: GameSetup, opts: GameOptions): Game {
   validateSetup(setup);
   const rng = createRng(setup.seed);
   const state = initialState(setup);
@@ -223,7 +231,7 @@ export function createGame(setup: GameSetup): Game {
   startPeriod(state, 1);
   snapToLineup(state); // the opening line-up; later draws wait for players to skate there
   state.rng = rng.getState();
-  return run(setup, state, rng, []);
+  return run(setup, state, rng, [], opts);
 }
 
 /**
@@ -252,7 +260,8 @@ function checkStateFits(setup: GameSetup, state: GameState): void {
   if (!Array.isArray(state.rng) || state.rng.length !== 4) throw new Error('state has no random-number state');
 }
 
-function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]): Game {
+function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], opts: GameOptions = {}): Game {
+  const lookTicks = opts.lookTicks ?? BRAIN_INTERVAL_TICKS;
   const defs = new Map<string, PlayerDef>();
   for (const side of SIDES) for (const p of setup[side].players) defs.set(p.id, p);
   const tactics: Record<Side, Tactics> = { home: setup.home.tactics, away: setup.away.tactics };
@@ -361,7 +370,6 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     // and never more than CARRY_STEP (where the blade swings past a post, it slides round it).
     const dx = t.x - p.pos.x, dy = t.y - p.pos.y, l = hypot2(dx, dy);
     const step = Math.min(CARRY_STEP, hypot2(carrier.vel.x, carrier.vel.y) * DT + CARRY_TURN);
-    const sx0 = p.pos.x, sy0 = p.pos.y;
     if (l > step) { t.x = p.pos.x + (dx / l) * step; t.y = p.pos.y + (dy / l) * step; }
     // A step that would end inside a frame goes to the frame (the furthest point of it outside) and slides along the face
     // it met for the rest of the step, so it goes round the net toward the blade and never moves further than the step.
@@ -386,10 +394,6 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     // Never inside a frame: out through its back or a side, the nearest (never into the goal mouth). It slides round a
     // frame, a step at a time, toward a blade on his side of it.
     outOfFrame(p.pos);
-    // ...but never further than the step in all (Task 7 review, Minor 2): a puck pushed out of a frame further than that
-    // comes the rest of the way next tick.
-    const ox = p.pos.x - sx0, oy = p.pos.y - sy0, ol = hypot2(ox, oy);
-    if (ol > step) { p.pos.x = sx0 + (ox / ol) * step; p.pos.y = sy0 + (oy / ol) * step; }
     noVel.x = 0;
     noVel.y = 0;
     resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);
@@ -506,7 +510,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
     benchTick(state, setup, DT, events);
     assignJobs(state, defs, tactics);
-    brainTick(state, defs, rng, events);
+    brainTick(state, defs, rng, events, lookTicks);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
 
     const skaters = onIceSkaters();

@@ -105,6 +105,14 @@ const BREAKAWAY_SHOT = 12;
 /** A breakaway needs nobody within this far (m) of him, beside or behind him as well as ahead. */
 const BREAKAWAY_ALONE = 4;
 const DEKE_FROM = 6;
+/** What a saved shot keeps of the possession on average (held, steered, rebound: TUNING.value.after, against a carry's). */
+const SAVED_KEEP = (TUNING.value.after.held.keep + TUNING.value.after.steered.keep + TUNING.value.after.rebound.keep) / 3 / TUNING.value.after.carry.keep;
+/** What the shot at the end of a breakaway carry keeps of the possession: wide (TUNING.shot.wild, no pressure) or saved. */
+function endKeep(accuracy: number, d: number): number {
+  const W = TUNING.shot.wild, AF = TUNING.value.after;
+  const wide = clamp(W.base + (100 - accuracy) * W.perPoint + d * W.perMetre, 0.03, 0.97);
+  return wide * (AF.wide.keep / AF.carry.keep) + (1 - wide) * SAVED_KEEP;
+}
 const DEKE_ACROSS = 1.5;
 /** A pass on a rush goes only to a teammate no more than this far (m) behind him. */
 const LEVEL = 1;
@@ -406,8 +414,10 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // On a breakaway a carry at the net leads to the shot or deke at its end: worth that chance to score (the goalie
     // square to him), not the threat of the spot.
     // A carry that ends inside DEKE_FROM of the net ends in a deke, with the goalie to beat at close range: V.deke of it.
+    // (Task 8 fix round 2: valued as the shot is, so the shot that ends it keeps what a saved shot keeps, not nothing.)
+    const gEnd = V.goal * shotQuality(trx, tly) * shootSkill * B.openNetWeight[0] * (hyp(GOAL - trx, tly) < DEKE_FROM ? V.deke : 1);
     const to = mode === 'break'
-      ? V.goal * shotQuality(trx, tly) * shootSkill * B.openNetWeight[0] * (hyp(GOAL - trx, tly) < DEKE_FROM ? V.deke : 1)
+      ? gEnd + (1 - gEnd) * endKeep(a.shootingAccuracy, hyp(GOAL - trx, tly)) * threat(trx, tly)
       : threat(trx, tly) * openAt(spaceAt(state, side, tw));
     let v = valueOf(chance, to);
     v = habit(v, tend.carry) - moveOn;
@@ -671,6 +681,21 @@ export function topKindShare(options: readonly Option[], me: PlayerDef, sit: Sit
   let top = 0;
   for (let k = 1; k < kindW.length; k++) if (kindW[k]! > top) top = kindW[k]!;
   return top / total;
+}
+
+/**
+ * Whether an option he sees (its value plus the error of his read) is worth more than the plan he is carrying out by
+ * `margin`, or his plan is no longer on his list (brain.ts: a decision point).
+ */
+export function planBeaten(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan, margin: number): boolean {
+  const T = pickTemperature(me, sit.pressure);
+  let cur = -Infinity, best = -Infinity;
+  for (const o of options) {
+    const v = o.value + readError(plan, o, T, sit.since);
+    if (committed(o, plan) && v > cur) cur = v;
+    if (v > best) best = v;
+  }
+  return cur === -Infinity || best > cur + margin;
 }
 
 /** His pick's temperature (TUNING.value.pick): lower for a smart, poised player, higher under pressure. */
