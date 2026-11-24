@@ -1,6 +1,6 @@
 import { blockPickup as blockPickup_, recordTouch as recordTouch_, tryIntercept as tryIntercept_ } from './actions';
 import { bladePos as bladePos_ } from './blade';
-import { comesFromBehind as comesFromBehind_, receiveChance as receiveChance_ } from './passing';
+import { comesFromBehind as comesFromBehind_, receiveChance as receiveChance_, receiverContest as receiverContest_ } from './passing';
 import { BENCH_DOORS as BENCH_DOORS_, benchTick as benchTick_, finishChanges as finishChanges_, initialBench as initialBench_ } from './bench';
 import { resolveBodies as resolveBodies_, resolveGoalies as resolveGoalies_, routeAroundGoalies as routeAroundGoalies_ } from './bodies';
 import { brainTick as brainTick_ } from './brain';
@@ -31,6 +31,7 @@ const blockPickup = blockPickup_;
 const bladePos = bladePos_;
 const comesFromBehind = comesFromBehind_;
 const receiveChance = receiveChance_;
+const receiverContest = receiverContest_;
 const recordTouch = recordTouch_;
 const tryIntercept = tryIntercept_;
 const BENCH_DOORS = BENCH_DOORS_;
@@ -385,7 +386,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
 
   /**
    * A pass's receiver takes it when it came within TUNING.blade.pickupReach of his blade this tick (from `prev` to now),
-   * at any speed, after one draw against receiveChance (passing.ts): on a miss it bobbles off his stick (2 to 4 m/s,
+   * at any speed, after one draw against receiveChance (passing.ts; contested by the nearest opponent to his blade,
+   * receiverContest): on a miss it bobbles off his stick (2 to 4 m/s,
    * turned up to 1 rad), pendingPass.bobbled is set, he cannot touch it for RELEASE_NO_PICKUP_SECONDS, and his next
    * touch takes it with no draw. A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater whose
    * blade it came within pickupReach of this tick, or whose centre it is within IN_FEET of. Eligible: not down, not
@@ -407,7 +409,10 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
         if (segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y) > PICKUP_REACH) break;
         if (!pass.bobbled) {
           const speed = hypot2(p.vel.x, p.vel.y);
-          if (!rng.chance(receiveChance(d, speed, comesFromBehind(s.facing, p.vel.x, p.vel.y)))) {
+          // An opponent on him as it arrives contests the catch.
+          let near = Infinity;
+          for (const o of skaters) if (o.side !== s.side && o.downT === 0) { const od = dist(o.pos, b); if (od < near) near = od; }
+          if (!rng.chance(receiveChance(d, speed, comesFromBehind(s.facing, p.vel.x, p.vel.y), receiverContest(near, 0)))) {
             // Off his stick: it bobbles away, and he needs a moment to get to it.
             const a = datan2(p.vel.y, p.vel.x) + rng.range(-BOBBLE_TURN, BOBBLE_TURN), v = rng.range(BOBBLE_SPEED[0], BOBBLE_SPEED[1]);
             p.vel.x = dcos(a) * v;

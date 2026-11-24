@@ -175,6 +175,8 @@ export const TUNING = deepFreeze({
       base: 0.97, perMetre: 0.006, from: 12, pressure: 0.3, pressurePerPoint: 0.002, settle: 1, settleMin: 0.9,
       narrow: 0.5, narrowFactor: 0.2, crowded: 0.5, crowdedPer: 3, across: 0.6, acrossFull: 6,
       hand: { forehand: 1, backhand: 0.85, behind: 0.65 },
+      /** A covered lane (passing.ts PassPlan.cover, 0 to 1) takes cover * (cover - coverPerPoint * passing) off the chance. */
+      cover: 0.8, coverPerPoint: 0.004,
     },
     carry: { base: 0.95, pressure: 0.35, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
     hold: { base: 0.97, pressure: 0.1, keep: 0.9 },
@@ -224,6 +226,14 @@ export const TUNING = deepFreeze({
     stickReach: 1.2,
     stickLane: 0.75,
     stickFactor: 1.5,
+    /** A man reaching into a covered lane (passing.ts laneReach) tries with interceptChance times reach times his reach (0 to 1). */
+    reach: 0.5,
+    /**
+     * A catch contested by an opponent on the receiver (passing.ts receiverContest: within stickReach plus what he can
+     * close as it travels, fading over contestRange m beyond) loses up to `contested` of the receive chance.
+     */
+    contested: 0.1,
+    contestRange: 1,
     maxReceiveSpeed: 16,
     pointInside: 1.5,
     backhand: { speed: 0.75, error: 1.6, range: 15 },

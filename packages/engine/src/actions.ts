@@ -1,6 +1,6 @@
 import { DT as DT_ } from './constants';
 import { bladePos as bladePos_ } from './blade';
-import { forcedPass as forcedPass_, HAND_ERROR as HAND_ERROR_, interceptChance as interceptChance_, planPass as planPass_, stickInterceptChance as stickInterceptChance_, type PassPlan } from './passing';
+import { forcedPass as forcedPass_, HAND_ERROR as HAND_ERROR_, interceptChance as interceptChance_, laneReach as laneReach_, planPass as planPass_, stickInterceptChance as stickInterceptChance_, type PassPlan } from './passing';
 import { crossesEndBox as crossesEndBox_ } from './lanes';
 import { boardsNormal as boardsNormal_, distToBoards as distToBoards_, RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
@@ -18,6 +18,7 @@ const bladePos = bladePos_;
 const forcedPass = forcedPass_;
 const HAND_ERROR = HAND_ERROR_;
 const interceptChance = interceptChance_;
+const laneReach = laneReach_;
 const planPass = planPass_;
 const stickInterceptChance = stickInterceptChance_;
 const RINK = RINK_;
@@ -133,7 +134,7 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
   release(state, from, dcos(angle) * plan.speed, dsin(angle) * plan.speed, 0, out, 'pass', toId);
   state.pendingPass = {
     fromId, toId, untilTick: state.tick + Math.round((plan.arriveSeconds + PASS.graceSeconds) / DT), tried: [], pressure,
-    aim: { x: aim.x, y: aim.y }, bobbled: false,
+    aim: { x: aim.x, y: aim.y }, bobbled: false, cover: plan.cover,
   };
 }
 
@@ -253,7 +254,7 @@ export function executeRim(state: GameState, fromId: string, toId: string | null
   const l = hypot2(to.x - p.x, to.y - p.y);
   out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'rim', distance: toId === null ? null : l, hand: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump', toId);
-  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], pressure, aim: { x: to.x, y: to.y }, bobbled: false };
+  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], pressure, aim: { x: to.x, y: to.y }, bobbled: false, cover: 0 };
 }
 
 /**
@@ -279,7 +280,10 @@ export function executeClear(state: GameState, fromId: string, defs: Map<string,
  * A pass still on its way (state.pendingPass) at PASS.interceptSpeed[0] m/s or faster: each opposing skater (on the ice,
  * not leaving, not down, not steered by a contest) gets one try when his stick blade came within PASS.stickLane of the
  * puck's path this tick (from `prev` to its position now), with stickInterceptChance, or, with no stick in the lane,
- * his body within PASS.interceptRange of it, with interceptChance. On success the pass is over and a `turnover` is
+ * his body within PASS.interceptRange of it, with interceptChance, or, with neither and a lane that was covered when
+ * the pass was thrown (pendingPass.cover over 0), as the puck passes him when he could have reached the lane
+ * since the pass was let go (passing.ts laneReach: the lane was covered), with interceptChance * PASS.reach * how far
+ * he reaches. On success the pass is over and a `turnover` is
  * returned. With his stick there, he takes it PASS.interceptTake of the time (`taker`, now the carrier; the caller puts
  * the puck on his blade) and otherwise deflects it loose (`taker` null); off his body it always goes loose.
  */
@@ -292,14 +296,33 @@ export function tryIntercept(
   const speed = hypot2(p.vel.x, p.vel.y);
   if (speed < PASS.interceptSpeed[0] || p.z > 0) return null;
   const from = skaterById(state, pass.fromId);
+  const rel = state.lastRelease;
+  const releaseTick = rel !== null && rel.id === pass.fromId ? rel.tick : state.tick;
   for (const s of state.skaters) {
     if (!s.onIce || s.leaving || s.downT > 0 || steeredByContest(state, s) || s.side === from.side || pass.tried.includes(s.id)) continue;
     const d = defs.get(s.id)!;
     const blade = bladePos(s.pos, s.facing, d.shoots, bladeScratch);
     const stick = segDistXY(blade.x, blade.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.stickLane;
-    if (!stick && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) > PASS.interceptRange) continue;
+    let chance: number;
+    if (stick) chance = stickInterceptChance(d, speed);
+    else {
+      const off = segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y);
+      if (off <= PASS.interceptRange) chance = interceptChance(d, speed);
+      else if (pass.cover <= 0) continue;
+      else {
+        // In a lane that was covered when it was thrown (pendingPass.cover), he reaches for it: a man who could get his
+        // stick into the lane since the pass was let go (passing.ts laneReach, the rule that says a lane is covered)
+        // gets a try, the less likely the further he has to reach.
+        // He reaches when the puck passes him (its nearest point to him is not still ahead of it).
+        const mx = p.pos.x - prev.x, my = p.pos.y - prev.y;
+        if ((s.pos.x - p.pos.x) * mx + (s.pos.y - p.pos.y) * my > 0) continue;
+        const reach = laneReach(off, (state.tick - releaseTick) * DT);
+        if (reach <= 0) continue;
+        chance = clamp(interceptChance(d, speed) * PASS.reach * reach, 0.03, 0.97);
+      }
+    }
     pass.tried.push(s.id);
-    if (!rng.chance(stick ? stickInterceptChance(d, speed) : interceptChance(d, speed))) continue;
+    if (!rng.chance(chance)) continue;
     const take = rng.chance(PASS.interceptTake) && stick;
     state.pendingPass = null;
     state.lastTouch = { id: s.id, side: s.side };

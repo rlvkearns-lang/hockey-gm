@@ -30,8 +30,8 @@ const breakaway = (x: number): GameState => {
 
 /**
  * Home RW carries at (17.4, 10) in the zone: home C open at (21.5, 3.5) is the best option; home LW at (24, 8) is
- * covered; three defenders are goal-side (no breakaway, no odd-man rush), none able to close the lane to C before the
- * puck gets there (Task 6), and the other two far up ice.
+ * covered; three defenders are goal-side (no breakaway, no odd-man rush), none near enough the C to contest his catch
+ * (passing.ts receiverContest; Task 6 moved them for its lane rule, Task 7 keeps them for this), and the other two far up ice.
  */
 const oneBestPass = (): GameState => {
   const st = stateWith({ carrier: 'home', puckX: 18, puckY: 10 });
@@ -67,21 +67,20 @@ describe('the carrier values his options', () => {
     for (const d of decisions(st, def({}), 2000)) { expect(['protect', 'rim', 'shoot', 'pass', 'carry']).toContain(d.kind); if (d.kind === 'pass') expect(['home-LD', 'home-RD']).not.toContain(d.toId); }
   });
   it('behind the net he holds it, passes out front or wraps: all three happen, and he is not sent straight back out', () => {
-    // The away LD stands off the pass out front (at (26, 0.5) he could get his stick into it first: Task 6, planPass).
-    const st = stateWith({ carrier: 'home', puckX: 28.9, puckY: 1, carrierSlot: 'C' }); place(st, 'home:LW', 22, 1); place(st, 'away:LD', 25.5, -2.5);
+    const st = stateWith({ carrier: 'home', puckX: 28.9, puckY: 1, carrierSlot: 'C' }); place(st, 'home:LW', 22, 1); place(st, 'away:LD', 26, 0.5);
     expect(readSituation(st, skater(st, 'home', 'C')).behindNet).toBe(true);
     const ds = decisions(st, def({}), 2000); const share = (f: (d: Decision) => boolean): number => ds.filter(f).length / 2000;
     expect(share((d) => d.kind === 'carry' && d.lane === 'hold')).toBeGreaterThan(0.15);
     expect(share((d) => d.kind === 'pass')).toBeGreaterThan(0.10);
     expect(share((d) => d.kind === 'carry' && d.lane === 'wrap')).toBeGreaterThan(0.03);
   });
-  // Task 6: a lane a defender can get his stick into before the puck (passing.ts planPass) is no option at all.
-  it('a shadowed lane is tried less: with a defender\'s stick in the lane the pass is not tried', () => {
+  // Task 7 step 0: a stick in the lane makes the pass riskier, not impossible (passing.ts PassPlan.cover).
+  it('a shadowed lane is tried less: a defender\'s stick in the lane at least halves the passes into it', () => {
     const st = stateWith({ carrier: 'home', puckX: 18, puckY: 10 }); place(st, 'home:C', 22, 0); for (const s of st.skaters) if (s.side === 'away') s.pos = { x: 5, y: s.pos.y };
     const open = decisions(st, playmaker, 2000).filter((d) => d.kind === 'pass' && d.toId === 'home-C').length;
-    place(st, 'away:C', 20.2, 5.4); // 0.5 m off the lane
+    place(st, 'away:C', 20.75, 5.7); // 0.5 m off the lane to the C's blade (Task 6 aims there)
     const shadowed = decisions(st, playmaker, 2000).filter((d) => d.kind === 'pass' && d.toId === 'home-C').length;
-    expect(open).toBeGreaterThan(200); expect(shadowed).toBe(0);
+    expect(open).toBeGreaterThan(200); expect(shadowed).toBeLessThan(open * 0.5); expect(shadowed).toBeGreaterThan(0);
   });
   it('a smart player takes the best option more often than a limited one, who sometimes forces it', () => {
     const st = oneBestPass();

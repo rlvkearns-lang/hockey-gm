@@ -327,14 +327,16 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (mode === 'behind' && (mrx < OUT_FRONT_MIN_RX || mrx > GOAL)) continue;
     // Behind his back: seen only with good vision.
     if ((dx * fc + dy * fs) / (l || 1) < BEHIND_COS && a.vision < BEHIND_VISION) continue;
-    // A pass he can make (passing.ts planPass: the receiver can take it, its hand's range, nobody can get a stick into
-    // the lane first, not too hard), aimed at the receiver's blade.
+    // A pass he can make (passing.ts planPass: the receiver can take it, its hand's range, no body in the lane, not too
+    // hard), aimed at the receiver's blade.
     const pp = planPass(state, s, m, defs, planScratch);
     if (pp === null) continue;
     const pl = hyp(pp.aim.x - p.x, pp.aim.y - p.y);
     let chance = O.pass.base - O.pass.perMetre * Math.max(0, pl - O.pass.from) - V.skill.pass * (100 - passSkill) - pressure * (O.pass.pressure - O.pass.pressurePerPoint * passSkill);
     // Settled on it, and the chance he handles it (passing.ts receiveChance, against the best there is).
     chance *= settled * (pp.chance / RECEIVE_BEST) * O.pass.hand[pp.hand];
+    // A lane an opponent can get his stick into first (pp.cover) is riskier, the less so the better he passes.
+    chance *= 1 - pp.cover * clamp(O.pass.cover - O.pass.coverPerPoint * passSkill, 0, 1);
     // The goalie and the net frames are in the way of a pass as much as a skater is (passLaneWidth, to the aim).
     const w = pp.lane;
     if (w < O.pass.narrow) chance *= O.pass.narrowFactor; else if (w < L.open) chance *= V.shadowed;

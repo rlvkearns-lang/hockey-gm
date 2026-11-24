@@ -293,8 +293,10 @@ export type GameState = {
    * A pass on its way: its intended receiver skates onto it and may take it at any speed until tick `untilTick`.
    * `tried` lists the opponents who have had their one chance to intercept it. `aim` is where it was aimed (his blade
    * where he would be when it arrived); `bobbled` is set once it has come off his stick (he takes it at the next touch).
+   * `cover` (0 to 1) is how well an opponent could get his stick into its lane when it was thrown (passing.ts PassPlan.cover;
+   * 0 for a rim).
    */
-  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; pressure: number; aim: Vec2; bobbled: boolean } | null;
+  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; pressure: number; aim: Vec2; bobbled: boolean; cover: number } | null;
   /**
    * A turnover that may still go in the box score (see turnovers.ts): `side`'s `playerId` won the puck off `otherId`
    * (a takeaway) or `otherId` gave it to him (a giveaway, credited to `otherId`) on `tick`; it counts once `side` has

@@ -7,8 +7,9 @@ import { def, defs, heldFor, meanMiss, place, playmaker, rate, slotState, sniper
 /**
  * Home C with the puck high in the zone at (14, 4), the two away defencemen low by the net and the rest of them away
  * from the play: both wingers in the slot and open (nearly as good a pass as each other), the points manned. Passing is a live choice here
- * for a sniper and for a playmaker alike (Task 5 review, Important 3). Every lane is one no defender can close before
- * the puck gets there (Task 6: passing.ts planPass).
+ * for a sniper and for a playmaker alike (Task 5 review, Important 3). (Task 6 moved the defenders off the lanes for its
+ * absolute lane rule; with Task 7's softer rule the Task 5 state, defenders near both wingers, makes passing a rare choice
+ * for a sniper (0.06), so this state stays.)
  */
 const passState = (): GameState => {
   const st = stateWith({ carrier: 'home', puckX: 14, puckY: 4, carrierSlot: 'C' });
@@ -41,10 +42,9 @@ describe('player brain', () => {
     expect(behind).toBeGreaterThan(level); expect(behind).toBeLessThan(level * 1.35);
     expect(ahead).toBeLessThan(level); expect(ahead).toBeGreaterThan(level * 0.75);
   });
-  // In passState (slotState has no pass a defender cannot close since Task 6).
   it('the longer he has had the puck, the more he moves it on', () => {
-    expect(rate('pass', playmaker, heldFor(passState(), 10))).toBeGreaterThan(rate('pass', playmaker, heldFor(passState(), 0)) + 0.1);
-    expect(rate('carry', playmaker, heldFor(passState(), 10))).toBeLessThan(rate('carry', playmaker, heldFor(passState(), 0)));
+    expect(rate('pass', playmaker, heldFor(slotState, 10))).toBeGreaterThan(rate('pass', playmaker, heldFor(slotState, 0)) + 0.1);
+    expect(rate('carry', playmaker, heldFor(slotState, 10))).toBeLessThan(rate('carry', playmaker, heldFor(slotState, 0)));
   });
   it('vision widens what he sees: on one read of the play a high-vision carrier passes to clearly more teammates', () => {
     const st = passState();

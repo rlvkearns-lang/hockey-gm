@@ -136,6 +136,33 @@ function interceptShareWith(o: { bladeOffLane: number; bodyOffLane?: number }, n
   return caught / n;
 }
 
+/**
+ * Share of `n` passes (the interceptShareWith set-up) picked off or deflected by the away LD standing half way along the
+ * lane, his body `off` m to its side and facing away from it (his blade further off): with `off` 1.6 m he can get his stick
+ * into the lane before the puck gets there (the lane is covered), with 4 m he cannot.
+ */
+function reachShare(off: number, n: number): { share: number; cover: number } {
+  let caught = 0, cover = 0;
+  for (let i = 0; i < n; i++) {
+    const st = stateWith({ carrier: 'home', puckX: -5, carrierSlot: 'C' });
+    only(st, ['home:C', 'home:LW', 'away:LD']);
+    st.puck.pos = { x: -5, y: 0 };
+    place(st, 'home:LW', 12, 0.4); skater(st, 'home', 'LW').facing = Math.PI;
+    place(st, 'away:LD', 3, off); skater(st, 'away', 'LD').facing = Math.PI / 2;
+    const rng = createRng(++seedSeq);
+    executePass(st, 'home-C', 'home-LW', defs, rng);
+    cover += st.pendingPass!.cover;
+    for (let t = 0; t < 30 && st.pendingPass !== null; t++) {
+      st.tick++;
+      const prev = { x: st.puck.pos.x, y: st.puck.pos.y };
+      stepPuck(st.puck, DT);
+      if (tryIntercept(st, defs, rng, prev)) { caught++; break; }
+      if (st.puck.pos.x > 5) break;
+    }
+  }
+  return { share: caught / n, cover: cover / n };
+}
+
 describe('passing: a pass the receiver can take (Task 6)', () => {
   it('a point pass is aimed at least 1.5 m inside the line and stays in: 500 seeds, 95% reach the defenceman in the zone', () => {
     let kept = 0;
@@ -146,11 +173,13 @@ describe('passing: a pass the receiver can take (Task 6)', () => {
     }
     expect(kept / 500).toBeGreaterThanOrEqual(0.95);
   }, 120_000);
-  it('a pass he cannot make is not an option: a lane a defender can close, a 20 m backhand, a 12 m pass behind him', () => {
+  // Task 7 step 0: a lane a defender can close is covered (riskier), not removed; a body in the lane still stops it.
+  it('a pass he cannot make is not an option: a lane a body stands in, a 20 m backhand, a 12 m pass behind him', () => {
     const out = {} as PassPlan; const st = stateWith({ carrier: 'home', puckX: 0 }); const from = skater(st, 'home', 'RW');
-    // stateWith stands the away C 1.5 m in front of the puck, on the lane: he starts out of it.
+    // stateWith stands the away C 1.5 m in front of the puck, his body in the lane: he starts out of it.
     place(st, 'away:C', 6, 8);
     place(st, 'home:C', 12, 0); expect(planPass(st, from, skater(st, 'home', 'C'), defs, out)).not.toBeNull();
+    place(st, 'away:C', 6, 1.5); expect(planPass(st, from, skater(st, 'home', 'C'), defs, out)?.cover).toBeGreaterThan(0.8); // a stick in the lane: covered
     place(st, 'away:C', 6, 0.3); expect(planPass(st, from, skater(st, 'home', 'C'), defs, out)).toBeNull();
     place(st, 'away:C', -20, 0); place(st, 'home:C', -12, 0); expect(planPass(st, from, skater(st, 'home', 'C'), defs, out)).toBeNull(); // 12 m straight behind
   });
@@ -181,5 +210,11 @@ describe('passing: a pass the receiver can take (Task 6)', () => {
     const stick = interceptShareWith({ bladeOffLane: 0.3 }, 2000), body = interceptShareWith({ bladeOffLane: 1.5, bodyOffLane: 0.85 }, 2000);
     expect(stick).toBeGreaterThan(body * 1.3); expect(stick).toBeLessThanOrEqual(0.97); expect(body).toBeGreaterThanOrEqual(0.03);
     expect(stickInterceptChance(def({ stickChecking: 100, defensivePositioning: 100 }), 12)).toBeLessThanOrEqual(0.97);
+  }, 60_000);
+  // Task 7 step 0: a covered lane is riskier, not removed.
+  it('a pass into a covered lane is picked off or deflected clearly more often than one into an open lane', () => {
+    const covered = reachShare(1.6, 2000), open = reachShare(4, 2000);
+    expect(covered.cover).toBeGreaterThan(0.3); expect(open.cover).toBe(0);
+    expect(covered.share).toBeGreaterThan(0.05); expect(covered.share).toBeGreaterThan(open.share * 3 + 0.02); expect(covered.share).toBeLessThanOrEqual(0.97);
   }, 60_000);
 });

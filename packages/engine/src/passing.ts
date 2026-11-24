@@ -32,13 +32,23 @@ const RINK = RINK_;
 const isTiedUp = isTiedUp_;
 const steeredByContest = steeredByContest_;
 
-export type PassPlan = { toId: string; aim: Vec2; speed: number; hand: PassHand; arriveSeconds: number; arriveSpeed: number; lane: number; chance: number };
+/**
+ * `cover` (0 to 1): how well an opponent can get his stick into the lane before the puck gets there (laneReach of the
+ * one who covers it best, between the puck and the receiver): 0 when nobody can, 1 with a stick already in it.
+ * `contest` (0 to 1): how closely an opponent can be on the receiver as it arrives (receiverContest); `chance` (the
+ * receiver handles it) already counts it.
+ */
+export type PassPlan = { toId: string; aim: Vec2; speed: number; hand: PassHand; arriveSeconds: number; arriveSpeed: number; lane: number; chance: number; cover: number; contest: number };
 
 const PASS = TUNING.pass;
 const K = ICE_DECAY;
 const BLUE = RINK.blueLineX;
 /** An opponent reaches for a lane at this speed (m/s). */
 const CLOSE_SPEED = 4;
+/** An opponent's body within this far (m) of a lane ahead of the puck stands in it: the pass cannot get through. */
+const BODY_IN_LANE = 0.3;
+/** An opponent closes on a receiver at this speed (m/s) while the pass travels (he also watches the passer). */
+const CONTEST_CLOSE = 1;
 /** A pass must still be going this fast (m/s) when it gets there. */
 const MIN_ARRIVE = 3;
 /** The weight: speed = clamp(WEIGHT_BASE + WEIGHT_PER_METRE * distance, WEIGHT_MIN, his passing speed). */
@@ -67,6 +77,18 @@ export function canReceivePass(state: GameState, t: SkaterState): boolean {
   return t.onIce && !t.leaving && t.downT === 0 && !steeredByContest(state, t) && !isTiedUp(state, t.id);
 }
 
+/**
+ * How well an opponent whose body is `off` m from a pass's path gets his stick to it with `seconds` to reach for it: 1 when
+ * it is within TUNING.pass.stickReach of him (his stick is in the lane), falling linearly to 0 at stickReach plus the
+ * 4 m/s he closes at times `seconds`.
+ */
+export function laneReach(off: number, seconds: number): number {
+  const over = off - PASS.stickReach;
+  if (over <= 0) return 1;
+  const can = CLOSE_SPEED * seconds;
+  return over >= can ? 0 : 1 - over / can;
+}
+
 /** Seconds a puck let go at `v0` m/s takes to slide `d` m (Infinity if it stops first). */
 export function slideSeconds(d: number, v0: number): number {
   const r = 1 - (K * d) / v0;
@@ -89,10 +111,23 @@ export function stickInterceptChance(d: PlayerDef, speed: number): number {
   return clamp(interceptChance(d, speed) * PASS.stickFactor, 0.03, 0.97);
 }
 
-/** Chance the receiver handles it: 0.97, less 0.02 per m/s over 12, less 0.15 arriving from behind him (over 120 degrees off his facing), plus 0.002 per point of puckHandling over 70; clamped to [0.03, 0.97]. */
-export function receiveChance(receiver: PlayerDef, arriveSpeed: number, fromBehind: boolean): number {
+/**
+ * Chance the receiver handles it: 0.97, less 0.02 per m/s over 12, less 0.15 arriving from behind him (over 120 degrees
+ * off his facing), plus 0.002 per point of puckHandling over 70, less TUNING.pass.contested times `contested` (0 to 1: an
+ * opponent on him as it arrives, receiverContest); clamped to [0.03, 0.97].
+ */
+export function receiveChance(receiver: PlayerDef, arriveSpeed: number, fromBehind: boolean, contested = 0): number {
   return clamp(RECEIVE_MAX - RECEIVE_PER_MS * Math.max(0, arriveSpeed - RECEIVE_FROM) - (fromBehind ? RECEIVE_BEHIND : 0)
-    + RECEIVE_PER_POINT * (receiver.attrs.puckHandling - 70), 0.03, 0.97);
+    + RECEIVE_PER_POINT * (receiver.attrs.puckHandling - 70) - PASS.contested * contested, 0.03, 0.97);
+}
+
+/**
+ * How much an opponent `d` m from where the pass is taken contests the catch, with `seconds` to close on it at 1 m/s:
+ * 1 within TUNING.pass.stickReach, falling linearly to 0 over TUNING.pass.contestRange beyond what he can close.
+ */
+export function receiverContest(d: number, seconds: number): number {
+  const over = d - PASS.stickReach - CONTEST_CLOSE * seconds;
+  return over <= 0 ? 1 : over >= PASS.contestRange ? 0 : 1 - over / PASS.contestRange;
 }
 
 /** Whether a puck travelling (vx, vy) comes at a man facing `facing` from behind him (over 120 degrees off his facing). */
@@ -149,19 +184,26 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
   if (check) {
     if (d < TUNING.brain.passRange[0] || d > HAND_RANGE[hand] || arriveSpeed < MIN_ARRIVE || arriveSpeed > PASS.maxReceiveSpeed + 1e-9) return null;
     if (crossesNet(p, aim)) return null;
-    // Can an opponent get a stick into the lane before the puck gets there?
+    // A body standing in the lane stops the pass (no option); an opponent who can get a stick into it before the puck
+    // gets there covers it (`cover`, the best of them): the pass is riskier, not impossible.
     const ax = aim.x - p.x, ay = aim.y - p.y, l2 = d * d;
+    // A man at or beyond the receiver is not in the lane: he contests the catch (receiverContest).
+    let cover = 0, contest = 0;
     for (const o of state.skaters) {
       if (!o.onIce || o.side === from.side || o.downT > 0) continue;
-      let u = l2 === 0 ? 0 : ((o.pos.x - p.x) * ax + (o.pos.y - p.y) * ay) / l2;
+      const c = receiverContest(hyp(o.pos.x - aim.x, o.pos.y - aim.y), t);
+      if (c > contest) contest = c;
+      const u = l2 === 0 ? 0 : ((o.pos.x - p.x) * ax + (o.pos.y - p.y) * ay) / l2;
       // A man behind the puck (or level with it) harries the passer; the lane is ahead of it.
-      if (u <= 0) continue;
-      u = u > 1 ? 1 : u;
+      if (u <= 0 || u >= 1) continue;
       const off = hyp(o.pos.x - (p.x + ax * u), o.pos.y - (p.y + ay * u));
-      const reach = off - PASS.stickReach;
-      if (reach <= 0 || reach / CLOSE_SPEED < slideSeconds(u * d, speed)) return null;
+      if (off < BODY_IN_LANE) return null;
+      const r = laneReach(off, slideSeconds(u * d, speed));
+      if (r > cover) cover = r;
     }
-  }
+    out.cover = cover;
+    out.contest = contest;
+  } else { out.cover = 0; out.contest = 0; }
   out.toId = to.id;
   out.speed = speed;
   out.hand = hand;
@@ -171,16 +213,19 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
   // From behind him: the puck comes at him from more than 120 degrees off his facing.
   const rx = p.x - aim.x, ry = p.y - aim.y, rl = hyp(rx, ry) || 1;
   const behind = (rx * dcos(to.facing) + ry * dsin(to.facing)) / rl < BEHIND_COS;
-  out.chance = td ? receiveChance(td, arriveSpeed, behind) : RECEIVE_MAX;
+  out.chance = td ? receiveChance(td, arriveSpeed, behind, out.contest) : RECEIVE_MAX;
   return out;
 }
 
 /**
  * The pass from `from` to `to`, or null when it is not an option: the receiver cannot take a pass (canReceivePass), it is out of
- * range for the hand (forehand TUNING.brain.passRange; backhand 15 m; behind 8 m), an opponent can reach the lane before the puck
- * (his distance to the path less TUNING.pass.stickReach 1.2 m, over 4 m/s, is under the puck's time to that point; a man
- * behind the puck, level with or behind its start, harries the passer instead and does not count), or it would
- * arrive faster than TUNING.pass.maxReceiveSpeed (16 m/s). Also null through a net frame or too soft to get there.
+ * range for the hand (forehand TUNING.brain.passRange; backhand 15 m; behind 8 m), it would go through an opponent's body
+ * (one within 0.3 m of the lane ahead of the puck), or it would arrive faster than TUNING.pass.maxReceiveSpeed (16 m/s).
+ * Also null through a net frame or too soft to get there. An opponent between the puck and the receiver who can get his
+ * stick into the lane before the puck gets there (his distance to the path less TUNING.pass.stickReach 1.2 m, at 4 m/s, against the puck's time to that point:
+ * laneReach) does not remove it: he covers it (`cover`), which makes it riskier (options.ts values it lower, and
+ * actions.ts tryIntercept gives him his reach at it). A man behind the puck, level with or behind its start, harries the
+ * passer instead and does not count; one at or beyond the receiver contests the catch (`contest`, a lower `chance`).
  * Aim: the receiver's blade where he will be when it arrives. A point man (job pointStrong / pointWeak, or a defenceman within
  * 3 m of the offensive blue line) is aimed at no nearer the line than TUNING.pass.pointInside (1.5 m).
  * Weight: speed = clamp(8 + 0.9 * distance, 10, TUNING.pass.speed for his passing), times 0.75 backhand, 0.6 behind (and never
