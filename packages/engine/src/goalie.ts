@@ -275,19 +275,21 @@ export function resolveOnNet(
     night: state.goalieNight[defSide],
   });
   const releaseTick = shot ? shot.tick : null;
-  out.push(gameEvent(state, { type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, pos: state.puck.pos, detail: { distance, releaseTick, speed: ev.speed } }));
+  // Only a shot is a shot on goal (Task 7 review): a pass or loose puck that slides in is a goal with releaseTick null,
+  // and one he stops is no save (he covers it or plays it away).
+  if (shot) out.push(gameEvent(state, { type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, pos: state.puck.pos, detail: { distance, releaseTick, speed: ev.speed } }));
 
   if (rng.chance(p)) {
     const pose = savePose(g, defs.get(g.id)?.catches ?? 'L', ev.y, ev.z, end);
     g.pose = pose;
     g.poseT = POSE_SECONDS;
-    out.push(gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: state.puck.pos, detail: { pose } }));
+    if (shot) out.push(gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: state.puck.pos, detail: { pose } }));
     const rc = ga.reboundControl;
     const pk = state.puck;
     if (rng.chance(clamp(G.freeze[pose].base + G.freeze[pose].perPoint * rc, 0.03, 0.97))) {
       g.pose = 'cover';
       g.poseT = COVER_SECONDS;
-      out.push(gameEvent(state, { type: 'freeze', side: defSide, playerId: g.id, otherId: null, pos: pk.pos, detail: { cause: 'save' } }));
+      out.push(gameEvent(state, { type: 'freeze', side: defSide, playerId: g.id, otherId: null, pos: pk.pos, detail: { cause: shot ? 'save' : 'cover' } }));
       stopPlay(state, endDotNear(end, pk.pos));
       return 'save';
     }

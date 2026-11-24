@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createGame, simulateGame } from '../src/game';
 import { gameSetup, sum } from './helpers';
 import { countGames, measureGames } from './measures';
-import type { GameResult, GameState } from '../src/types';
+import type { GameEvent, GameResult, GameState } from '../src/types';
 import type { PlayCounters, PlayMeasures } from './measures';
 
 /** Whole-game behaviour on seeds 1, 2, 3 (each played once per file): the guard rails every task keeps, and each task's numbers. */
@@ -112,10 +112,35 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
 });
 
 describe('A4: attempts (Task 7)', () => {
-  it('A4: the record keeps attempts: on goal + missed + blocked, for teams and players', () => {
+  // Task 7 review, Important 3: checked event by event (the record's own sums cannot disagree with each other).
+  it('A4: every shot release has exactly one outcome (block, miss, post or shot), every shot one save or goal, and the record\'s attempts are the shot releases', () => {
     for (const r of games()) {
-      for (const side of ['home', 'away'] as const) { const t = r.team[side]; expect(t.attempts).toBe(t.shots + t.missedShots + t.shotsBlocked); }
-      expect(sum(r.players.map((p) => p.attempts))).toBe(r.team.home.attempts + r.team.away.attempts); expect(r.team.home.shotsBlocked).toBe(r.team.away.blocks);
+      const outcomes = new Map<string, string[]>(), releases: GameEvent[] = [];
+      for (const e of r.events) {
+        if (e.type === 'release' && e.detail.kind === 'shot') { releases.push(e); outcomes.set(`${e.tick}:${e.playerId}`, []); }
+        if (e.type === 'block' || e.type === 'miss' || e.type === 'post' || (e.type === 'shot' && e.detail.releaseTick !== null)) {
+          const shooter = e.type === 'block' ? e.otherId : e.playerId;
+          const k = `${e.detail.releaseTick}:${shooter}`;
+          expect(outcomes.has(k), `${e.type} at ${e.tick} has no shot release`).toBe(true);
+          outcomes.get(k)!.push(e.type);
+        }
+        // A puck that goes in without a shot is a goal with releaseTick null, and nothing else.
+        if (e.type === 'shot') expect(e.detail.releaseTick).not.toBeNull();
+      }
+      for (const [k, o] of outcomes) expect(o.length, `release ${k}: ${o.join(',')}`).toBe(1);
+      // Each shot on goal: exactly one save or goal, before the next shot.
+      let open: GameEvent | null = null;
+      for (const e of r.events) {
+        if (e.type === 'shot') { expect(open).toBeNull(); open = e; }
+        else if (e.type === 'save' || (e.type === 'goal' && e.detail.releaseTick !== null)) { expect(open).not.toBeNull(); open = null; }
+      }
+      expect(open).toBeNull();
+      for (const side of ['home', 'away'] as const) {
+        const rel = releases.filter((e) => e.side === side);
+        expect(r.team[side].attempts).toBe(rel.length);
+        expect(r.team[side].shots).toBe(r.events.filter((e) => e.type === 'shot' && e.side === side).length);
+      }
+      for (const p of r.players) expect(p.attempts, p.id).toBe(releases.filter((e) => e.playerId === p.id).length);
     }
   }, 60_000);
   it('A4: defencemen shoot: at least 6 attempts a team a game from the defence (was 2)', () => { expect(m().defenceAttemptsPerTeam).toBeGreaterThanOrEqual(6); }, 60_000);

@@ -61,7 +61,9 @@ describe('goalies, saves, goals', () => {
     expect(createGame(setup(1)).state.goalieNight).toEqual(nights[0]);
   });
   it('shot blockers block more', () => { expect(share(3000, () => blockAttempt(def({ shotBlocking: 92 })))).toBeGreaterThan(share(3000, () => blockAttempt(def({ shotBlocking: 40 }))) + 0.15); });
-  it('shots, saves and goals reconcile', () => { const r = simulateGame(setup(4)); expect(r.team.home.shots).toBe(count(r, 'save', 'away') + r.score.home); }, GAME_TIMEOUT);
+  // A goal with releaseTick null went in with no shot (a pass or loose puck): no shot on goal (Task 7 review).
+  const shotGoals = (r: GameResult, side: 'home' | 'away'): number => r.events.filter((e) => e.type === 'goal' && e.side === side && e.detail.releaseTick !== null).length;
+  it('shots, saves and goals reconcile', () => { const r = simulateGame(setup(4)); expect(r.team.home.shots).toBe(count(r, 'save', 'away') + shotGoals(r, 'home')); }, GAME_TIMEOUT);
   describe('every goal and shot is credited (seeds 1 to 8)', () => {
     const results: GameResult[] = [];
     const games = (): GameResult[] => { if (results.length === 0) for (let seed = 1; seed <= 8; seed++) results.push(simulateGame(setup(seed))); return results; };
@@ -78,13 +80,13 @@ describe('goalies, saves, goals', () => {
           const other = side === 'home' ? 'away' : 'home';
           const ids = new Set(s[side].players.map(p => p.id));
           expect(sum(r.players.filter(p => ids.has(p.id)).map(p => p.goals))).toBe(r.score[side]);
-          expect(r.team[side].shots).toBe(count(r, 'save', other) + r.score[side]);
+          expect(r.team[side].shots).toBe(count(r, 'save', other) + shotGoals(r, side));
         }
       });
     }, GAME_TIMEOUT * 8);
-    it('every goal is immediately preceded by a shot by the same player', () => {
+    it('every goal from a shot is immediately preceded by a shot by the same player', () => {
       const bad: string[] = [];
-      for (const r of games()) r.events.forEach((e, k) => { if (e.type !== 'goal') return; const prev = r.events[k - 1]; if (!prev || prev.type !== 'shot' || prev.playerId !== e.playerId) bad.push(`tick ${e.tick}`); });
+      for (const r of games()) r.events.forEach((e, k) => { if (e.type !== 'goal' || e.detail.releaseTick === null) return; const prev = r.events[k - 1]; if (!prev || prev.type !== 'shot' || prev.playerId !== e.playerId) bad.push(`tick ${e.tick}`); });
       expect(bad).toEqual([]);
     }, GAME_TIMEOUT * 8);
   });

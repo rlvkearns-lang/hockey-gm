@@ -15,7 +15,7 @@ export const GOLDEN_EXPECTED: Record<number, Golden> = {
     ],
     "final": "712886b182697f71",
     "score": "4-2",
-    "events": 4285
+    "events": 4279
   },
   "42": {
     "roster": "1a569608feefa31c",
@@ -45,6 +45,6 @@ export const GOLDEN_EXPECTED: Record<number, Golden> = {
     ],
     "final": "2c6e750e95221ad5",
     "score": "1-2",
-    "events": 4511
+    "events": 4510
   }
 };

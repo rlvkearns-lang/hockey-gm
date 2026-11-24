@@ -21,7 +21,7 @@ import { confirmTurnover as confirmTurnover_ } from './turnovers';
 import { assignJobs as assignJobs_, driveOf as driveOf_, isTiedUp as isTiedUp_, steeredByContest as steeredByContest_ } from './team-play';
 import { initialPlans as initialPlans_, initialTeamPhase as initialTeamPhase_ } from './commit';
 import type {
-  ContestState, GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, Side, SkaterState, Tactics,
+  ContestState, GameEvent, GameResult, GameSetup, GameState, GoalieState, PlayerDef, Position, ShotInFlight, Side, SkaterState, Tactics,
 } from './types';
 import { validateSetup as validateSetup_ } from './validate';
 import { dist as dist_, hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
@@ -477,6 +477,11 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
   }
 
 
+  /** A shot cut short by a whistle or the horn ends as a `miss` (Task 7 review: every shot release has one outcome). */
+  function missAtWhistle(shot: ShotInFlight): void {
+    events.push(gameEvent(state, { type: 'miss', side: shot.side, playerId: shot.shooterId, otherId: state.goalies[shot.side === 'home' ? 'away' : 'home'].id, pos: state.puck.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick } }));
+  }
+
   function liveTick(): void {
     const prevPuckX = state.puck.pos.x;
     if (state.pickupBlock !== null && state.tick >= state.pickupBlock.untilTick) state.pickupBlock = null;
@@ -516,7 +521,10 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
         }
       }
     }
+    const flying = state.shotInFlight;
     const call = refereeTick(state, prevPuckX, defs);
+    // A whistle while a shot is still on its way ends it as a miss (every shot release has exactly one outcome).
+    if (call && flying !== null && state.shotInFlight === null) missAtWhistle(flying);
     if (call) events.push(call);
     const turnover = confirmTurnover(state);
     if (turnover) events.push(turnover);
@@ -526,6 +534,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     state.clock = Math.max(0, (PERIOD_TICKS - liveTicks) * DT);
 
     if (liveTicks >= PERIOD_TICKS) {
+      // A shot still on its way at the horn is a miss (Task 7 review: every shot release has exactly one outcome).
+      if (state.shotInFlight !== null) missAtWhistle(state.shotInFlight);
       events.push(gameEvent(state, { type: 'periodEnd', side: null, playerId: null, otherId: null, pos: state.puck.pos, detail: { period: state.period } }));
       state.carrierId = null;
       state.carrierPlan = null;
