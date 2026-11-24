@@ -330,13 +330,14 @@ export type GameState = {
   pickupBlock: { ids: string[]; untilTick: number } | null;
   /**
    * A pass on its way: its intended receiver skates onto it and may take it at any speed until tick `untilTick`.
-   * `tried` lists the opponents who have had their one chance to intercept it. `aim` is where it was aimed (his blade
+   * `tried` lists the opponents who have had their one chance to intercept it; `clear`, the passer's checkers, who get no
+   * try on its first tick or ticks (actions.ts checkersOf; Task 8 review). `aim` is where it was aimed (his blade
    * where he would be when it arrived); `bobbled` is set once it has come off his stick (he takes it at the next touch).
    * `cover` (0 to 1) is how well an opponent could get his stick into its lane when it was thrown (passing.ts PassPlan.cover;
    * 0 for a rim). `oneTimer`: a pass across the slot to a man in a scoring area (actions.ts executePass), which he may shoot
    * at once.
    */
-  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; pressure: number; aim: Vec2; bobbled: boolean; cover: number; oneTimer: boolean } | null;
+  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; clear?: string[]; pressure: number; aim: Vec2; bobbled: boolean; cover: number; oneTimer: boolean } | null;
   /** The last one-timer pass taken: by whom and on which tick (Task 7; null when none, cleared at a whistle). */
   oneTimerTaken: { id: string; tick: number } | null;
   /**

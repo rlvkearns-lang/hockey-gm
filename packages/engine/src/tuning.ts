@@ -256,8 +256,11 @@ export const TUNING = deepFreeze({
     interceptSpeed: [12, 22] as [number, number],
     /** Below interceptSpeed[0] the chance rises linearly to slowFactor times as much for a dead puck (Task 7 review). */
     slowFactor: 1.5,
-    /** Opponents this close (m) to the passer as he lets it go get no interception try at it (their pressure is in its error). */
-    clearOfPasser: 1.5,
+    /**
+     * Opponents this close (m) to the passer as he lets it go get no interception try at it on the tick of its release
+     * and the clearTicks ticks after it (their pressure is in its error); after that they try like anyone (Task 8 review).
+     */
+    clearOfPasser: 1.5, clearTicks: 2,
     /** Share of interceptions that are clean takes; the rest are deflections that leave the puck loose. */
     interceptTake: 0.6,
     /** A deflected pass keeps this share of its speed and turns by a random angle in this range (rad), either way. */

@@ -140,14 +140,16 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
   const oneTimer = isOneTimerPass(state, from, aim);
   release(state, from, dcos(angle) * plan.speed, dsin(angle) * plan.speed, 0, out, 'pass', toId);
   state.pendingPass = {
-    fromId, toId, untilTick: state.tick + Math.round((plan.arriveSeconds + PASS.graceSeconds) / DT), tried: checkersOf(state, from), pressure,
+    fromId, toId, untilTick: state.tick + Math.round((plan.arriveSeconds + PASS.graceSeconds) / DT), tried: [], clear: checkersOf(state, from), pressure,
     aim: { x: aim.x, y: aim.y }, bobbled: false, cover: plan.cover, oneTimer,
   };
 }
 
 /**
  * The opponents within PASS.clearOfPasser (m) of the passer as he lets it go: the pressure they put on him is in the pass's
- * error (and a poke check is theirs to try), so, as with a shot and its blockers, they get no interception try at it.
+ * error (and a poke check is theirs to try), so they get no interception try at it as it leaves his blade: on the tick
+ * of its release and the PASS.clearTicks ticks after it (pendingPass.clear). After that they try like anyone
+ * (Task 8 review, Important 1: they were exempt for its whole flight).
  */
 function checkersOf(state: GameState, from: SkaterState): string[] {
   const ids: string[] = [];
@@ -340,7 +342,7 @@ export function executeRim(state: GameState, fromId: string, toId: string | null
   const l = hypot2(to.x - p.x, to.y - p.y);
   out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'rim', distance: toId === null ? null : l, hand: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump', toId);
-  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: checkersOf(state, s), pressure, aim: { x: to.x, y: to.y }, bobbled: false, cover: 0, oneTimer: false };
+  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], clear: checkersOf(state, s), pressure, aim: { x: to.x, y: to.y }, bobbled: false, cover: 0, oneTimer: false };
 }
 
 /**
@@ -389,6 +391,7 @@ export function tryIntercept(
   // comes too late (Task 7 review: the order of the tries is the order along the path).
   const mx = p.pos.x - prev.x, my = p.pos.y - prev.y, m2 = mx * mx + my * my;
   const along = (q: Vec2): number => (m2 === 0 ? 0 : clamp(((q.x - prev.x) * mx + (q.y - prev.y) * my) / m2, 0, 1));
+  const clearNow = pass.clear !== undefined && state.tick - releaseTick <= PASS.clearTicks;
   let catchAt = 2;
   const recv = pass.bobbled ? null : skaterById(state, pass.toId);
   if (recv !== null && recv.onIce && recv.downT === 0) {
@@ -397,6 +400,8 @@ export function tryIntercept(
   }
   for (const s of state.skaters) {
     if (!s.onIce || s.leaving || s.downT > 0 || steeredByContest(state, s) || s.side === from.side || pass.tried.includes(s.id)) continue;
+    // The passer's checkers get no try as it leaves his blade (checkersOf).
+    if (clearNow && pass.clear!.includes(s.id)) continue;
     const d = defs.get(s.id)!;
     const blade = bladePos(s.pos, s.facing, d.shoots, bladeScratch);
     if (along(blade) > catchAt && along(s.pos) > catchAt) continue;

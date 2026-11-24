@@ -227,3 +227,35 @@ describe('passing: a pass the receiver can take (Task 6)', () => {
     expect(covered.share).toBeGreaterThan(0.05); expect(covered.share).toBeGreaterThan(open.share * 3 + 0.02); expect(covered.share).toBeLessThanOrEqual(0.97);
   }, 60_000);
 });
+
+// Task 8 review, Important 1: the passer's checker was exempt for the pass's whole flight.
+describe('the passer\'s checker (Task 8 review)', () => {
+  /** `n` 16 m passes along y = 0 past a checker 1.2 m ahead of the passer with his blade in the lane: the ticks after the release on which he picked it off. */
+  function checkerTakes(n: number): number[] {
+    const at: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const st = stateWith({ carrier: 'home', puckX: -5, carrierSlot: 'C' });
+      only(st, ['home:C', 'home:LW', 'away:LD']);
+      st.puck.pos = { x: -5, y: 0 };
+      place(st, 'home:LW', 12, 0.4); skater(st, 'home', 'LW').facing = Math.PI;
+      // 1.2 m from the passer (at (-5.6, 0)); a left shot facing -y has his blade 0.9 m toward -y and 0.4 m toward +x: on the lane.
+      place(st, 'away:LD', -4.6, 0.7); skater(st, 'away', 'LD').facing = -Math.PI / 2;
+      const rng = createRng(9000 + i);
+      executePass(st, 'home-C', 'home-LW', defs, rng);
+      expect(st.pendingPass!.clear).toEqual(['away-LD']); expect(st.pendingPass!.tried).toEqual([]);
+      const t0 = st.tick;
+      for (let t = 0; t < 30 && st.pendingPass !== null; t++) {
+        st.tick++;
+        const prev = { x: st.puck.pos.x, y: st.puck.pos.y };
+        stepPuck(st.puck, DT);
+        if (tryIntercept(st, defs, rng, prev)) { at.push(st.tick - t0); break; }
+      }
+    }
+    return at;
+  }
+  it('gets no try as it leaves the blade (the release tick and the two after), and the same draw as anyone after that', () => {
+    const at = checkerTakes(400);
+    expect(at.length / 400).toBeGreaterThan(0.2); expect(at.length / 400).toBeLessThanOrEqual(0.97);
+    expect(Math.min(...at)).toBe(3);
+  });
+});
