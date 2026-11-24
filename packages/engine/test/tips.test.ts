@@ -82,4 +82,10 @@ describe('tips (Task 8)', () => {
     expect(goal!.playerId).toBe('home-C'); expect(goal!.detail.tippedFrom).toBe('home-LD'); expect(goal!.assistIds[0]).toBe('home-LD');
     expect(shot!.playerId).toBe('home-C'); expect(shot!.detail.tippedFrom).toBe('home-LD'); expect(goal!.detail.releaseTick).toBe(0);
   }, 120_000);
+  // Task 8 review, Minor 2: after a tip the line starts at the tipper's blade, with his own body beside it.
+  it('the man who tipped it is not his own screen: no tipped shot on goal is screened with only him in front', () => {
+    const shots = tippedShots(1500).flatMap((s) => s.events.filter((e) => e.type === 'shot'));
+    expect(shots.length).toBeGreaterThan(30);
+    for (const e of shots) if (e.type === 'shot') { expect(e.detail.tippedFrom).not.toBeNull(); expect(e.detail.screened).toBe(false); }
+  }, 60_000);
 });

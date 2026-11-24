@@ -36,7 +36,7 @@ export type PlayCounterKey =
   | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
-  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'passGoals'
+  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals'
   | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
   | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear';
 
@@ -54,13 +54,13 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderInside',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
-  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'passGoals',
+  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
   'netFrontHolds', 'netFrontHoldsLong', 'pointShotSaves', 'pointShotSavesNear',
 ];
 
 /** Counters that hold a largest value, not a sum: games combine by taking the largest. */
-const MAX_KEYS: ReadonlySet<PlayCounterKey> = new Set<PlayCounterKey>(['pickupSnapMax']);
+const MAX_KEYS: ReadonlySet<PlayCounterKey> = new Set<PlayCounterKey>(['pickupSnapMax', 'carryStepMax']);
 /** Adds counter `k` of one game (`v`) into the running total `c`. */
 const addInto = (c: PlayCounters, k: PlayCounterKey, v: number): void => { c[k] = MAX_KEYS.has(k) ? Math.max(c[k], v) : c[k] + v; };
 
@@ -470,9 +470,15 @@ export function createObserver(setup: GameSetup): Observer {
    * far the puck moved beyond its own travel that tick (pickupSnapMax, the largest). Call before puck(), which moves
    * prevPuck on.
    */
+  let prevCarry: { id: string; x: number; y: number } | null = null;
   function carry(st: GameState, events: readonly GameEvent[]): void {
     const live = st.phase === 'live';
     const cs = live ? skaterById(st, st.carrierId) : undefined;
+    // carryStepMax (Task 8 review, Minor 3): the furthest a puck moved in a tick while the same man carried it.
+    if (cs !== undefined) {
+      if (prevCarry !== null && prevCarry.id === cs.id) { const d = Math.hypot(st.puck.pos.x - prevCarry.x, st.puck.pos.y - prevCarry.y); if (d > c.carryStepMax) c.carryStepMax = d; }
+      prevCarry = { id: cs.id, x: st.puck.pos.x, y: st.puck.pos.y };
+    } else prevCarry = null;
     if (cs !== undefined) {
       c.carryTicks++;
       const dx = st.puck.pos.x - cs.pos.x, dy = st.puck.pos.y - cs.pos.y;

@@ -107,6 +107,12 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   // tick. Contest hand-overs (races, battles) have their own measures.
   // Task 6 review, Minor 8: the carried puck's step limit keeps it to about 0.4 m (it read 1.18 before that limit).
   it('A3: a pickup moves the puck at most 0.6 m beyond its own travel', () => { expect(counters().pickupSnapMax).toBeLessThanOrEqual(0.6); }, 60_000);
+  // Task 8 review, Minor 3: the 0.4 m carry step (game.test.ts, seeds 1-3) holds on seeds 1-16 too, a frame push included.
+  it('A3: a continuously carried puck never moves more than its 0.4 m step, seeds 1-16', () => { expect(countGames(Array.from({ length: 16 }, (_, i) => i + 1)).carryStepMax).toBeLessThanOrEqual(0.4 + 1e-9); }, 240_000);
+  // Task 8 review, Minor 1: no save is made beyond the goalie's reach.
+  it('A4: every save is made within the goalie\'s reach: the crossing is at most 1.6 m from his centre', () => {
+    for (const r of games()) for (const e of r.events) if (e.type === 'save') expect(Math.abs(e.detail.cross.side)).toBeLessThanOrEqual(1.6 + 1e-9);
+  }, 60_000);
   // At 1763a70, 1 to 3 goals a game came from a pass, rim or clear that slid in with no shot (1.6 a game over seeds 1-8;
   // 0.375 after the Task 5 review fixes, 0 or 1 in eight games after Task 6).
   it('A3: a pass almost never slides into the net: at most one goal in seeds 1-8 from a pass, rim, dump or clear with no shot', () => {

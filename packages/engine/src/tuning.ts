@@ -113,8 +113,9 @@ export const TUNING = deepFreeze({
    * Jobs (jobs.ts): a man holding a job is keep (m) nearer its anchor than anyone else when the jobs are handed out
    * (keepNet for the net-front defender: the man at the net stays there rather than swapping with his partner).
    * openRadius (m): a skater getting open looks at 8 spots this far round his job's anchor (officeRadius behind the net).
+   * reboundRange (m): a rebound loose within this far of the net is the net-front men's to go for (job-targets.ts).
    */
-  jobs: { keep: 3, keepNet: 6, openRadius: 3, officeRadius: 1.2 },
+  jobs: { keep: 3, keepNet: 6, openRadius: 3, officeRadius: 1.2, reboundRange: 6 },
   /**
    * Passing lanes (lanes.ts): a lane is open with `open` (m) of clear ice round it and no opponent within `space` (m) of
    * its end; a skater has a clear path to the net with no opponent ahead within clearPath (m) of his line to it.
@@ -201,6 +202,8 @@ export const TUNING = deepFreeze({
   options: {
     /** A shot from farShot (m) or more is a point shot; traffic is a netFront teammate within trafficNear (m) of the net centre (Task 7; moved here, review Minor 5). */
     farShot: 11, trafficNear: 3,
+    /** A rebound lands about rebound.out m out; each metre nearer it than the other side's nearest man is worth rebound.edge of the chance of getting it (options.ts shotAfter). */
+    rebound: { out: 2.5, edge: 0.15 },
     threat: { base: 0.005, ice: 0.035, shot: 0.15 },
     openAt: { min: 0.6, from: 1, over: 4 },
     pass: {
@@ -356,6 +359,15 @@ export const TUNING = deepFreeze({
 
   /** Goalies (goalie.ts). */
   goalie: {
+    /**
+     * Facing a shot (Task 8; moved here in the Task 8 review fixes). He faces a shot at his plane only when it is on its
+     * way in clear of the posts by the puck's and the post's radius plus postClear (m) and under the bar by barClear (m);
+     * a save needs the puck's line within `reach` (m) of his centre (a sharp-angle shot passing wider is a goal, a post
+     * or a miss).
+     */
+    face: { postClear: 0.01, barClear: 0.05, reach: 1.6 },
+    /** An attacker screens him within `off` (m) of a shot's line, `near` to `far` (m) in front of him. */
+    screen: { off: 0.6, near: 0.8, far: 4 },
     /** Top speed along his arc (m/s): base plus per point of lateral. */
     speed: { base: 1.5, perPoint: 0.035 },
     /** How fast he turns square to the puck (rad/s): base plus per point of positioning. */

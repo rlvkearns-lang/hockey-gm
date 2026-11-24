@@ -45,14 +45,16 @@ const POSE_SPEED_FACTOR = 0.4;
 /** How long a save pose and a cover are shown (s). */
 const POSE_SECONDS = 0.6;
 const COVER_SECONDS = TUNING.goalie.rebound.coverSeconds;
-/** He faces only a shot on its way in clear of the posts (by POST_CLEAR m: the puck and the post's radius) and under the bar (by BAR_CLEAR m). */
-const POST_CLEAR = PUCK_RADIUS_ + 0.03 + 0.01;
-const BAR_CLEAR = 0.05;
+/** He faces only a shot on its way in clear of the posts (by POST_CLEAR m: the puck and the post's radius, plus TUNING.goalie.face.postClear) and under the bar (by BAR_CLEAR m). */
+const POST_CLEAR = PUCK_RADIUS_ + 0.03 + TUNING.goalie.face.postClear;
+const BAR_CLEAR = TUNING.goalie.face.barClear;
 const POSTS: readonly number[] = [RINK_.netHalfWidth, -RINK_.netHalfWidth];
-/** An attacker screens him within SCREEN_OFF (m) of a shot's line, SCREEN_NEAR to SCREEN_FAR (m) in front of him. */
-const SCREEN_OFF = 0.6;
-const SCREEN_NEAR = 0.8;
-const SCREEN_FAR = 4;
+/** A save needs him within this far (m) of the puck's line (TUNING.goalie.face.reach; Task 8 review, Minor 1). */
+const SAVE_REACH = TUNING.goalie.face.reach;
+/** An attacker screens him within SCREEN_OFF (m) of a shot's line, SCREEN_NEAR to SCREEN_FAR (m) in front of him (TUNING.goalie.screen). */
+const SCREEN_OFF = TUNING.goalie.screen.off;
+const SCREEN_NEAR = TUNING.goalie.screen.near;
+const SCREEN_FAR = TUNING.goalie.screen.far;
 /** A save above this height (m) is a glove or blocker save; below it, a pad save when this far (m) off his centre, else butterfly. */
 const HIGH_SAVE_Z = 0.5;
 const PAD_OFFSET = 0.35;
@@ -258,13 +260,13 @@ function recoveringOf(g: GoalieState): number {
 }
 
 /**
- * Whether an attacker of `att` (other than `shooterId`) screens a shot meeting the goalie at (cx, cy) along (ux, uy)
+ * Whether an attacker of `att` (other than `shooterId` and the man who tipped it, `tippedBy`: Task 8 review, Minor 2) screens a shot meeting the goalie at (cx, cy) along (ux, uy)
  * (its unit direction): within SCREEN_OFF (0.6 m) of its line, between SCREEN_NEAR (0.8 m) and SCREEN_FAR (4 m) in front
  * of the goalie.
  */
-function screenedOnLine(state: GameState, att: Side, shooterId: string, cx: number, cy: number, ux: number, uy: number): boolean {
+function screenedOnLine(state: GameState, att: Side, shooterId: string, tippedBy: string | null, cx: number, cy: number, ux: number, uy: number): boolean {
   for (const s of state.skaters) {
-    if (!s.onIce || s.side !== att || s.downT > 0 || s.id === shooterId) continue;
+    if (!s.onIce || s.side !== att || s.downT > 0 || s.id === shooterId || s.id === tippedBy) continue;
     const dx = s.pos.x - cx, dy = s.pos.y - cy;
     const along = -(dx * ux + dy * uy);
     if (along < SCREEN_NEAR || along > SCREEN_FAR) continue;
@@ -305,14 +307,16 @@ export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   // Within a post's (or the bar's) reach it may ring off it if he does not stop it: then only his save is decided here.
   // (At a sharp angle the path can meet a post before the line even when it crosses the line inside it.)
   let near = Math.abs(ly) >= RINK.netHalfWidth - POST_CLEAR || lz >= RINK.netHeight - BAR_CLEAR;
-  const t0 = (gx - x0) / vx, sx = gx, sy = y0 + vy * t0;
-  for (const py of POSTS) if (segDistXY(nx, py, sx, sy, nx, ly) < POST_CLEAR) near = true;
   const t = (gx - x0) / vx;
   const cy = y0 + vy * t, cz = heightAfter(pk.z, pk.vz, t);
+  // A crossing of his plane beyond his reach (a sharp-angle shot passing wide of him) is not met here: it is played at the
+  // goal line (resolveOnNet), where it is a goal unless its line passes within his reach (Task 8 review, Minor 1).
+  if (Math.abs(cy - g.pos.y) > SAVE_REACH) return false;
+  for (const py of POSTS) if (segDistXY(nx, py, gx, cy, nx, ly) < POST_CLEAR) near = true;
   const cross: Crossing = { side: (cy - g.pos.y) * -end, height: cz };
   const v = hypot2(vx, vy);
   const speed = hypot3(vx, vy, pk.z === 0 && pk.vz === 0 ? 0 : pk.vz - GRAVITY * t);
-  const screened = state.screenedUntilTick[defSide] > state.tick || screenedOnLine(state, shot.side, shot.shooterId, gx, cy, vx / v, vy / v);
+  const screened = state.screenedUntilTick[defSide] > state.tick || screenedOnLine(state, shot.side, shot.shooterId, shot.tippedBy, gx, cy, vx / v, vy / v);
   const f = shot.from;
   const squareErr = Math.abs(wrapAngle(datan2(f.y - g.pos.y, f.x - g.pos.x) - g.facing));
   const ga = goalieAttrs(defs, g.id);
@@ -383,14 +387,33 @@ function shotGoalDetail(shot: ShotInFlight, cross: Crossing): EventDetails['goal
 }
 
 /**
- * A shot that has beaten the goalie (shot.faced) when play is cut short before it crosses the line (the horn or a
- * whistle): it is a goal (it is past him and on its way in).
+ * A shot that has beaten the goalie (shot.faced) when the horn ends the period before it crosses the line: it is a goal
+ * (it is past him and on its way in). At a referee's whistle it is not (whistleFacedShot).
  */
 export function scoreFacedShot(state: GameState, out: GameEvent[]): void {
   const shot = state.shotInFlight;
   if (shot === null || !shot.faced) return;
   state.shotInFlight = null;
   scoreGoal(state, shot.side, shot.tippedBy ?? shot.shooterId, shotGoalDetail(shot, shot.cross ?? { side: 0, height: 0 }), out);
+}
+
+/**
+ * A shot that has beaten the goalie (shot.faced) when a referee's whistle (offside, icing) stops play before it crosses
+ * the line: the whistle kills the play, so it is no goal (Task 8 review, Minor 4). Its `shot` is already in the record,
+ * and every shot on goal has one save or goal: it ends as a `save` of kind 'held' (play is dead with the puck not in);
+ * the score and the call's faceoff spot stand. (No whistle can come in the 1 to 3 ticks a faced shot flies as the rules
+ * are today: an offside call needs a carrier, an icing a puck over the goal line outside the net.)
+ */
+export function whistleFacedShot(state: GameState, defs: Map<string, PlayerDef> | undefined, out: GameEvent[]): void {
+  const shot = state.shotInFlight;
+  if (shot === null || !shot.faced) return;
+  state.shotInFlight = null;
+  const defSide = other(shot.side);
+  const g = state.goalies[defSide];
+  const end = (-state.attackDir[defSide]) as 1 | -1;
+  const cross = shot.cross ?? { side: 0, height: 0 };
+  const pose = poseFor(defs?.get(g.id)?.catches ?? 'L', { netEnd: end, dy: cross.side * -end, z: cross.height });
+  out.push(gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shot.tippedBy ?? shot.shooterId, pos: state.puck.pos, detail: { pose, kind: 'held', cross } }));
 }
 
 /**
@@ -444,7 +467,8 @@ export function resolveOnNet(
   const squareErr = Math.abs(wrapAngle(datan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
   const screened = state.screenedUntilTick[defSide] > state.tick;
   const tipped = shot !== null && shot.tippedBy !== null;
-  const p = saveChance({
+  // A shot whose line passes beyond his reach cannot be saved (Task 8 review, Minor 1): a save needs his body, glove or pad there.
+  const p = shot !== null && offLine > SAVE_REACH ? 0 : saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
     screened, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
     night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
@@ -458,7 +482,7 @@ export function resolveOnNet(
     shot.screened = screened;
   }
 
-  if (rng.chance(p)) {
+  if (p > 0 && rng.chance(p)) {
     const pose = savePose(g, defs.get(g.id)?.catches ?? 'L', ev.y, ev.z, end);
     if (!shot) {
       // A puck that was not shot: he covers it.

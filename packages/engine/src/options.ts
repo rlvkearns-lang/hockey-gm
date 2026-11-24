@@ -139,8 +139,8 @@ const HOLD_LY = 1.4;
 /** TUNING.options.farShot: a shot from this far (m) or more is a point shot (Task 7; moved to tuning.ts, review Minor 5). */
 const FAR_SHOT = O.farShot;
 /** A rebound lands about REBOUND_OUT m out; each metre nearer it than the other side's nearest man is worth REBOUND_EDGE of the chance of getting it (shotAfter). */
-const REBOUND_OUT = 2.5;
-const REBOUND_EDGE = 0.15;
+const REBOUND_OUT = O.rebound.out;
+const REBOUND_EDGE = O.rebound.edge;
 /** TUNING.options.trafficNear: traffic is a teammate with job netFront within this far (m) of the net centre. */
 const TRAFFIC_NEAR = O.trafficNear;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */

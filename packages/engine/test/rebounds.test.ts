@@ -7,6 +7,8 @@ import { DT } from '../src/constants';
 import type { GameEvent, GameState, SaveKind, SavePose } from '../src/types';
 import { g, shareOf, skater, stateWith } from './helpers';
 import { eventsOf, flyShot, withGoalies } from './shot-lab';
+import { whistleFacedShot } from '../src/goalie';
+import { moveLoosePuck } from '../src/shots';
 
 const POSES: SavePose[] = ['glove', 'blocker', 'pad', 'butterfly'];
 const GOAL_X = 27.13;
@@ -165,4 +167,41 @@ describe('saves with an outcome (Task 8)', () => {
     for (const s of left) expect(s.detail.cross.side).toBeGreaterThan(0);
     for (const s of right) expect(s.detail.cross.side).toBeLessThan(0);
   }, 60_000);
+  // Task 8 review, Minor 1: sharp-angle shots were "saved" at his plane up to 3 m from him.
+  it('a save needs the goalie within reach: a sharp-angle shot crossing his plane wide of him is never saved out there', () => {
+    let saves = 0, shots = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      // From low on the wing, 1.2 to 2.8 m out from the goal line: its line crosses his plane well wide of him.
+      const { st, ticks } = slotShot(seed, GOAL_X - 1.2 - (seed % 5) * 0.4, (seed % 2 === 0 ? 1 : -1) * (5 + (seed % 4)));
+      for (const e of eventsOf(ticks)) {
+        if (e.type === 'shot') shots++;
+        if (e.type !== 'save') continue;
+        saves++;
+        expect(Math.hypot(e.pos.x - st.goalies.away.pos.x, e.pos.y - st.goalies.away.pos.y)).toBeLessThanOrEqual(1.6 + 1.3);
+        expect(Math.abs(e.detail.cross.side)).toBeLessThanOrEqual(1.6 + 1e-9);
+      }
+    }
+    expect(shots).toBeGreaterThan(20); expect(saves).toBeGreaterThan(5);
+  }, 60_000);
+  // Task 8 review, Minor 4: a referee's whistle kills a shot already past the goalie.
+  it('a shot past the goalie is no goal at a referee\'s whistle: it ends as a held save, the score stands', () => {
+    for (let seed = 1; seed <= 3000; seed++) {
+      const st = stateWith({ carrier: 'home', puckX: 19, puckY: 1, carrierSlot: 'C' });
+      for (const s of st.skaters) if (s.id !== 'home-C') s.onIce = false;
+      const ds = withGoalies({ goalie: g(40) }); const rng = createRng(seed); const out: GameEvent[] = [];
+      st.goalies.away.pos = { x: GOAL_X - 1.3, y: 0 }; // well out: a backhand takes over a tick from him to the line
+      executeShot(st, 'home-C', ds, rng, out, 'backhand');
+      const prev = { x: 0, y: 0 };
+      for (let t = 0; t < 60 && st.shotInFlight !== null && !st.shotInFlight.faced && st.phase === 'live'; t++) { st.tick++; moveLoosePuck(st, ds, rng, out, prev); }
+      if (st.shotInFlight === null || !st.shotInFlight.faced || st.phase !== 'live') continue;
+      const n = out.length;
+      whistleFacedShot(st, ds, out);
+      expect(st.shotInFlight).toBeNull(); expect(st.score).toEqual({ home: 0, away: 0 });
+      expect(out.length).toBe(n + 1); const e = out[n]!;
+      expect(e.type).toBe('save'); if (e.type === 'save') { expect(e.detail.kind).toBe('held'); expect(e.playerId).toBe('away-G'); expect(e.otherId).toBe('home-C'); }
+      expect(out.filter((x) => x.type === 'shot').length).toBe(1); expect(out.some((x) => x.type === 'goal')).toBe(false);
+      return;
+    }
+    throw new Error('no shot beat the goalie');
+  });
 });

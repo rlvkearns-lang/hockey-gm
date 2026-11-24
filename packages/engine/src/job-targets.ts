@@ -598,7 +598,7 @@ function reboundInFront(state: GameState, side: Side, attacking: boolean): boole
   const nx = (attacking ? state.attackDir[side] : -state.attackDir[side]) * GOAL;
   return hyp(state.puck.pos.x - nx, state.puck.pos.y) <= REBOUND_RANGE;
 }
-const REBOUND_RANGE = 6;
+const REBOUND_RANGE = TUNING.jobs.reboundRange;
 
 function chaseSpot(state: GameState, s: SkaterState, out: Vec2): void {
   const p = state.puck;
