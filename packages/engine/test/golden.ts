@@ -5,6 +5,7 @@
 import { SKATER_ATTRS, GOALIE_ATTRS } from '../src/attributes';
 import { createGame } from '../src/game';
 import { generateTeam } from '../src/roster-gen';
+import { resolveTactics } from '../src/tactics';
 import type { GameSetup, GameState, TeamDef } from '../src/types';
 
 export const GOLDEN_SEEDS = [42, 7, 123456] as const;
@@ -48,6 +49,10 @@ function hashTeam(h: Hash, t: TeamDef): void {
   for (const line of t.lines.forwards) for (const id of line) h.str(id);
   for (const pair of t.lines.defence) for (const id of pair) h.str(id);
   h.str(t.lines.goalie);
+  // Task 11: the tactics (resolved, so a setup without the optional fields hashes as its defaults).
+  const tc = resolveTactics(t.tactics);
+  for (const v of [tc.forecheck, tc.zoneEntry, tc.offence, tc.defence, tc.pinch]) h.str(v);
+  h.num(tc.shiftSeconds.forwards); h.num(tc.shiftSeconds.defence);
 }
 
 function hashPositions(h: Hash, st: GameState): void {

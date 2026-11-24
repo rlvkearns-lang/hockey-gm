@@ -283,11 +283,65 @@ export const TUNING = deepFreeze({
    * - situation: what the possession can still produce. On an odd-man rush, `rush`. Otherwise from `alone` (none of his
    *   team in the zone with him: a lone rush builds nothing better) up to `setUp` once `setUp` teammates are in the zone
    *   (men in their jobs can produce a slot chance). On a breakaway there is no floor (his carry is worth its own end);
-   * - tacticFactor: 1 until Task 11's offensive-zone tactic sets it (cycle low more patient, shoot from the point less,
-   *   rush least).
+   * - tacticFactor: the team's offensive-zone tactic (Task 11, TUNING.tactics.patience: cycle low the most patient,
+   *   shoot from the point less, rush least).
    * Set once so Task 8b's guards pass; Task 14 tunes it to NHL attempt numbers (see task-8b-report.md).
    */
-  patience: { base: 1.3, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, tacticFactor: 1, max: 2 },
+  patience: { base: 1.3, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, max: 2 },
+
+  /**
+   * Team tactics (tactics.ts, Task 11). Every factor a tactic applies is here; tactics shade option values and jobs and
+   * never decide (every chance stays inside its clamp). The default tactics (zoneEntry mixed, offence cycle, forecheck as
+   * set, defence collapse, pinch sometimes) play as the engine did before tactics.
+   *
+   * - entry: multipliers on the carrier's neutral-zone options (options.ts): `carryIn` on a carry toward the zone,
+   *   `dump` on the dump. A multiplier m makes a positive value v * m and a negative one v / m (as a habit does).
+   * - bend: the men on the ice bend an entry tactic: its factor f becomes f ** e, e = max(min, perHabit * h), h the
+   *   mean habit of the on-ice forwards for what the tactic asks for (tend.carry under 'carry', tend.dump under 'dump').
+   *   An average line (0.5) plays it as written; a line that does not like it (grinders asked to carry) plays it less.
+   *   (The brief's 0.5 + h bends too little for its own test: grinders asked to carry would dump 1.16 times as often
+   *   as a skilled line, against 1.3; perHabit 2 gives 1.34.)
+   * - offence: the brief's multipliers (lowCycle on a rim and a pass or carry to a man or a spot below the dots,
+   *   pointPass on a pass to a point man, pointShot on a shot from options.farShot m or more, rushShot on a shot on an
+   *   odd-man rush, hold on protecting it in the zone and holding it behind the net). options.ts uses them divided by
+   *   the default's (cycle), so the default plays as before and the tactics differ from each other as the brief says.
+   * - patience: TUNING.patience's tactic factor by offence.
+   * - pointIn (m): with pointShots the point men hold this much further in.
+   * - joinRush: the joinRush tendency a defenceman needs for the dJoin job (rush tactic: `rush`; otherwise `other`).
+   * - passiveF1 (rx, m): with a passive forecheck the first forechecker holds at the top of the circles (`hold`, on the
+   *   carrier's line, within `holdLy` m of the middle) while the carrier is below it.
+   * - pressure: defence 'pressure' (job-targets.ts): the wingers cover their point men at `gap` m; the corner man and the
+   *   centre both go at a carrier below the dots (the second man `second` m goal-side of him); the corner man chases a
+   *   carrier behind the net at once. 'collapse' (the default) is the defensive play as before: one man has the carrier
+   *   (pressing below the dots, containing above), the wingers cover at TUNING.cover's gap, and behind the net the man
+   *   who has the carrier waits at the post (job-targets.ts BEHIND_CHASE_SECONDS) unless he is right on him.
+   * - pinch (m): a point man goes down the wall for a loose or contested puck on his side within this far of him, and
+   *   only while a teammate with job highForward is above the puck (nearer the blue line than it).
+   * - natural: generateTeam's rules (naturalTactics), from the roster alone.
+   */
+  tactics: {
+    entry: { carry: { carryIn: 1.25, dump: 0.6 }, mixed: { carryIn: 1, dump: 1 }, dump: { carryIn: 0.8, dump: 1.6 } },
+    bend: { perHabit: 2, min: 0.2 },
+    offence: {
+      cycle: { lowCycle: 1.3, pointPass: 1, pointShot: 0.8, rushShot: 1, hold: 1.2 },
+      pointShots: { lowCycle: 1, pointPass: 1.4, pointShot: 1.4, rushShot: 1, hold: 1 },
+      rush: { lowCycle: 0.8, pointPass: 0.9, pointShot: 1, rushShot: 1.3, hold: 0.8 },
+    },
+    patience: { cycle: 1, pointShots: 0.9, rush: 0.8 },
+    pointIn: 1,
+    joinRush: { rush: 0.45, other: 0.6 },
+    passiveF1: { hold: 15.5, holdLy: 6 },
+    pressure: { gap: 1.2, second: 2.2 },
+    pinch: { often: 9, sometimes: 6, rarely: 3 },
+    natural: {
+      entry: { carry: 0.15, dump: -0.05 },
+      pointShots: { shootingPower: 74, shoot: 0.35 },
+      rush: { speed: 73, joinRush: 0.55 },
+      forecheck: { aggressive: 0.62, passive: 0.48 },
+      pressure: { bodyChecking: 72 },
+      pinch: { often: 0.5, rarely: 0.3 },
+    },
+  },
 
   /**
    * Score effects (team-play.ts scoreMargin, brain, poke checks), kept to real-hockey size. A margin is comfortable from

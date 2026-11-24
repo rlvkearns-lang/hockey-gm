@@ -137,6 +137,12 @@ const LANE_TAKERS: ReadonlySet<Job> = new Set<Job>(['f2', 'f3', 'dLineStrong', '
 /** Jobs that cover a man. */
 const COVER_JOBS: ReadonlySet<Job> = new Set<Job>(['backcheckA', 'backcheckB', 'wingStrong', 'wingWeak', 'dzCentre']);
 
+const TT = TUNING.tactics;
+const pointIn = (t: Tactics): number => (t.offence === 'pointShots' ? TT.pointIn : 0);
+const pressing = (t: Tactics): boolean => t.defence === 'pressure';
+/** The two own-zone jobs that both go at a carrier below the dots under defence 'pressure' (Task 11). */
+const PRESSERS: ReadonlySet<Job> = new Set<Job>(['dCorner', 'dzCentre']);
+
 /** The view of the play from `side`: its attack direction, the puck's rx and ly, the puck's side, and the carrier. */
 type Frame = { dir: 1 | -1; pr: number; pl: number; ps: 1 | -1; carrier: SkaterState | null };
 const frameScratch: Frame = { dir: 1, pr: 0, pl: 0, ps: 1, carrier: null };
@@ -365,8 +371,9 @@ export function jobAnchor(state: GameState, side: Side, job: Job, tactics: Tacti
     case 'lowSupport': return setRel(out, clamp(crx < 21 ? crx + 7 : crx - 7, BLUE + 1, 25.5), ps * 11, dir);
     case 'office': return setRel(out, 28.3, -ps * 1.2, dir);
     case 'highForward': return setRel(out, 16, ps * 2, dir);
-    case 'pointStrong': return setRel(out, 9.1, ps * 8.5, dir);
-    case 'pointWeak': return setRel(out, 9.1, -ps * 4, dir);
+    // (Task 11: a team that shoots from the point holds its point men TUNING.tactics.pointIn m further in.)
+    case 'pointStrong': return setRel(out, 9.1 + pointIn(tactics), ps * 8.5, dir);
+    case 'pointWeak': return setRel(out, 9.1 + pointIn(tactics), -ps * 4, dir);
     case 'driveWide': return pr > BLUE + DRIVE_IN ? setRel(out, GOAL - 1, -ps * 1.6, dir) : setRel(out, Math.min(pr + 2, BLUE - DRIVE_WAIT), -ps * 8, dir);
     case 'driveMiddle': return pr > BLUE + DRIVE_IN ? setRel(out, GOAL - 2.3, 0, dir) : setRel(out, Math.min(pr + 1, BLUE - DRIVE_WAIT), ps * 1, dir);
     // The trailer stays outside the line until the play is well in.
@@ -756,12 +763,40 @@ export function carrierTaker(state: GameState, side: Side): SkaterState | null {
 }
 
 /**
+ * Under defence 'pressure' (Task 11): when the man who has the carrier holds dCorner or dzCentre and the carrier is below
+ * the dots (and in front of the goal line), `s`, holding the other of the two, goes at him as well, from the slot side
+ * (TUNING.tactics.pressure.second m from him toward the slot). Returns false otherwise.
+ */
+function secondPresser(state: GameState, s: SkaterState, out: Want): boolean {
+  const taker = carrierTaker(state, s.side);
+  if (taker === null || taker === s) return false;
+  const c = curCarrier(state);
+  if (c === null || c.side === s.side) return false;
+  const dir = state.attackDir[s.side];
+  const crx = c.pos.x * dir;
+  if (crx >= CONTAIN_ABOVE || crx < -GOAL) return false;
+  const tj = jobNow(state, s.side, indexOf(state, taker.id));
+  if (tj === null || !PRESSERS.has(tj)) return false;
+  setRel(spotScratch, -20, 0, dir);
+  const dx = spotScratch.x - c.pos.x, dy = spotScratch.y - c.pos.y, l = hyp(dx, dy) || 1;
+  out.pos.x = c.pos.x + (dx / l) * TT.pressure.second;
+  out.pos.y = c.pos.y + (dy / l) * TT.pressure.second;
+  out.face = null;
+  out.slow = 'coast';
+  out.follow = 'man';
+  out.markId = c.id;
+  out.through = true;
+  out.effort = 'sprint';
+  return true;
+}
+
+/**
  * Has the carrier (`s` is carrierTaker): below the dots, or wherever the carrier is shielding the puck (his plan is
  * protect), he pressures him (PRESS_GAP goal-side, skating through him); above them he contains him (CONTAIN_GAP
  * goal-side). Behind the net he waits at the near post until he is within
  * BEHIND_CHASE_RANGE of the carrier or has waited BEHIND_CHASE_SECONDS. Returns false when `s` is not the taker.
  */
-function takeCarrier(state: GameState, s: SkaterState, out: Want): boolean {
+function takeCarrier(state: GameState, s: SkaterState, out: Want, tactics: Tactics): boolean {
   if (carrierTaker(state, s.side) !== s) return false;
   const c = curCarrier(state)!;
   const dir = state.attackDir[s.side];
@@ -769,7 +804,8 @@ function takeCarrier(state: GameState, s: SkaterState, out: Want): boolean {
   const p = out.pos;
   out.face = null;
   out.slow = 'coast';
-  if (crx < -BEHIND_RX) {
+  // (Task 11: a team that pressures the puck goes behind the net at once.)
+  if (crx < -BEHIND_RX && !pressing(tactics)) {
     const plan = state.plans[indexOf(state, s.id)]!;
     // He has waited once his post spot (a held spot, no man) is BEHIND_TICKS old.
     const waited = plan.follow === 'spot' && plan.markId === null && state.tick - plan.targetTick > BEHIND_TICKS;
@@ -808,7 +844,7 @@ function takeLane(state: GameState, s: SkaterState, out: Vec2): boolean {
   return true;
 }
 
-function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: Job, tactics: Tactics, out: Want, shadow: boolean): void {
+function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: Job, tactics: Tactics, out: Want, shadow: boolean, gap?: number): void {
   const mark = stickyMark(state, s, rule);
   if (mark === null) {
     const fallback = jobAnchor(state, s.side, job, tactics, anchorScratch);
@@ -817,7 +853,7 @@ function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: 
     if (shadow && shadowSpot(state, s, spotScratch, fallback) !== null) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; out.follow = 'puck'; }
     return;
   }
-  coverSpot(state, s, mark, coverGap(state, s, mark), out.pos);
+  coverSpot(state, s, mark, gap ?? coverGap(state, s, mark), out.pos);
   if (shadow && shadowSpot(state, s, spotScratch, out.pos) !== null) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; }
   out.follow = 'man';
   out.markId = mark.id;
@@ -832,7 +868,9 @@ function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: 
 export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<string, PlayerDef>, tactics: Tactics, out: Want): Want {
   jobWantOwn(state, s, job, defs, tactics, out);
   // In his own zone the defender nearest the carrier has him, whatever his job (someone always has the carrier).
-  if (CARRIER_TAKERS.has(job) && takeCarrier(state, s, out)) return out;
+  if (CARRIER_TAKERS.has(job) && takeCarrier(state, s, out, tactics)) return out;
+  // Defence 'pressure' (Task 11): the other of the corner man and the centre goes at a carrier below the dots too.
+  if (pressing(tactics) && PRESSERS.has(job) && secondPresser(state, s, out)) return out;
   // The defender nearest the most dangerous pass takes that lane first, whatever his job; the others play theirs.
   if (LANE_TAKERS.has(job) && takeLane(state, s, out.pos)) {
     if (out.follow === 'spot') out.follow = 'puck';
@@ -932,6 +970,13 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
       return out;
     case 'f1': {
       if (opp === null) { p.x = state.puck.pos.x; p.y = state.puck.pos.y; out.follow = 'puck'; out.effort = 'sprint'; return out; }
+      // A passive forecheck (Task 11, the trap): he holds at the top of the circles, on the carrier's line, until the
+      // carrier comes up to it.
+      if (tactics.forecheck === 'passive' && opp.pos.x * dir > TT.passiveF1.hold) {
+        setRel(p, TT.passiveF1.hold, clamp(opp.pos.y * dir, -TT.passiveF1.holdLy, TT.passiveF1.holdLy), dir);
+        out.face = state.puck.pos;
+        return out;
+      }
       pressSpot(state, s, opp, PRESS_GAP, p);
       out.follow = 'man';
       out.markId = opp.id;
@@ -1028,7 +1073,8 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
     }
     case 'wingStrong': case 'wingWeak':
       // The weak-side winger sags into the lane to the most dangerous man when it is within reach (shadowSpot).
-      cover(state, s, pointMen(state, s.side)[job === 'wingStrong' ? 0 : 1]!, job, tactics, out, job === 'wingWeak');
+      // (Task 11: under defence 'pressure' they cover their point men tight, TUNING.tactics.pressure.gap.)
+      cover(state, s, pointMen(state, s.side)[job === 'wingStrong' ? 0 : 1]!, job, tactics, out, job === 'wingWeak', pressing(tactics) ? TT.pressure.gap : undefined);
       return out;
     default:
       // Utility jobs are steered elsewhere; hold where he is.

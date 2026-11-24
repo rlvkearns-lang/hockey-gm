@@ -502,7 +502,8 @@ export function createObserver(setup: GameSetup): Observer {
     // draw its most likely kind of option gets.
     if (st.tick % BRAIN_INTERVAL_TICKS === 0 && !sit.breakaway && !sit.oddMan && !sit.behindNet && !sit.pressuredLow) {
       const me = defs.get(cs.id)!;
-      listOptions(st, me, defs, optionScratch);
+      // (Task 11: with his team's tactics, as the brain values them.)
+      listOptions(st, me, defs, optionScratch, undefined, setup[cs.side].tactics);
       c.normalDecisionPoints++;
       // Before the kind cap (Task 6 review): certain when one kind gets over 0.97 of the draw; the cap binds when that
       // happens with another kind on the list.
@@ -751,4 +752,192 @@ export function countGames(seeds: number[]): PlayCounters {
   const c = emptyCounters();
   for (const r of seeds.map(observeSeed)) for (const k of PLAY_COUNTER_KEYS) addInto(c, k, r.counters[k]);
   return c;
+}
+
+// ---- one team's tactics (Task 11) ----
+
+/**
+ * One team's numbers, the ones its tactics move (Task 11), as sums over games. `side` is the team watched; rx is toward
+ * the net it attacks.
+ * - carryIns: its carrier takes the puck over the offensive blue line (the same man carrying on both ticks).
+ *   dumpIns: a dump or a rim it releases in the neutral zone.
+ * - ozonePossessions / ozoneTicks: as the play measures (its possession, the puck in the offensive zone), for it alone;
+ *   ozoneLowTicks: of those, with the puck below the faceoff dots (rx > 21.03); lowPasses: a pass or rim it releases
+ *   below the dots, a pass going to a teammate also below them (the cycle).
+ * - attempts / pointAttempts (released 11 m or more from the net: TUNING.options.farShot) / defenceAttempts.
+ * - forecheckTicks: live ticks with an opposing carrier in its offensive zone; forecheckTwoDeep: of those, with two or
+ *   more of its forwards below the far hash marks (rx > 21); forecheckDeep: the number of them summed.
+ * - dzoneCarrierTicks: live ticks with an opposing carrier in its own zone; dzoneCarrierPressed: one of its skaters
+ *   (standing) within 3 m of him; dzoneCarrierTwo: two of them.
+ * - allowedSlot / allowedPoint: the other side's attempts released in the slot (rx > 17, |ly| < 4.3, the shooter's
+ *   frame) and from 11 m or more.
+ * - behindSpells: an opposing carrier behind its net (beyond rx 27.43 of his attack, within 4 m of the middle) that it
+ *   chased, or that lasted 1.0 s; behindChased: of those, chased: one of its skaters went behind the goal line within
+ *   2 m of him or came within 1.2 m of him in the spell's first 1.0 s.
+ * - pinches: one of its defencemen, standing in the offensive zone (rx > 6.62) with the puck loose there, is given the
+ *   loose-puck job (chase or battleSupport) he did not hold; pinchesWithoutCover: of those, with no teammate holding job
+ *   highForward nearer the blue line than the puck (each read from the tick before, when the jobs were handed out).
+ */
+export type TacticCounters = Record<TacticCounterKey, number>;
+export type TacticCounterKey =
+  | 'games' | 'carryIns' | 'dumpIns' | 'ozonePossessions' | 'ozoneTicks' | 'ozoneLowTicks' | 'lowPasses'
+  | 'attempts' | 'pointAttempts' | 'defenceAttempts' | 'forecheckTicks' | 'forecheckTwoDeep' | 'forecheckDeep'
+  | 'dzoneCarrierTicks' | 'dzoneCarrierPressed' | 'dzoneCarrierTwo' | 'allowedSlot' | 'allowedPoint' | 'behindSpells' | 'behindChased'
+  | 'pinches' | 'pinchesWithoutCover';
+const TACTIC_KEYS: readonly TacticCounterKey[] = [
+  'games', 'carryIns', 'dumpIns', 'ozonePossessions', 'ozoneTicks', 'ozoneLowTicks', 'lowPasses',
+  'attempts', 'pointAttempts', 'defenceAttempts', 'forecheckTicks', 'forecheckTwoDeep', 'forecheckDeep',
+  'dzoneCarrierTicks', 'dzoneCarrierPressed', 'dzoneCarrierTwo', 'allowedSlot', 'allowedPoint', 'behindSpells', 'behindChased',
+  'pinches', 'pinchesWithoutCover',
+];
+const DOTS_RX = 21.03;
+const HASH_RX = 21;
+const PUCK_JOBS = new Set(['chase', 'battleSupport', 'receive']);
+
+/** Call `tick` after every `game.step()` with `game.drainEvents()`; `counters()` gives `side`'s TacticCounters for the game. */
+export function createTacticObserver(setup: GameSetup, side: Side): { tick(state: GameState, events: readonly GameEvent[]): void; counters(): TacticCounters } {
+  const c = Object.fromEntries(TACTIC_KEYS.map((k) => [k, 0])) as TacticCounters;
+  c.games = 1;
+  const opp = otherSide(side);
+  const BLUE = RINK.blueLineX, GOAL = RINK.goalLineX;
+  const isDslot = (s: SkaterState): boolean => s.slot === 'LD' || s.slot === 'RD';
+  let prev: { carrier: string | null; puckRx: number; puckLy: number; live: boolean; jobs: string[]; rx: number[]; ly: number[]; down: boolean[]; onIce: boolean[] } | null = null;
+  let inZone = false;
+  let behind: { id: string; ticks: number; chased: boolean; counted: boolean } | null = null;
+  return {
+    tick(st, events) {
+      const dir = st.attackDir[side], live = st.phase === 'live';
+      const prx = st.puck.pos.x * dir;
+      const cs = live && st.carrierId !== null ? st.skaters.find((k) => k.id === st.carrierId) : undefined;
+      for (const e of events) {
+        if (e.type === 'pass' && e.side === side && (e.detail.kind === 'dump' || e.detail.kind === 'rim')) {
+          const rx = e.pos.x * dir;
+          if (rx > -BLUE && rx <= BLUE) c.dumpIns++;
+        }
+        if (e.type === 'pass' && e.side === side && (e.detail.kind === 'pass' || e.detail.kind === 'rim') && e.pos.x * dir > DOTS_RX) {
+          const to = e.otherId === null ? undefined : st.skaters.find((k) => k.id === e.otherId);
+          if (e.detail.kind === 'rim' || (to !== undefined && to.pos.x * dir > DOTS_RX)) c.lowPasses++;
+        }
+        if (e.type === 'release' && e.detail.kind === 'shot' && e.side !== null) {
+          const d = st.attackDir[e.side], rx = e.pos.x * d, ly = e.pos.y * d, far = Math.hypot(GOAL - rx, ly) >= TUNING.options.farShot;
+          if (e.side === side) {
+            c.attempts++;
+            if (far) c.pointAttempts++;
+            const s = st.skaters.find((k) => k.id === e.playerId);
+            if (s && isDslot(s)) c.defenceAttempts++;
+          } else {
+            if (far) c.allowedPoint++;
+            if (rx > 17 && Math.abs(ly) < 4.3) c.allowedSlot++;
+          }
+        }
+      }
+      // entries
+      if (live && prev !== null && prev.live && cs !== undefined && cs.side === side && prev.carrier === cs.id && prev.puckRx <= BLUE && prx > BLUE) c.carryIns++;
+      // offensive-zone possessions
+      const mine = live && st.possession === side && prx > BLUE;
+      if (mine) { if (!inZone) c.ozonePossessions++; c.ozoneTicks++; if (prx > DOTS_RX) c.ozoneLowTicks++; }
+      inZone = mine;
+      if (live && cs !== undefined && cs.side === opp) {
+        const crx = cs.pos.x * dir;
+        if (crx > BLUE) {
+          c.forecheckTicks++;
+          let deep = 0;
+          for (const s of st.skaters) if (s.onIce && s.side === side && !isDslot(s) && s.downT === 0 && s.pos.x * dir > HASH_RX) deep++;
+          c.forecheckDeep += deep;
+          if (deep >= 2) c.forecheckTwoDeep++;
+        }
+        if (crx < -BLUE) {
+          c.dzoneCarrierTicks++;
+          let near = 0;
+          for (const s of st.skaters) if (s.onIce && s.side === side && s.downT === 0 && Math.hypot(s.pos.x - cs.pos.x, s.pos.y - cs.pos.y) <= 3) near++;
+          if (near >= 1) c.dzoneCarrierPressed++;
+          if (near >= 2) c.dzoneCarrierTwo++;
+        }
+        // behind its own net
+        if (crx < -27.43 && Math.abs(cs.pos.y) < 4) {
+          if (behind === null || behind.id !== cs.id) behind = { id: cs.id, ticks: 0, chased: false, counted: false };
+          behind.ticks++;
+          if (behind.ticks <= ticksOf(1.0) && !behind.chased) {
+            for (const s of st.skaters) {
+              if (!s.onIce || s.side !== side || s.downT > 0) continue;
+              const d = Math.hypot(s.pos.x - cs.pos.x, s.pos.y - cs.pos.y);
+              if (d <= 1.2 || (s.pos.x * dir < -GOAL && d <= 2)) { behind.chased = true; break; }
+            }
+          }
+          if (!behind.counted && (behind.chased || behind.ticks >= ticksOf(0.5))) {
+            // Counted once it is a spell (0.5 s) or chased; its chase is settled after 1.0 s.
+            if (behind.ticks >= ticksOf(1.0) || behind.chased) { behind.counted = true; c.behindSpells++; if (behind.chased) c.behindChased++; }
+          }
+        } else behind = null;
+      } else behind = null;
+      // pinches, against the tick before (when this tick's jobs were handed out)
+      if (live && prev !== null && prev.live && prev.carrier === null && prev.puckRx > BLUE) {
+        st.skaters.forEach((s, i) => {
+          if (s.side !== side || !isDslot(s) || !prev!.onIce[i] || prev!.down[i] || prev!.rx[i]! <= BLUE - 1) return;
+          const job = st.plans[i]!.job;
+          if ((job !== 'chase' && job !== 'battleSupport') || PUCK_JOBS.has(prev!.jobs[i]!)) return;
+          c.pinches++;
+          let cover = false;
+          st.skaters.forEach((m, k) => { if (m.side === side && k !== i && prev!.onIce[k] && prev!.jobs[k] === 'highForward' && prev!.rx[k]! < prev!.puckRx) cover = true; });
+          if (!cover) c.pinchesWithoutCover++;
+        });
+      }
+      prev = {
+        carrier: live ? st.carrierId : null, puckRx: prx, puckLy: st.puck.pos.y * dir, live,
+        jobs: st.plans.map((p) => p.job), rx: st.skaters.map((s) => s.pos.x * dir), ly: st.skaters.map((s) => s.pos.y * dir),
+        down: st.skaters.map((s) => s.downT > 0), onIce: st.skaters.map((s) => s.onIce),
+      };
+    },
+    counters: () => ({ ...c }),
+  };
+}
+
+const tacticCache = new Map<string, TacticCounters>();
+/**
+ * `side`'s TacticCounters over games with `setup`'s teams on seeds 1..n (each game played once per process for the same
+ * setup and side), summed.
+ */
+export function tacticCounts(setup: GameSetup, side: Side, n: number, seeds: readonly number[] = Array.from({ length: n }, (_, i) => i + 1)): TacticCounters {
+  const sum = Object.fromEntries(TACTIC_KEYS.map((k) => [k, 0])) as TacticCounters;
+  for (const seed of seeds) {
+    const key = JSON.stringify([setup.home, setup.away, side, seed]);
+    let r = tacticCache.get(key);
+    if (r === undefined) {
+      const s = { ...setup, seed };
+      const game = createGame(s);
+      const obs = createTacticObserver(s, side);
+      while (!game.done) { game.step(); obs.tick(game.state, game.drainEvents()); }
+      r = obs.counters();
+      tacticCache.set(key, r);
+    }
+    for (const k of TACTIC_KEYS) sum[k] += r[k];
+  }
+  return sum;
+}
+
+/** The measures read from TacticCounters. */
+export function tacticMeasures(c: TacticCounters): {
+  dumpInShare: number; ozoneSecondsPerPossession: number; lowSecondsPerPossession: number; lowPassesPerPossession: number;
+  pointAttemptShare: number; defenceAttemptsPerGame: number; attemptsPerGame: number; twoDeepShare: number; meanDeep: number;
+  dzonePressedShare: number; dzoneTwoShare: number; slotToPoint: number; allowedSlotPerGame: number; allowedPointPerGame: number;
+  chaseShare: number; pinchesPerGame: number;
+} {
+  return {
+    dumpInShare: ratio(c.dumpIns, c.dumpIns + c.carryIns),
+    ozoneSecondsPerPossession: ratio(c.ozoneTicks * DT, c.ozonePossessions),
+    lowSecondsPerPossession: ratio(c.ozoneLowTicks * DT, c.ozonePossessions),
+    lowPassesPerPossession: ratio(c.lowPasses, c.ozonePossessions),
+    pointAttemptShare: ratio(c.pointAttempts, c.attempts),
+    defenceAttemptsPerGame: ratio(c.defenceAttempts, c.games),
+    attemptsPerGame: ratio(c.attempts, c.games),
+    twoDeepShare: ratio(c.forecheckTwoDeep, c.forecheckTicks),
+    meanDeep: ratio(c.forecheckDeep, c.forecheckTicks),
+    dzonePressedShare: ratio(c.dzoneCarrierPressed, c.dzoneCarrierTicks),
+    dzoneTwoShare: ratio(c.dzoneCarrierTwo, c.dzoneCarrierTicks),
+    slotToPoint: ratio(c.allowedSlot, c.allowedPoint),
+    allowedSlotPerGame: ratio(c.allowedSlot, c.games),
+    allowedPointPerGame: ratio(c.allowedPoint, c.games),
+    chaseShare: ratio(c.behindChased, c.behindSpells),
+    pinchesPerGame: ratio(c.pinches, c.games),
+  };
 }

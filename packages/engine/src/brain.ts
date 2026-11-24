@@ -5,7 +5,7 @@ import { RINK } from './rink';
 import { TUNING as TUNING_ } from './tuning';
 import { steeredByContest as steeredByContest_ } from './team-play';
 import type { Rng } from './rng';
-import type { CarrierPlan, CarryLane, GameEvent, GameState, PlayerDef, SkaterState } from './types';
+import type { CarrierPlan, CarryLane, GameEvent, GameState, PlayerDef, Side, SkaterState, Tactics } from './types';
 import { hypot2 as hypot2_, type Vec2 } from './vec';
 import { clamp as clamp_, findSkater as findSkater_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
@@ -107,7 +107,7 @@ function holdTicks(sit: Situation): number {
 }
 
 /** The decision point the carrier `s`, carrying out `plan`, has reached, or null (brainTick). */
-function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, plan: CarrierPlan, lookTicks: number): CarrierPlan['why'] | null {
+function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, plan: CarrierPlan, lookTicks: number, tactics?: Tactics): CarrierPlan['why'] | null {
   // (Always run: it keeps the checker on him up to date.)
   const pressure = pressureArrives(state, s, plan);
   const sit = readSituationInto(state, s, decideScratch);
@@ -118,7 +118,7 @@ function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Ma
   if (pressure) return 'pressure';
   const toGo = plan.kind === 'carry' && plan.to !== null ? hypot2(plan.to.x - s.pos.x, plan.to.y - s.pos.y) : Infinity;
   if (toGo <= D.arrive) return 'arrive';
-  const opts = listOptions(state, me, defs, optionScratch, sit);
+  const opts = listOptions(state, me, defs, optionScratch, sit, tactics);
   // Inside his plan's minimum hold only a clearly better option (D.margin) makes him choose again. Once it has run out
   // (Task 8b) he chooses again when he sees anything worth D.marginHeld more than what he is doing, or it is gone from
   // his list; while his plan is still the best he sees he keeps at it, and the hold starts again. (An expiry that
@@ -160,10 +160,10 @@ function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Ma
  * What the carrier does next: every option he has is valued (options.ts listOptions) and he takes the best as he sees
  * it (chooseOption), favouring what he is committed to (state.carrierPlan, when it is his).
  */
-export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, rng: Rng, situation: Situation = sitScratch): Decision {
+export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, rng: Rng, situation: Situation = sitScratch, tactics?: Tactics): Decision {
   const s = findSkater(state, me.id);
   if (!s) throw new Error(`no skater ${me.id}`);
-  const opts = listOptions(state, me, defs, optionScratch, situation);
+  const opts = listOptions(state, me, defs, optionScratch, situation, tactics);
   const plan = state.carrierPlan !== null && state.carrierPlan.id === me.id ? state.carrierPlan : null;
   const o = chooseOption(opts, me, situation, plan, rng);
   switch (o.kind) {
@@ -187,9 +187,10 @@ export function decideCarrier(state: GameState, me: PlayerDef, defs: Map<string,
  * (BRAIN_INTERVAL_TICKS); between them he carries out his plan. Writes state.carrierPlan (cleared while nobody carries).
  * Its events (release, and pass) go into `out` (a shot's own event comes when it ends). A carrier steered by a contest
  * (being hit, from impact on) may still pass, shoot, rim, dump or clear, but his skating belongs to the contest, so a
- * carry or protect decision changes nothing.
+ * carry or protect decision changes nothing. Each side's `tactics` (Task 11) shade his option values (options.ts listOptions);
+ * without them he plays the default tactics.
  */
-export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = [], lookTicks: number = BRAIN_INTERVAL_TICKS): void {
+export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = [], lookTicks: number = BRAIN_INTERVAL_TICKS, tactics?: Record<Side, Tactics>): void {
   if (state.carrierId === null) { state.carrierPlan = null; return; }
   const prev = state.carrierPlan;
   const fresh = prev === null || prev.id !== state.carrierId;
@@ -199,7 +200,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   // Shielding it in a board battle (Task 9) he holds it, keeping his plan, until the battle decides what happens to it:
   // no decision (options.ts listOptions offers only protect then).
   if (!fresh && shieldingInBattle(state, s)) return;
-  const why = fresh ? 'gain' : decisionPoint(state, s, defs.get(s.id)!, defs, prev, lookTicks);
+  const why = fresh ? 'gain' : decisionPoint(state, s, defs.get(s.id)!, defs, prev, lookTicks, tactics?.[s.side]);
   if (why === null) return;
   const busy = steeredByContest(state, s);
   const me = defs.get(s.id)!;
@@ -212,7 +213,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
     state.carrierPlan = np;
   }
   const sit = sitScratch;
-  const d = decideCarrier(state, me, defs, rng, sit);
+  const d = decideCarrier(state, me, defs, rng, sit, tactics?.[s.side]);
   const plan: CarrierPlan = state.carrierPlan!;
   // A shot off the wrap he was carrying out, at a post, is a wraparound (actions.ts shotTypeFor reads the plan's lane).
   const wrap = d.kind === 'shoot' && plan.lane === 'wrap' && atWrapPost(state, s);

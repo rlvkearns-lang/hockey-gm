@@ -52,3 +52,13 @@ describe('roster-gen', () => {
     expect(left / n).toBeGreaterThan(0.84); expect(left / n).toBeLessThan(0.92);
   });
 });
+
+describe('roster-gen tactics (Task 11)', () => {
+  it('each team gets the tactics that suit its roster, with the usual shift lengths', async () => {
+    const { naturalTactics } = await import('../src/tactics');
+    for (const seed of [1, 2, 3, 4]) {
+      const t = generateTeam(seed, 'T', 'T');
+      expect(t.tactics).toEqual({ ...naturalTactics(t.players, t.lines), shiftSeconds: { forwards: 45, defence: 55 } });
+    }
+  });
+});

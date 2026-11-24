@@ -1,6 +1,7 @@
 import { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from './attributes';
 import { PLAYER_TYPES } from './player-types';
 import { createRng, type Rng } from './rng';
+import { naturalTactics } from './tactics';
 import type { PlayerDef, Position, TeamDef, Tendencies } from './types';
 import { clamp } from './util';
 
@@ -85,7 +86,7 @@ function assignCatches(seed: number, players: PlayerDef[]): void {
   for (const p of players) if (p.position === 'G') p.catches = rng.chance(CATCHES_LEFT) ? 'L' : 'R';
 }
 
-/** 12 forwards, 6 defencemen, 2 goalies. `overall` is the mean attribute before type bias. */
+/** 12 forwards, 6 defencemen, 2 goalies, and the tactics that suit them (tactics.ts naturalTactics). `overall` is the mean attribute before type bias. */
 export function generateTeam(seed: number, name: string, abbr: string, overall = 70): TeamDef {
   const rng = createRng(seed);
   const players: PlayerDef[] = [];
@@ -111,13 +112,15 @@ export function generateTeam(seed: number, name: string, abbr: string, overall =
   add('G', 'Goalie');
   assignNumbers(seed, players);
   assignCatches(seed, players);
+  const lines = { forwards, defence, goalie };
 
   return {
     id: abbr.toLowerCase(),
     name,
     abbr,
     players,
-    lines: { forwards, defence, goalie },
-    tactics: { forecheck: 'balanced', shiftSeconds: { forwards: 45, defence: 55 } },
+    lines,
+    // Tactics that suit the roster (Task 11): a pure function of the players and lines, no draw, so the roster is as before.
+    tactics: { ...naturalTactics(players, lines), shiftSeconds: { forwards: 45, defence: 55 } },
   };
 }

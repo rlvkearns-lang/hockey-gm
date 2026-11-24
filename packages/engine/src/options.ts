@@ -37,7 +37,8 @@ import { shotQuality as shotQuality_, threat as threat_ } from './threat';
 import { TUNING } from './tuning';
 import { dcos as dcos_, dexp as dexp_, dpow as dpow_, dsin as dsin_ } from './dmath';
 import type { Rng } from './rng';
-import type { CarrierPlan, CarryLane, GameState, PlayerDef, SavePose, Side, SkaterState } from './types';
+import { DEFAULT_TACTICS, entryFactors as entryFactors_, lineHabit as lineHabit_, offenceFactors as offenceFactors_, patienceFactor as patienceFactor_, shade as shade_, type ResolvedTactics } from './tactics';
+import type { CarrierPlan, CarryLane, GameState, PlayerDef, SavePose, Side, SkaterState, Tactics } from './types';
 import { saveOutcomeChances } from './rebounds';
 import type { Vec2 } from './vec';
 // Local bindings of hot imports (a call through an imported binding costs more under the test runner). Never alias
@@ -65,6 +66,11 @@ const dsin = dsin_;
 const dpow = dpow_;
 const shotQuality = shotQuality_;
 const threat = threat_;
+const entryFactors = entryFactors_;
+const lineHabit = lineHabit_;
+const offenceFactors = offenceFactors_;
+const patienceFactor = patienceFactor_;
+const shade = shade_;
 
 export type Situation = {
   rx: number; ly: number; zone: 'D' | 'N' | 'O'; pressure: number;
@@ -226,10 +232,11 @@ function defenderGoalSide(state: GameState, s: SkaterState): boolean {
  * How patient the carrier is with the puck in the zone he attacks (Task 8b, TUNING.patience): base less perShoot per
  * point of his shoot tendency over 0.5 (a shooter is less patient), times what the possession can still produce (on an
  * odd-man rush `situation.rush`; otherwise from `situation.alone`, nobody of his in the zone with him, up to
- * `situation.setUp` with `setUp` teammates in it), times tacticFactor (Task 11's offensive-zone tactic), within [0, max].
+ * `situation.setUp` with `setUp` teammates in it), times `tacticFactor` (Task 11: his team's offensive-zone tactic,
+ * tactics.ts patienceFactor; 1 for the default), within [0, max].
  * The puck in the zone is then worth at least patience * PROSPECT to him (listOptions).
  */
-export function patienceOf(state: GameState, s: SkaterState, me: PlayerDef, oddMan: boolean): number {
+export function patienceOf(state: GameState, s: SkaterState, me: PlayerDef, oddMan: boolean, tacticFactor = 1): number {
   let by: number = PT.situation.rush;
   if (!oddMan) {
     const dir = state.attackDir[s.side];
@@ -237,7 +244,7 @@ export function patienceOf(state: GameState, s: SkaterState, me: PlayerDef, oddM
     for (const m of state.skaters) if (m.onIce && m.side === s.side && m !== s && !m.leaving && m.pos.x * dir > BLUE) mates++;
     by = PT.situation.alone + (PT.situation.setUp - PT.situation.alone) * clamp(mates / PT.setUp, 0, 1);
   }
-  return clamp((PT.base - PT.perShoot * (me.tendencies.shoot - 0.5)) * by * PT.tacticFactor, 0, PT.max);
+  return clamp((PT.base - PT.perShoot * (me.tendencies.shoot - 0.5)) * by * tacticFactor, 0, PT.max);
 }
 
 /**
@@ -283,6 +290,19 @@ export function readSituation(state: GameState, s: SkaterState): Situation {
   return readInto(state, s, { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 });
 }
 
+/** The tactics listOptions plays without a team's: the defaults (shiftSeconds is not read). */
+const NO_TACTICS: Tactics = { forecheck: 'balanced', shiftSeconds: { forwards: 45, defence: 55 } };
+/** A team's tactics resolved, kept per Tactics object (they never change during a game). */
+const resolved = new WeakMap<Tactics, ResolvedTactics>();
+function resolvedOf(t: Tactics): ResolvedTactics {
+  let r = resolved.get(t);
+  if (r === undefined) {
+    r = { forecheck: t.forecheck, shiftSeconds: t.shiftSeconds, zoneEntry: t.zoneEntry ?? DEFAULT_TACTICS.zoneEntry, offence: t.offence ?? DEFAULT_TACTICS.offence, defence: t.defence ?? DEFAULT_TACTICS.defence, pinch: t.pinch ?? DEFAULT_TACTICS.pinch };
+    resolved.set(t, r);
+  }
+  return r;
+}
+
 /** listOptions' situation when its caller passes none (private scratch). */
 const ownSituation: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
 
@@ -311,11 +331,17 @@ export function shieldingInBattle(state: GameState, s: SkaterState): boolean {
 
 /**
  * Every option he has, each with value = chance it works * (threat it leads to - threat here) - (1 - that chance) *
- * what losing it here costs. Refills and returns `out`, and writes his situation into `situation`. (Tactics, Task 11,
- * will come in as a parameter when they shade an option.) A carrier shielding the puck in a board battle (`roles.carrier`
- * of one in `protect`) has only `protect` (Task 9).
+ * what losing it here costs. Refills and returns `out`, and writes his situation into `situation`. A carrier shielding the
+ * puck in a board battle (`roles.carrier` of one in `protect`) has only `protect` (Task 9).
+ *
+ * His team's `tactics` (Task 11, tactics.ts; the defaults when absent, which change nothing) shade values, never the
+ * list: in the neutral zone a carry toward the zone by entryFactors' carryIn and the dump by its dump (bent by the
+ * forwards on the ice); in the zone he attacks (offenceFactors) a rim, a pass to a man below the dots and the office
+ * carry by lowCycle, a pass to a point man by pointPass, a shot from TUNING.options.farShot m or more by pointShot, a
+ * shot on an odd-man rush by rushShot, protecting it and holding it behind the net by hold; and his patience by
+ * patienceFactor. A factor k makes a positive value v * k and a negative one v / k (tactics.ts shade).
  */
-export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, out: Option[], situation: Situation = ownSituation): Option[] {
+export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, out: Option[], situation: Situation = ownSituation, tactics: Tactics = NO_TACTICS): Option[] {
   out.length = 0;
   const s = findSkater(state, me.id);
   if (s === null) { out.push({ kind: 'protect', value: 0 }); return out; }
@@ -329,12 +355,21 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const srx = s.pos.x * dir, sly = s.pos.y * dir;
   const outside = rx <= BLUE;
   const mode = sit.breakaway ? 'break' : sit.oddMan ? 'odd' : sit.behindNet ? 'behind' : sit.pressuredLow ? 'low' : 'normal';
+  // Tactics (Task 11): in the zone he attacks, the offence factors; in the neutral zone, the entry factors.
+  const tac = resolvedOf(tactics);
+  const off = offenceFactors(tac);
+  const inZone = rx > BLUE;
+  let carryIn = 1, dumpK = 1;
+  if (sit.zone === 'N' && tac.zoneEntry !== 'mixed') {
+    const e = entryFactors(tac, lineHabit(state, side, defs, 'dump', 'F'), lineHabit(state, side, defs, 'carry', 'F'));
+    carryIn = e.carryIn; dumpK = e.dump;
+  }
 
   // Patience (Task 8b): in the zone he attacks (no breakaway: there his carry is worth the chance at its end) the puck is
   // worth at least `floor`, his patience times the best look the possession can still produce. The same floor holds for
   // every spot in the zone an option leads to (keepAt, worthAt), so it shifts every comparison alike: an option is worth
   // taking for what it adds to, or risks of, a possession worth that much.
-  const floor = rx > BLUE && mode !== 'break' ? patienceOf(state, s, me, sit.oddMan) * PROSPECT : 0;
+  const floor = rx > BLUE && mode !== 'break' ? patienceOf(state, s, me, sit.oddMan, patienceFactor(tac.offence)) * PROSPECT : 0;
   const spot = threat(rx, ly) * (0.6 + 0.4 * (1 - pressure));
   const here = spot > floor ? spot : floor;
   /** A spot in the zone worth `v` by itself is worth at least the floor. */
@@ -434,6 +469,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
         const tie = tieOf(state, s.id);
         if (tie > 0) { const k = 1 - TUNING.engage.limits.shootValue * tie; v = v >= 0 ? v * k : v / k; }
       }
+      // Tactics: a shot from the point, or one on an odd-man rush.
+      if (inZone && dNet >= FAR_SHOT) v = shade(v, off.pointShot);
+      if (mode === 'odd') v = shade(v, off.rushShot);
       const ot = state.oneTimerTaken;
       if (ot !== null && ot.id === s.id && state.tick - ot.tick <= TUNING.shot.types.oneTimerTicks) v += V.oneTimerBonus;
       out.push({ kind: 'shoot', value: v + shootOn });
@@ -502,7 +540,10 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // From inside the zone, a pass out to a man at or outside the line, who will carry it back in while the passer
     // (and whoever else) is still inside, puts them offside.
     if (!outside && mrx < BLUE + 1) v -= V.offside;
-    v = habit(v, tend.pass) + passOn;
+    v = habit(v, tend.pass);
+    // Tactics: a pass to the point, or one low (the cycle).
+    if (inZone) v = shade(v, isPoint(state, m) ? off.pointPass : mrx > DOTS ? off.lowCycle : 1);
+    v += passOn;
     // Vision: he sees the best `seen` passes as he reads them (value plus the error of his read, fixed for the possession).
     passKey.toId = m.id;
     const sv = v + readError(plan, passKey, T0, sit.since);
@@ -542,7 +583,11 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (mode === 'break') to = gEnd + (1 - gEnd) * endKeep(a.shootingAccuracy, hyp(GOAL - trx, tly)) * here;
     else { const sp = spaceAt(state, side, tw); to = worthAt(threat(trx, tly) * openAt(sp), gEnd * lookLeft(sp, a.poise), trx); }
     let v = valueOf(chance, to);
-    v = habit(v, tend.carry) - moveOn;
+    v = habit(v, tend.carry);
+    // Tactics: a carry toward the zone from the neutral zone (entry), the office (the cycle).
+    if (sit.zone === 'N' && trx > srx) v = shade(v, carryIn);
+    else if (lane === 'office') v = shade(v, off.lowCycle);
+    v -= moveOn;
     out.push({ kind: 'carry', lane, to: { x: tw.x + 0, y: tw.y + 0 }, value: v });
   };
   const ps = sgn(sly);
@@ -570,7 +615,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     let bestPass = -Infinity;
     for (const pv of passValues) if (pv > bestPass) bestPass = pv;
     const kept = passValues.length > 0 ? Math.max(0, bestPass - passOn) * O.hold.keep : 0;
-    out.push({ kind: 'carry', lane: 'hold', to: { x: tw.x + 0, y: tw.y + 0 }, value: keep * kept - (1 - keep) * loss - moveOn });
+    out.push({ kind: 'carry', lane: 'hold', to: { x: tw.x + 0, y: tw.y + 0 }, value: shade(keep * kept - (1 - keep) * loss, off.hold) - moveOn });
     // Wrap: to the post the goalie is further from, worth what a shot from there would be.
     const gl = state.goalies[side === 'home' ? 'away' : 'home'].pos;
     const grx = gl.x * dir, gly = gl.y * dir;
@@ -621,7 +666,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // 0.34 of the time, about as after a carry; the race alone valued it lost half the time or more.)
     const chance = clamp(O.rimFit.base + O.rimFit.slope * race(state, s, tw, to) * (to === null ? O.blindRim : 1), 0.03, 0.97);
     const v = habit(valueOf(chance, keepAt(threat(drx, dly) * openAt(spaceAt(state, side, tw)), drx)), tend.pass);
-    out.push({ kind: 'rim', toId: to === null ? null : to.id, value: v });
+    out.push({ kind: 'rim', toId: to === null ? null : to.id, value: inZone ? shade(v, off.lowCycle) : v });
   }
 
   // ---- dump (neutral zone) or clear (own zone) ----
@@ -633,7 +678,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     chance = (chance + race(state, s, tw, null)) / 2;
     let v = valueOf(chance, threat(D.x, D.y), here + V.turnoverCost * threat(-D.x, D.y));
     if (rx < 0) v -= V.icing;
-    out.push({ kind: 'dump', value: habit(v, tend.dump) });
+    out.push({ kind: 'dump', value: shade(habit(v, tend.dump), dumpK) });
   }
   if (mode === 'normal' && sit.zone === 'D') {
     const cx = RIM.clear.x;
@@ -649,7 +694,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   if (mode === 'normal' || mode === 'low' || mode === 'odd') {
     const keep = clamp(O.protect.base - pressure * ((outside ? O.protect.lossOut : O.protect.loss) - O.protect.lossPerPoint * composite(a, PROTECTING)), 0.03, 0.97);
     // Unpressured, shielding the puck only stands still: it costs O.protect.idle * (1 - pressure).
-    out.push({ kind: 'protect', value: valueOf(keep, here) - moveOn - O.protect.idle * (1 - pressure) });
+    const pv = valueOf(keep, here);
+    out.push({ kind: 'protect', value: (inZone ? shade(pv, off.hold) : pv) - moveOn - O.protect.idle * (1 - pressure) });
   }
   if (out.length === 0) out.push({ kind: 'protect', value: 0 });
   return out;

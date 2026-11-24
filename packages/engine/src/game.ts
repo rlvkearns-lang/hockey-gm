@@ -4,6 +4,7 @@ import { comesFromBehind as comesFromBehind_, receiveChance as receiveChance_, r
 import { BENCH_DOORS as BENCH_DOORS_, benchTick as benchTick_, finishChanges as finishChanges_, initialBench as initialBench_ } from './bench';
 import { type EngagedPair, resolveBodies as resolveBodies_, resolveGoalies as resolveGoalies_, routeAroundGoalies as routeAroundGoalies_ } from './bodies';
 import { brainTick as brainTick_ } from './brain';
+import { resolveTactics } from './tactics';
 import { BRAIN_INTERVAL_TICKS, DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
@@ -279,7 +280,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
   const lookTicks = opts.lookTicks ?? BRAIN_INTERVAL_TICKS;
   const defs = new Map<string, PlayerDef>();
   for (const side of SIDES) for (const p of setup[side].players) defs.set(p.id, p);
-  const tactics: Record<Side, Tactics> = { home: setup.home.tactics, away: setup.away.tactics };
+  // Each side's tactics, resolved once (Task 11: the optional fields take their defaults).
+  const tactics: Record<Side, Tactics> = { home: resolveTactics(setup.home.tactics), away: resolveTactics(setup.away.tactics) };
   let drained = events.length;
 
   // Per-skater bookkeeping (derived, rebuilt on restore), parallel to state.skaters (whose order never changes).
@@ -561,7 +563,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
     if (state.staggered.length > 0) state.staggered = state.staggered.filter((x) => state.tick < x.untilTick);
     benchTick(state, setup, DT, events);
     assignJobs(state, defs, tactics);
-    brainTick(state, defs, rng, events, lookTicks);
+    brainTick(state, defs, rng, events, lookTicks, tactics);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
     engagementTick(state, defs, rng, events);
 

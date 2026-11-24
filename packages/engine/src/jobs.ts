@@ -48,8 +48,32 @@ export const DEFENCE_JOBS: readonly Job[] = [
 const DEFENCE: ReadonlySet<Job> = new Set(DEFENCE_JOBS);
 /** Jobs handed out to one man by the loose puck before the phase's jobs: chase, receive, battleSupport. */
 const PUCK_JOBS: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'battleSupport']);
-/** A defenceman joins the rush (`dJoin`) only with this joinRush tendency or more. */
-const JOIN_RUSH_MIN = 0.6;
+/**
+ * A defenceman joins the rush (`dJoin`) only with this joinRush tendency or more (Task 11: TUNING.tactics.joinRush,
+ * lower for a team whose offence is the rush).
+ */
+const joinRushMin = (t: Tactics): number => ((t.offence ?? 'cycle') === 'rush' ? TUNING.tactics.joinRush.rush : TUNING.tactics.joinRush.other);
+const BLUE = RINK.blueLineX;
+
+/**
+ * Pinching (Task 11): with the puck loose in the zone `side` attacks, a defenceman at the point (inside the blue line,
+ * or within a metre of it) may go down the wall for it only when it is on his side of the ice, within his team's pinch
+ * distance of him (TUNING.tactics.pinch by tactics.pinch) and a teammate with job highForward is above it (nearer the
+ * blue line than the puck): otherwise he holds the line and someone else goes. True when `d` may not go.
+ */
+function heldAtPoint(state: GameState, side: Side, d: SkaterState, tactics: Tactics): boolean {
+  if (!isDefenceman(d)) return false;
+  const dir = state.attackDir[side], p = state.puck.pos;
+  const prx = p.x * dir;
+  if (prx <= BLUE || d.pos.x * dir <= BLUE - 1) return false;
+  const reach = TUNING.tactics.pinch[tactics.pinch ?? 'sometimes'];
+  if (hyp(p.x - d.pos.x, p.y - d.pos.y) > reach || (p.y >= 0) !== (d.pos.y >= 0)) return true;
+  for (let k = 0; k < state.skaters.length; k++) {
+    const t = state.skaters[k]!;
+    if (t !== d && t.onIce && t.side === side && t.downT === 0 && state.plans[k]!.job === 'highForward' && t.pos.x * dir < prx) return false;
+  }
+  return true;
+}
 
 const isDefenceman = (s: SkaterState): boolean => s.slot === 'LD' || s.slot === 'RD';
 
@@ -171,6 +195,7 @@ function stickyNearest(state: GameState, pool: number[], job: Job, to: Vec2): nu
 const poolScratch: number[] = [];
 const netScratch: Vec2 = { x: 0, y: 0 };
 const chasePool: number[] = [];
+const heldPool: number[] = [];
 /** Jobs are handed out afresh every ASSIGN_TICKS ticks (0.2 s), and at once on a trigger or a change of the list. */
 const ASSIGN_TICKS = 6;
 const outHome: (Job | null)[] = [];
@@ -221,14 +246,22 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
     const stay: Job | null = phase === 'ozone' ? 'netFront' : phase === 'dzone' ? 'dNet' : null;
     const shot = state.shotInFlight;
     chasePool.length = 0;
-    for (const i of pool) if (stay === null || state.plans[i]!.job !== stay) chasePool.push(i);
-    const from = chasePool.length > 0 ? chasePool : pool;
-    let puckMan: number;
-    if (shot !== null) {
+    heldPool.length = 0;
+    // (A point man who may not pinch is in neither pool: he never goes, Task 11.)
+    for (const i of pool) {
+      if (heldAtPoint(state, side, sk[i]!, tactics)) continue;
+      heldPool.push(i);
+      if (stay === null || state.plans[i]!.job !== stay) chasePool.push(i);
+    }
+    const from = chasePool.length > 0 ? chasePool : heldPool;
+    let puckMan = -1;
+    if (from.length === 0) {
+      // Nobody may go for it.
+    } else if (shot !== null) {
       netScratch.x = state.attackDir[shot.side] * RINK.goalLineX; netScratch.y = 0;
       puckMan = stickyNearest(state, from, 'chase', netScratch);
     } else puckMan = stickyNearest(state, from, 'chase', state.puck.pos);
-    let job: Job | null = 'chase';
+    let job: Job | null = puckMan < 0 ? null : 'chase';
     const pass = state.pendingPass;
     if (pass !== null) for (const i of pool) if (sk[i]!.id === pass.toId) { puckMan = i; job = 'receive'; }
     if (job === 'chase' && boardBattle(state) !== null) job = supportTarget(state, side) !== null ? 'battleSupport' : null;
@@ -263,7 +296,7 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
       if (out[i] !== null) continue;
       const s = sk[i]!;
       if (isDefenceman(s) !== DEFENCE.has(job)) continue;
-      if (job === 'dJoin' && (defs.get(s.id)?.tendencies.joinRush ?? 0) < JOIN_RUSH_MIN) continue;
+      if (job === 'dJoin' && (defs.get(s.id)?.tendencies.joinRush ?? 0) < joinRushMin(tactics)) continue;
       const held = state.plans[i]!.job;
       // The man at the net stays there: another job costs him keepNet more (the defenders' dNet, and since Task 8's fix
       // round the attackers' netFront).

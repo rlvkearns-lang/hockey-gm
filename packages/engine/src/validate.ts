@@ -23,6 +23,13 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 
 const POSITIONS = ['C', 'LW', 'RW', 'LD', 'RD', 'G'];
 const FORECHECKS = ['passive', 'balanced', 'aggressive'];
+/** Task 11: the optional tactics and their values (each may be absent: tactics.ts resolveTactics fills it in). */
+const OPTIONAL_TACTICS: readonly (readonly [string, readonly string[]])[] = [
+  ['zoneEntry', ['carry', 'dump', 'mixed']],
+  ['offence', ['cycle', 'pointShots', 'rush']],
+  ['defence', ['collapse', 'pressure']],
+  ['pinch', ['often', 'sometimes', 'rarely']],
+];
 const TENDENCIES: readonly (keyof Tendencies)[] = ['shoot', 'pass', 'carry', 'dump', 'hit', 'forecheck', 'netFront', 'joinRush'];
 /** Plausible body sizes (anything outside is a data error, not a player). */
 const HEIGHT_CM: [number, number] = [140, 230];
@@ -66,6 +73,10 @@ function checkTactics(team: TeamDef): void {
   for (const unit of ['forwards', 'defence'] as const) {
     const v = t.shiftSeconds[unit];
     if (!isNum(v) || v <= 0) fail('bad-tactics', `${team.abbr}: tactics.shiftSeconds.${unit} must be a positive number of seconds, got ${String(v)}`);
+  }
+  for (const [k, values] of OPTIONAL_TACTICS) {
+    const v = (t as Record<string, unknown>)[k];
+    if (v !== undefined && !values.includes(v as string)) fail('bad-tactics', `${team.abbr}: tactics.${k} must be one of ${values.join(', ')}, got ${String(v)}`);
   }
 }
 

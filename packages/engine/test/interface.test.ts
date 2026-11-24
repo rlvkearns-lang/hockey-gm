@@ -27,7 +27,7 @@ describe('the interface a viewer builds on', () => {
   it('exports a deliberate surface: the game functions, setup checks, rosters, types\' runtime parts, geometry, constants', () => {
     expect(Object.keys(engine).sort()).toEqual([
       'BENCH_DOORS', 'BLADE', 'BRAIN_INTERVAL_TICKS', 'DT', 'FACEOFF_DOTS', 'GOALIE_ATTRS', 'PERIODS', 'PERIOD_SECONDS', 'PLAYER_TYPES', 'RINK',
-      'SKATER_ATTRS', 'SetupError', 'bodyRadius', 'createGame', 'generateTeam', 'restoreGame', 'simulateGame', 'validateSetup', 'zoneOf',
+      'SKATER_ATTRS', 'SetupError', 'bodyRadius', 'createGame', 'generateTeam', 'resolveTactics', 'restoreGame', 'simulateGame', 'validateSetup', 'zoneOf',
     ]);
   });
   it('the tuning table is internal and frozen all the way down', () => {

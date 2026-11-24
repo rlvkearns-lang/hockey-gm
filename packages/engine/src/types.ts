@@ -52,9 +52,22 @@ export type Lines = {
   goalie: string;
 };
 
+/**
+ * A team's tactics (Task 11, tactics.ts). They shade the carrier's option values and the jobs; they never decide a play.
+ * The four optional fields default as noted (tactics.ts resolveTactics); the defaults play as the engine did before
+ * tactics existed. Per team only for now: per line and per game situation is a later step.
+ */
 export type Tactics = {
   forecheck: 'passive' | 'balanced' | 'aggressive';
   shiftSeconds: { forwards: number; defence: number };
+  /** How the team gets into the offensive zone. Default 'mixed'. */
+  zoneEntry?: 'carry' | 'dump' | 'mixed';
+  /** What it does once there: cycle low, shoot from the point, or attack off the rush. Default 'cycle'. */
+  offence?: 'cycle' | 'pointShots' | 'rush';
+  /** In its own zone: collapse to the net or pressure the puck. Default 'collapse'. */
+  defence?: 'collapse' | 'pressure';
+  /** How readily its point men go down the wall for a loose or contested puck. Default 'sometimes'. */
+  pinch?: 'often' | 'sometimes' | 'rarely';
 };
 
 export type TeamDef = {
