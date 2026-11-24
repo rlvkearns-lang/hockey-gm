@@ -455,7 +455,7 @@ export type EventDetails = {
    */
   pass: { kind: 'pass' | 'dump' | 'rim' | 'clear'; distance: number | null; hand: PassHand | null };
   /**
-   * A shot on goal reached the goalie (otherId: the goalie): `pos` is where it met him (at his plane), `cross` where on
+   * A shot on goal reached the goalie (otherId: the goalie): `pos` is where it met him (at his plane; for a shot that beat him by a post, or that he played on the goal line, the puck at the goal line), `cross` where on
    * him, `speed` its speed then (m/s). Followed by `save` (same tick) or `goal` (up to 4 ticks later, when it crosses the
    * line). After a tip, playerId is the tipper and `tippedFrom` the shooter; `releaseTick` is the shooter's release.
    * `screened`: an attacker screened the goalie; `rebound`: released within 3 s of a save on that net.

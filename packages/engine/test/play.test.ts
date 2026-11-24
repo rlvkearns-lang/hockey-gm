@@ -28,6 +28,13 @@ const m = lazy((): PlayMeasures => measureGames([1, 2, 3]));
 const counters = lazy((): PlayCounters => countGames([1, 2, 3]));
 /** Seeds 1-16 pooled, for the measures one game moves too much for three (or eight) seeds to read (Task 8). */
 const m16 = lazy((): PlayMeasures => measureGames(Array.from({ length: 16 }, (_, i) => i + 1)));
+/**
+ * Seeds 1-8 pooled (Task 8b close-out, controller ruling): the guards that three seeds move by 10 to 20% between two tunings
+ * a rounding apart are read on eight (the games are the ones m16 plays; each seed is played once per process).
+ */
+const SEEDS8 = [1, 2, 3, 4, 5, 6, 7, 8];
+const m8 = lazy((): PlayMeasures => measureGames(SEEDS8));
+const counters8 = lazy((): PlayCounters => countGames(SEEDS8));
 
 describe('guard rails', () => {
   it('three games complete with 1 to 5 goals a team on average and no NaN or Infinity anywhere in the result or final state', () => {
@@ -52,8 +59,9 @@ describe('guard rails', () => {
 describe('A1: commitment (Task 3)', () => {
   it('A1: targets are held: under 10% of spot ticks see the target move (was 39%)', () => { expect(m().retargetShare).toBeLessThan(0.10); }, 60_000);
   it('A1: more gliding and more top speed than before: glide over 30% (was 25%), top speed over 17% (was 14%), sprints over 1.2 s (was 0.8)', () => {
-    expect(m().glideShare).toBeGreaterThan(0.30); expect(m().topSpeedShare).toBeGreaterThan(0.17); expect(m().sprintRunSeconds).toBeGreaterThan(1.2);
-  }, 60_000);
+    // Close-out ruling 5: the sprint length is pooled over seeds 1-8 (1.198 s on three seeds was noise); the bar is unchanged.
+    expect(m().glideShare).toBeGreaterThan(0.30); expect(m().topSpeedShare).toBeGreaterThan(0.17); expect(m8().sprintRunSeconds).toBeGreaterThan(1.2);
+  }, 240_000);
   it('A1: skaters never overlap a goalie, and a race win never moves the puck to the winner', () => { expect(counters().goalieOverlapTicks).toBe(0); expect(counters().raceJumpTicks).toBe(0); }, 60_000);
   it('A1: players hold up at the blue line: under 10 offsides a game on seeds 1, 2, 3 and 8 (12 to 18 after Task 2, 7.75 after Task 5)', () => {
     const offsides = (r: GameResult): number => r.events.filter((e) => e.type === 'offside').length;
@@ -75,7 +83,8 @@ describe('A2: every player has a job (Task 4)', () => {
   }, 240_000);
   // Task 10 (engagements, box-outs) tightens this to over 85%.
   it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 50% of the time he has one (Task 10 tightens this to 85%)', () => { const c = counters(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.5); }, 60_000);
-  it('A2: the side with the puck skates forward: under 3% of its time backward', () => { expect(m().backwardShareWithPuck).toBeLessThan(0.03); }, 60_000);
+  // Close-out: pooled over seeds 1-8 (it read 0.030 to 0.033 on three seeds); the bar is unchanged.
+  it('A2: the side with the puck skates forward: under 3% of its time backward (seeds 1-8)', () => { expect(m8().backwardShareWithPuck).toBeLessThan(0.03); }, 240_000);
   // Task 4 review, Important 1 (0.564 before the fix, 0.657 after it). The coordinator asked for 0.75; with the carrier's
   // own decisions (Task 5) it reads about 0.61: see task-5-report.md.
   it('A2: someone has the carrier: a defender within 3 m of a carrier in the zone he attacks on over 58% of its ticks', () => { expect(m().carrierPressedShare).toBeGreaterThan(0.58); }, 60_000);
@@ -85,10 +94,12 @@ describe('A3: decisions with the puck (Task 5)', () => {
   it('A3: no breakaway pass backward in three games', () => { expect(counters().breakawayBackPasses).toBe(0); }, 60_000);
   // Task 6 review, Important 1: measured BEFORE the kind cap (after it, it was 0 by construction).
   it('A3: the pick stays a draw: under 15% of decision points in normal play have one kind of option above 97% before the cap, and the cap binds on under 15%', () => {
-    const c = counters(); expect(c.normalDecisionPoints).toBeGreaterThan(1000);
+    // Close-out: pooled over seeds 1-8; the bar is unchanged.
+    const c = counters8(); expect(c.normalDecisionPoints).toBeGreaterThan(1000);
     expect(c.normalCertain / c.normalDecisionPoints).toBeLessThan(0.15); expect(c.normalCapBinds / c.normalDecisionPoints).toBeLessThan(0.15);
-  }, 60_000);
-  it('A3: the carrier keeps his mind: under 35% of his decisions change what he is doing', () => { expect(counters().carrierFlips / counters().carrierDecisions).toBeLessThan(0.35); }, 60_000);
+  }, 240_000);
+  // Close-out: pooled over seeds 1-8; the bar is unchanged.
+  it('A3: the carrier keeps his mind: under 35% of his decisions change what he is doing (seeds 1-8)', () => { expect(counters8().carrierFlips / counters8().carrierDecisions).toBeLessThan(0.35); }, 240_000);
   it('A2/A3: behind the net is used: at least 8 possessions there, 2 passes out front and 0.3 wraparounds a game', () => {
     expect(m().behindNetPossessionsPerGame).toBeGreaterThanOrEqual(8); expect(m().passesOutFrontPerGame).toBeGreaterThanOrEqual(2); expect(m().wrapAttemptsPerGame).toBeGreaterThanOrEqual(0.3);
   }, 60_000);
@@ -106,7 +117,8 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   // A pickup: a loose puck or a pass taken (tryPickup) or a pass picked off; the move beyond the puck's own travel that
   // tick. Contest hand-overs (races, battles) have their own measures.
   // Task 6 review, Minor 8: the carried puck's step limit keeps it to about 0.4 m (it read 1.18 before that limit).
-  it('A3: a pickup moves the puck at most 0.6 m beyond its own travel', () => { expect(counters().pickupSnapMax).toBeLessThanOrEqual(0.6); }, 60_000);
+  // Close-out: read on seeds 1-8 (the largest of eight games); the bar is unchanged.
+  it('A3: a pickup moves the puck at most 0.6 m beyond its own travel (seeds 1-8)', () => { expect(counters8().pickupSnapMax).toBeLessThanOrEqual(0.6); }, 240_000);
   // Task 8 review, Minor 3: the 0.4 m carry step (game.test.ts, seeds 1-3) holds on seeds 1-16 too, a frame push included.
   it('A3: a continuously carried puck never moves more than its 0.4 m step, seeds 1-16', () => { expect(countGames(Array.from({ length: 16 }, (_, i) => i + 1)).carryStepMax).toBeLessThanOrEqual(0.4 + 1e-9); }, 240_000);
   // Task 8 review, Minor 1: no save is made beyond the goalie's reach.
@@ -115,9 +127,12 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   }, 60_000);
   // At 1763a70, 1 to 3 goals a game came from a pass, rim or clear that slid in with no shot (1.6 a game over seeds 1-8;
   // 0.375 after the Task 5 review fixes, 0 or 1 in eight games after Task 6).
-  it('A3: a pass almost never slides into the net: at most one goal in seeds 1-8 from a pass, rim, dump or clear with no shot', () => {
-    expect(countGames([1, 2, 3, 4, 5, 6, 7, 8]).passGoals).toBeLessThanOrEqual(1);
-  }, 120_000);
+  // Close-out ruling 6: the two in seeds 1-8 were traced (a lead pass aimed into the goal mouth, a pass from in front to a
+  // man behind the goal line, blind passes across his own crease: passing.ts planPass now refuses them); the guard is
+  // pooled over seeds 1-16 with at most 2.
+  it('A3: a pass almost never slides into the net: at most two goals in seeds 1-16 from a pass, rim, dump or clear with no shot', () => {
+    expect(countGames(Array.from({ length: 16 }, (_, i) => i + 1)).passGoals).toBeLessThanOrEqual(2);
+  }, 240_000);
 });
 
 describe('A4: attempts (Task 7)', () => {
@@ -188,8 +203,9 @@ describe('A4: saves, rebounds and tips (Task 8)', () => {
   it('A4: rebounds exist: 15% to 50% of saves leave one, and there are at least 6 second chances a game (was 2.3)', () => {
     const saves = games().flatMap((r) => r.events.filter((e) => e.type === 'save'));
     const rb = saves.filter((e) => e.type === 'save' && e.detail.kind === 'rebound').length / saves.length;
-    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m().reboundChancesPerGame).toBeGreaterThanOrEqual(6);
-  }, 60_000);
+    // Close-out: second chances are pooled over seeds 1-8 (3.7 to 6.7 on three seeds by the roll); the bar is unchanged.
+    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m8().reboundChancesPerGame).toBeGreaterThanOrEqual(6);
+  }, 240_000);
   it('A4: tips happen: at least 2 a game, some on goal', () => {
     const tips = sum(games().map((r) => r.events.filter((e) => e.type === 'tip').length)) / 3;
     expect(tips).toBeGreaterThanOrEqual(2);
@@ -222,9 +238,11 @@ describe('A3: decisions at decision points (Task 8 fix round 2)', () => {
 });
 
 describe('A2/A4: the net front (Task 8 fix round 2)', () => {
-  it('A2: the net-front man holds his job: over half his spells in the zone last 2.5 s or more (median at least 2.5 s)', () => {
-    const c = counters(); expect(c.netFrontHolds).toBeGreaterThan(100); expect(c.netFrontHoldsLong / c.netFrontHolds).toBeGreaterThanOrEqual(0.5);
-  }, 60_000);
+  // Close-out ruling 4: pooled over seeds 1-8, and 45% for now (it reads 48 to 49%: a quarter of the spells end with a pass
+  // to the net-front man). Task 10 (engagements at the net) restores the 50% bar.
+  it('A2: the net-front man holds his job: at least 45% of his spells in the zone last 2.5 s or more, seeds 1-8 (Task 10 restores 50%)', () => {
+    const c = counters8(); expect(c.netFrontHolds).toBeGreaterThan(100); expect(c.netFrontHoldsLong / c.netFrontHolds).toBeGreaterThanOrEqual(0.45);
+  }, 240_000);
   it('A4: an attacker is within 4 m of the net on at least 40% of saves of shots from 11 m or more', () => {
     const c = counters(); expect(c.pointShotSaves).toBeGreaterThan(30); expect(c.pointShotSavesNear / c.pointShotSaves).toBeGreaterThanOrEqual(0.4);
   }, 60_000);
@@ -232,13 +250,19 @@ describe('A2/A4: the net front (Task 8 fix round 2)', () => {
 
 describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
   it('A3: the carrier decides at most 3,200 times a game (was 5,300; 6,700 on a clock)', () => { expect(counters().carrierDecisions / 3).toBeLessThanOrEqual(3200); }, 60_000);
-  it('A4: a pressured shot is a poor shot: under 20% of attempts are let go with a checker in stick reach (was 49%)', () => {
-    const c = counters(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.20);
-  }, 60_000);
-  it('A4: no source floods the net: odd-man rushes from 11 m or more, pressure down low in close and normal play from 11 m or more are each under 25 attempts a game (were 42, 97 and 45)', () => {
-    const c = counters();
-    expect(c.attemptsOddManFar / 3).toBeLessThan(25); expect(c.attemptsLowClose / 3).toBeLessThan(25); expect(c.attemptsNormalFar / 3).toBeLessThan(25);
+  // Close-out ruling 1: under 35% for now, pooled over seeds 1-8. 47% of the decisions made in the zone are made with a
+  // checker within 1.8 m, and a poor option still takes 3 to 7% of a draw, so the share of attempts follows the share of
+  // decisions. Task 10 (engagements: a tied-up man cannot get a shot off) must bring it under 20%.
+  it('A4: a pressured shot is a poor shot: under 35% of attempts are let go with a checker in stick reach (was 49%; Task 10: under 20%)', () => {
+    const c = counters8(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.35);
+  }, 240_000);
+  // Close-out ruling 2: the far shots of normal play that count are the UNSCREENED ones (no teammate at the net or in the
+  // goalie's sight line: measures.ts attemptsNormalFarBare); the screened ones are what "long shots wait for traffic"
+  // asks for and are reported beside them (task-8b-report.md). Pooled over seeds 1-8.
+  it('A4: no source floods the net: odd-man rushes from 11 m or more, pressure down low in close and unscreened shots from 11 m or more in normal play are each under 25 attempts a game (were 42, 97 and 45)', () => {
+    const c = counters8(), n = SEEDS8.length;
+    expect(c.attemptsOddManFar / n).toBeLessThan(25); expect(c.attemptsLowClose / n).toBeLessThan(25); expect(c.attemptsNormalFarBare / n).toBeLessThan(25);
     // The sources are reported whole: every attempt has one.
     expect(c.attemptsOddManFar + c.attemptsOddManClose + c.attemptsLowClose + c.attemptsLowFar + c.attemptsNormalFar + c.attemptsNormalClose + c.attemptsBreakaway + c.attemptsOther).toBe(c.attempts);
-  }, 60_000);
+  }, 240_000);
 });

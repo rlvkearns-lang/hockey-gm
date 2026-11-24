@@ -156,7 +156,8 @@ function faceOf(state: GameState, s: SkaterState, job: Job): Vec2 | null {
 }
 /** The attacking jobs that face the play only once there (within FACE_NEAR m of their spot): they skate to it forward. */
 const ARRIVE_FACE: ReadonlySet<Job> = new Set<Job>(['pointStrong', 'pointWeak', 'netFront', 'office']);
-const FACE_NEAR = 3;
+/** (Task 8b close-out: 2, was 3: with possessions set up in the zone longer, point men and the net-front man shuffling backward to spots 2 to 3 m off took backward skating with the puck from 2.3% to 3.1%.) */
+const FACE_NEAR = 2;
 const near = (s: SkaterState): boolean => { const dx = s.target.x - s.pos.x, dy = s.target.y - s.pos.y; return dx * dx + dy * dy <= FACE_NEAR * FACE_NEAR; };
 const FACE_SPOT_JOBS: ReadonlySet<Job> = new Set<Job>(['dGapStrong', 'dGapWeak', 'dLineStrong', 'dLineWeak', 'dNet', 'pointStrong', 'pointWeak', 'netFront', 'battleSupport']);
 /** Jobs that follow the puck or a man every tick (the rest that follow one do so every other tick). */

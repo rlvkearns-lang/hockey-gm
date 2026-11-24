@@ -87,14 +87,14 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
  * when it went wide or over, hit the boards, turned away from the net, slowed below 3 m/s, was picked up, or is still
  * going after 3 s. Call after the puck step and pickup (an `onNet` goes to resolveOnNet instead).
  */
-export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEvent[] = [], defs?: Map<string, PlayerDef>): void {
+export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEvent[] = [], defs?: Map<string, PlayerDef>, rng?: Rng): void {
   const shot = state.shotInFlight;
   if (shot === null) return;
   if (shot.faced) {
     // A shot past the goalie is on its way in (resolveOnNet scores it at the line); one that turns back or stops short
     // (a fallback) was saved after all.
     const pk0 = state.puck, end0 = state.attackDir[shot.side];
-    if (state.carrierId !== null || pk0.vel.x * end0 <= 0 || hypot2(pk0.vel.x, pk0.vel.y) < MISS_SPEED || (state.tick - shot.tick) * DT > SHOT_MAX_SECONDS) lateSave(state, defs, out);
+    if (state.carrierId !== null || pk0.vel.x * end0 <= 0 || hypot2(pk0.vel.x, pk0.vel.y) < MISS_SPEED || (state.tick - shot.tick) * DT > SHOT_MAX_SECONDS) lateSave(state, defs, out, rng);
     return;
   }
   const end = state.attackDir[shot.side];

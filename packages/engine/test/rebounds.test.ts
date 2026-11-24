@@ -7,7 +7,7 @@ import { DT } from '../src/constants';
 import type { GameEvent, GameState, SaveKind, SavePose } from '../src/types';
 import { g, shareOf, skater, stateWith } from './helpers';
 import { eventsOf, flyShot, withGoalies } from './shot-lab';
-import { whistleFacedShot } from '../src/goalie';
+import { lateSave, resolveOnNet, whistleFacedShot } from '../src/goalie';
 import { moveLoosePuck } from '../src/shots';
 
 const POSES: SavePose[] = ['glove', 'blocker', 'pad', 'butterfly'];
@@ -203,5 +203,36 @@ describe('saves with an outcome (Task 8)', () => {
       return;
     }
     throw new Error('no shot beat the goalie');
+  });
+  // Task 8 review, Minor 5: every puck that was not shot and that he stopped on the line was a whistle.
+  it('a puck that was not shot and that he stops is covered, steered away or left loose: never a save, not always a whistle', () => {
+    let covered = 0, loose = 0, goals = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      const st = empty(); st.tick = 900; const ds = withGoalies({ goalie: g(80) }); const out: GameEvent[] = [];
+      st.puck.pos = { x: GOAL_X, y: 0.2 }; st.puck.vel = { x: 0, y: 0 };
+      st.lastRelease = { id: 'home-C', tick: 870 };
+      st.skaters.find((k) => k.id === 'home-C')!.onIce = true; st.skaters.find((k) => k.id === 'home-C')!.pos = { x: 10, y: 8 };
+      resolveOnNet(st, { kind: 'onNet', end: 1, y: 0.2, z: 0, speed: 9 }, ds, createRng(seed), out);
+      expect(out.some((e) => e.type === 'save' || e.type === 'shot')).toBe(false);
+      if (out.some((e) => e.type === 'goal')) { goals++; expect(out.find((e) => e.type === 'goal')!.detail).toMatchObject({ releaseTick: null }); }
+      else if (out.some((e) => e.type === 'freeze' && e.detail.cause === 'cover')) { covered++; expect(st.phase).toBe('stopped'); }
+      else { loose++; expect(st.phase).toBe('live'); expect(st.puck.vel.x).toBeLessThanOrEqual(0); expect(Math.hypot(st.puck.vel.x, st.puck.vel.y)).toBeGreaterThan(2); }
+    }
+    expect(covered).toBeGreaterThan(40); expect(loose).toBeGreaterThan(40); expect(goals).toBeLessThan(40);
+  });
+  // Task 8 review, Minor 9: the fallback save of a shot past him ends as any save does.
+  it('a late save of a shot past the goalie is held, steered or a rebound from where the puck is: it never slides on into the net', () => {
+    const kinds = new Set<string>();
+    for (let seed = 1; seed <= 200; seed++) {
+      const st = empty(); st.tick = 400; const ds = withGoalies(); const out: GameEvent[] = [];
+      st.puck.pos = { x: GOAL_X - 0.4, y: 0.1 }; st.puck.vel = { x: 1.5, y: 0 }; // past him, too slow to get there
+      st.shotInFlight = { shooterId: 'home-C', side: 'home', from: { x: 20, y: 0 }, fromDist: 7, tick: 380, blockTried: [], shotType: 'wrist', tippedBy: null, tipTried: [], rebound: false, screened: false, faced: true, cross: { side: 0.1, height: 0.2 } };
+      lateSave(st, ds, out, createRng(seed));
+      const save = out.find((e) => e.type === 'save'); expect(save).toBeDefined(); expect(st.shotInFlight).toBeNull();
+      if (save && save.type === 'save') kinds.add(save.detail.kind);
+      if (st.phase === 'live') expect(st.puck.vel.x).toBeLessThanOrEqual(0);
+      expect(out.some((e) => e.type === 'goal')).toBe(false);
+    }
+    expect(kinds.size).toBe(3);
   });
 });

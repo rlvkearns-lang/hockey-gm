@@ -377,9 +377,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const scoreShoot = margin === 'ahead' ? se.leaderShoot : Math.min(se.maxShoot, (margin === 'behind' ? se.trailerShoot : 1) * (1 + se.latePush * late));
       g = V.goal * q * shootSkill * (B.openNetWeight[0] + B.openNetWeight[1] * open) * dpow(calm, B.shootPressure);
       // A rushed shot (Task 8b, actions.ts shotRush: a checker in stick reach): his stick gets on it with chance
-      // rush.stick, and what gets by him is slower and wilder (RU.value of its chance at full rush from RU.valueFull m
-      // or more; in tight the goalie has no time either way, so less in proportion).
-      g *= (1 - rushStick) * (1 - RU.value * rushed * clamp(dNet / RU.valueFull, 0, 1));
+      // rush.stick, and what gets by him is slower, wilder and easier to save (RU.value of its chance at full rush).
+      g *= (1 - rushStick) * (1 - RU.value * rushed);
       // A goalie still in his last save's pose is easier to beat (goalie.ts saveChance `recovering`; Task 8b: the
       // valuation did not see it, so a rebound in front was valued as any shot).
       const gs = state.goalies[side === 'home' ? 'away' : 'home'];
@@ -596,7 +595,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (to !== null) { drx = to.pos.x * dir; dly = to.pos.y * dir; } else { drx = GOAL - RIM.corner.back; dly = -ps * RIM.corner.y; }
     tw.x = drx * dir; tw.y = dly * dir;
     // Round the boards to nobody is a puck thrown away unless his team is nearer it: O.blindRim of the race.
-    const chance = clamp(race(state, s, tw, to) * (to === null ? O.blindRim : 1), 0.03, 0.97);
+    // (Task 8b close-out, O.rimFit, set from play: after a rim in the zone the other side has the puck within 4 s 0.23 to
+    // 0.34 of the time, about as after a carry; the race alone valued it lost half the time or more.)
+    const chance = clamp(O.rimFit.base + O.rimFit.slope * race(state, s, tw, to) * (to === null ? O.blindRim : 1), 0.03, 0.97);
     const v = habit(valueOf(chance, keepAt(threat(drx, dly) * openAt(spaceAt(state, side, tw)), drx)), tend.pass);
     out.push({ kind: 'rim', toId: to === null ? null : to.id, value: v });
   }

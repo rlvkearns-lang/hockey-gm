@@ -102,6 +102,7 @@ export function saveChance(input: SaveInput): number {
   const per = skill >= 70 ? G.save.perPointAbove : G.save.perPoint;
   const skillTerm = per * G.save.skillSpan * dtanh((skill - 70) / G.save.skillSpan);
   const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0)
+    + Math.min(G.save.slowMax, G.save.perSlowSpeed * Math.max(0, G.save.slowFrom - input.shotSpeed))
     - (input.screened ? G.save.screened : 0)
     - (input.tipped ? G.save.tipped : 0)
     - G.save.recovering * clamp(input.recovering ?? 0, 0, 1)
@@ -465,7 +466,9 @@ export function resolveOnNet(
   const ll = hypot2(lx, ly) || 1;
   const offLine = Math.abs((g.pos.x - fx) * ly - (g.pos.y - fy) * lx) / ll;
   const squareErr = Math.abs(wrapAngle(datan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
-  const screened = state.screenedUntilTick[defSide] > state.tick;
+  // (Task 8 review, Minor 5: a shot played on the line is screened as one met at his plane is: by an attacker on its line.)
+  const screened = state.screenedUntilTick[defSide] > state.tick
+    || (shot !== null && screenedOnLine(state, attSide, shot.shooterId, shot.tippedBy, netX, ev.y, lx / ll, ly / ll));
   const tipped = shot !== null && shot.tippedBy !== null;
   // A shot whose line passes beyond his reach cannot be saved (Task 8 review, Minor 1): a save needs his body, glove or pad there.
   const p = shot !== null && offLine > SAVE_REACH ? 0 : saveChance({
@@ -485,11 +488,11 @@ export function resolveOnNet(
   if (p > 0 && rng.chance(p)) {
     const pose = savePose(g, defs.get(g.id)?.catches ?? 'L', ev.y, ev.z, end);
     if (!shot) {
-      // A puck that was not shot: he covers it.
-      g.pose = 'cover';
-      g.poseT = COVER_SECONDS;
-      out.push(gameEvent(state, { type: 'freeze', side: defSide, playerId: g.id, otherId: null, pos: state.puck.pos, detail: { cause: 'cover' } }));
-      stopPlay(state, endDotNear(end, state.puck.pos));
+      // A puck that was not shot: he covers it, steers it away or leaves it loose, as his pose and its speed have it
+      // (Task 8 review, Minor 5: every one he stopped was a whistle). No `save`: it was no shot on goal.
+      g.pose = pose;
+      g.poseT = POSE_SECONDS;
+      saveOutcome(state, defSide, { pose, speed: ev.speed, screened, tipped: false, reboundControl: ga.reboundControl }, cross, rng, out, 'cover');
       return 'save';
     }
     g.pose = pose;
@@ -510,7 +513,7 @@ export function resolveOnNet(
  * should leave unused): he got a piece of it after all. `save` (its `shot` was emitted when it met him), the puck loose
  * where it is (kind 'rebound').
  */
-export function lateSave(state: GameState, defs: Map<string, PlayerDef> | undefined, out: GameEvent[]): void {
+export function lateSave(state: GameState, defs: Map<string, PlayerDef> | undefined, out: GameEvent[], rng?: Rng): void {
   const shot = state.shotInFlight;
   if (shot === null || !shot.faced) return;
   state.shotInFlight = null;
@@ -519,6 +522,18 @@ export function lateSave(state: GameState, defs: Map<string, PlayerDef> | undefi
   const end = (-state.attackDir[defSide]) as 1 | -1;
   const cross = shot.cross ?? { side: 0, height: 0 };
   const pose = poseFor(defs?.get(g.id)?.catches ?? 'L', { netEnd: end, dy: cross.side * -end, z: cross.height });
-  state.lastSave = { side: defSide, tick: state.tick, kind: 'rebound' };
-  out.push(gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shot.tippedBy ?? shot.shooterId, pos: state.puck.pos, detail: { pose, kind: 'rebound', cross } }));
+  // Task 8 review, Minor 9: it ends as any save does (held, steered or a rebound, from where the puck is), so it cannot
+  // slide on over the line as a goal with no shot after its save. (Someone already has it, or the caller has no random
+  // stream: a rebound where it is, stopped.)
+  const pk = state.puck;
+  const save = gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shot.tippedBy ?? shot.shooterId, pos: pk.pos, detail: { pose, kind: 'rebound', cross } });
+  out.push(save);
+  if (state.carrierId !== null || rng === undefined) {
+    state.lastSave = { side: defSide, tick: state.tick, kind: 'rebound' };
+    if (state.carrierId === null) { pk.vel.x = 0; pk.vel.y = 0; pk.vz = 0; }
+    return;
+  }
+  g.pose = pose;
+  g.poseT = POSE_SECONDS;
+  save.detail.kind = saveOutcome(state, defSide, { pose, speed: hypot2(pk.vel.x, pk.vel.y), screened: shot.screened, tipped: shot.tippedBy !== null, reboundControl: defs ? goalieAttrs(defs, g.id).reboundControl : 70 }, cross, rng, out);
 }

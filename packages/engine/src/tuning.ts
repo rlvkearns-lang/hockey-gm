@@ -172,7 +172,7 @@ export const TUNING = deepFreeze({
     deke: 0.6,
     /** A pass's chance falls by skill.pass per point of passing under 100, a carry's by skill.carry per point of puckHandling under 100, pressured or not. */
     skill: { pass: 0.001, carry: 0.001 },
-    pick: { base: 0.0147, perPoint: 0.00012, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
+    pick: { base: 0.0147, perPoint: 0.00012, pressure: 0.0045, perPoise: 0.000067, min: 0.003 },
     /**
      * The shot's value (Task 7; Task 7 review, Important 2): P(goal) * (1 - here) plus, for each thing that can follow a
      * shot that does not score (blocked, wide, held, steered to a corner, a rebound: Task 8's outcome model), its chance
@@ -189,13 +189,16 @@ export const TUNING = deepFreeze({
      * a completed pass: 0.53 / 0.09) is the baseline. These describe the engine, not a target.
      */
     after: {
-      carry: { keep: 0.51, rush: 0.07 },
-      passFailed: { keep: 0.29, rush: 0.32 },
-      held: { keep: 0.41, rush: 0.19 },
-      steered: { keep: 0.42, rush: 0.15 },
-      rebound: { keep: 0.32, rush: 0.13 },
-      blocked: { keep: 0.24, rush: 0.34 },
-      wide: { keep: 0.28, rush: 0.15 },
+      // Measured again in the Task 8b close-out (seeds 1-12, task-8-follow-measure.ts; the engine shoots half as often and
+      // from set-up possessions now). At 43d6dcf: carry 0.51 / 0.07, passFailed 0.29 / 0.32, held 0.41 / 0.19, steered
+      // 0.42 / 0.15, rebound 0.32 / 0.13, blocked 0.24 / 0.34, wide 0.28 / 0.15.
+      carry: { keep: 0.51, rush: 0.06 },
+      passFailed: { keep: 0.32, rush: 0.26 },
+      held: { keep: 0.39, rush: 0.24 },
+      steered: { keep: 0.36, rush: 0.12 },
+      rebound: { keep: 0.24, rush: 0.05 },
+      blocked: { keep: 0.31, rush: 0.23 },
+      wide: { keep: 0.32, rush: 0.15 },
     },
     stick: 0.034, shadowed: 0.5, turnoverCost: 0.6, hold: 0.003, holdCap: 10,
     goal: 0.2, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
@@ -256,6 +259,8 @@ export const TUNING = deepFreeze({
     protect: { base: 0.97, loss: 0.275, lossPerPoint: 0.0025, idle: 0.01 },
     clearIdle: 0.04,
     blindRim: 0.6,
+    /** A rim's chance is rimFit.base + rimFit.slope * its race chance (Task 8b close-out, set from play: see options.ts). */
+    rimFit: { base: 0.3, slope: 0.65 },
     /** A shot at a goalie still in his last save's pose is worth 1 + recovering times as much at its start (Task 8b). */
     recovering: 2,
     shotLane: [0.5, 1.0] as [number, number],
@@ -340,6 +345,12 @@ export const TUNING = deepFreeze({
     contestRange: 1.5,
     maxReceiveSpeed: 16,
     pointInside: 1.5,
+    /**
+     * Task 8b close-out (passing.ts planPass): no pass whose line, carried on up to netBeyond m past its aim, reaches a goal
+     * line inside the posts, with netCone m of margin per metre travelled; no backhand or blind pass within ownNetClear m of
+     * the centre of his own net.
+     */
+    netBeyond: 4.5, netCone: 0.06, ownNetClear: 3.5,
     backhand: { speed: 0.75, error: 1.6, range: 15 },
     behind: { speed: 0.6, error: 2.2, range: 8 },
   },
@@ -370,9 +381,10 @@ export const TUNING = deepFreeze({
      * and the checker gets his stick on it with chance (stick.base + stick.perPoint * (stickChecking - 50)) * how rushed
      * (within [0.03, 0.97]): stick.block of those are blocked at his stick (a `block`), the rest go on deflected wide at
      * stick.keep of their speed. The valuation (options.ts) takes the same stick chance off the shot's chance to score,
-     * and `value` * how rushed more for the lost speed and accuracy (set from play: see task-8b-report.md).
+     * and `value` * how rushed more for the lost speed and accuracy (set from play, close-out: a fully rushed shot scores
+     * 0.13 to 0.21 of a free one from the same spot per attempt, 0.36 to 0.56 per shot on goal; see task-8b-report.md).
      */
-    rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.2, wild: 0.15, aim: 0.8, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.5, valueFull: 6 },
+    rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.2, wild: 0.15, aim: 0.8, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.6 },
     /** Shooters aim this far (m) from the centre of the net, either side, and this high. */
     aimY: [0.3, 0.65] as [number, number],
     aimZ: [0.1, 0.8] as [number, number],
@@ -465,6 +477,11 @@ export const TUNING = deepFreeze({
       highFrom: 0.9, perHighMetre: 1.5,
       /** A tipped shot (Task 8); a goalie still in his last save's pose, at the start of it (scaled by how much of it is left). */
       tipped: 0.9, recovering: 0.8,
+      /**
+       * A slow shot is easier to read (Task 8b close-out, controller ruling 7): perSlowSpeed per m/s under slowFrom, at
+       * most slowMax. A rushed shot (TUNING.shot.rushed) is slow, so the ones that get on net score clearly less often.
+       */
+      slowFrom: 34, perSlowSpeed: 0.1, slowMax: 1.2,
     },
     /** Goalie skill for the save: weights of his attributes. */
     saveSkill: { reflexes: 0.35, positioning: 0.25, glove: 0.1, blocker: 0.1, lateral: 0.1, poise: 0.1 } as Partial<Record<keyof GoalieAttrs, number>>,

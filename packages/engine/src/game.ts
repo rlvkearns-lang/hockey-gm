@@ -213,7 +213,11 @@ function noNegativeZero(state: GameState): void {
   for (const g of [state.goalies.home, state.goalies.away]) { z(g.pos); z(g.vel); g.facing += 0; }
 }
 
-/** Engine-internal options (not exported from index.ts): `lookTicks`, how often the carrier looks for a decision point (default BRAIN_INTERVAL_TICKS). For tests. */
+/**
+ * Engine-internal options (not exported from index.ts): `lookTicks`, how often the carrier looks for a decision point
+ * (default BRAIN_INTERVAL_TICKS). For tests only: it is not in GameState, so a game restored with restoreGame looks at
+ * the default interval whatever the game it was saved from used (Task 8 review, Minor 7).
+ */
 export type GameOptions = { lookTicks?: number };
 
 /** A new game of `setup` (validated first: a bad setup throws a SetupError naming the problem). */
@@ -542,7 +546,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
               else tryPickup(skaters, prevPuck);
             } else tryPickup(skaters, prevPuck);
           }
-          trackShot(state, puckEvents, events, defs);
+          trackShot(state, puckEvents, events, defs, rng);
         }
       }
       watchLastSave();

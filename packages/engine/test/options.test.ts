@@ -150,10 +150,12 @@ describe('the carrier values his options', () => {
     for (const v of [far, near]) { expect(v).toBeGreaterThan(0.25); expect(v).toBeLessThan(0.85); }
     expect(near).toBeGreaterThan(far);
   });
-  it('pressured down low he does not just protect: protect under 75%, cycle and shoot each over 5% (Task 5 review)', () => {
+  it('pressured down low he does not just protect: protect under 75%, cycle over 5%, shoot 1.5% to 15% (Task 5 review; Task 8b ruling)', () => {
     const st = stateWith({ carrier: 'home', puckX: 24, puckY: 10, carrierSlot: 'LW' }); place(st, 'away:LD', 24.4, 9.2); place(st, 'home:LD', 9.1, 8.5); place(st, 'home:RD', 9.1, -4);
     const ds = decisions(st, def({}), 2000); const share = (k: string): number => ds.filter((d) => d.kind === k).length / 2000;
-    expect(share('protect')).toBeLessThan(0.75); expect(share('rim')).toBeGreaterThan(0.05); expect(share('shoot')).toBeGreaterThan(0.05);
+    // Task 8b close-out, ruling 3: the shot was to be over 5%; with a checker 0.9 m off it is a rushed shot from a bad angle
+    // (ruling 4), which stays possible but rare: over 1.5% and under 15%.
+    expect(share('protect')).toBeLessThan(0.75); expect(share('rim')).toBeGreaterThan(0.05); expect(share('shoot')).toBeGreaterThan(0.015); expect(share('shoot')).toBeLessThan(0.15);
   });
 });
 
@@ -257,18 +259,22 @@ describe('patience and pressured shots (Task 8b)', () => {
     const free = setUp('slot'), pressed = setUp('slot');
     place(pressed, 'away:C', 21, 2.1); // 1.1 m from him, beside him: not in his lane to the net
     expect(shoots(free)).toBeGreaterThan(0.3); expect(shoots(pressed)).toBeLessThanOrEqual(shoots(free) * 0.5);
-    const taken = (st0: GameState): { speed: number; onNet: number } => {
-      let speed = 0, onNet = 0; const n = 600;
+    const taken = (st0: GameState): { speed: number; onNet: number; goals: number } => {
+      let speed = 0, onNet = 0, goals = 0; const n = 4000;
       for (let seed = 1; seed <= n; seed++) {
         const st = structuredClone(st0); const ds = withGoalies(); const rng = createRng(seed);
         executeShot(st, 'home-C', ds, rng, []);
         speed += Math.hypot(st.puck.vel.x, st.puck.vel.y) / n;
         const ev = st.shotInFlight === null ? [] : eventsOf(flyShot(st, ds, rng));
         if (ev.some((e) => e.type === 'shot')) onNet += 1 / n;
+        if (ev.some((e) => e.type === 'goal')) goals += 1 / n;
       }
-      return { speed, onNet };
+      return { speed, onNet, goals };
     };
     const f = taken(free), pr = taken(pressed);
     expect(pr.speed).toBeLessThan(f.speed * 0.9); expect(pr.onNet).toBeLessThan(f.onNet * 0.75); expect(pr.onNet).toBeGreaterThan(0.03);
+    // Close-out (ruling 7): the rushed shots that do get on net score at most 0.6 as often as free ones from the same spot.
+    expect(f.goals).toBeGreaterThan(0.03); expect(pr.goals).toBeGreaterThan(0);
+    expect(pr.goals / pr.onNet).toBeLessThanOrEqual(0.6 * (f.goals / f.onNet));
   }, 60_000);
 });

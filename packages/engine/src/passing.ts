@@ -17,7 +17,7 @@ import { RINK as RINK_ } from './rink';
 import { isTiedUp as isTiedUp_, steeredByContest as steeredByContest_ } from './team-play';
 import { TUNING } from './tuning';
 import type { GameState, PassHand, PlayerDef, SkaterState } from './types';
-import type { Vec2 } from './vec';
+import { segDistXY as segDistXY_, type Vec2 } from './vec';
 // Local bindings of hot imports (a call through an imported binding costs more under the test runner). Not on an
 // import cycle: nothing passing.ts imports imports it.
 const bladePos = bladePos_;
@@ -27,6 +27,7 @@ const dlog = dlog_;
 const dcos = dcos_;
 const dsin = dsin_;
 const crossesNet = crossesNet_;
+const segDist = segDistXY_;
 const passLaneWidth = passLaneWidth_;
 const RINK = RINK_;
 const isTiedUp = isTiedUp_;
@@ -184,6 +185,19 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
   if (check) {
     if (d < TUNING.brain.passRange[0] || d > HAND_RANGE[hand] || arriveSpeed < MIN_ARRIVE || arriveSpeed > PASS.maxReceiveSpeed + 1e-9) return null;
     if (crossesNet(p, aim)) return null;
+    // Task 8b close-out (no-shot goals traced on seeds 1-16). A pass is never aimed so that, missed, it slides on into a
+    // net: its line, carried on up to PASS.netBeyond m past the aim, does not reach a goal line inside the posts (with
+    // PASS.netCone m of margin per metre travelled: its direction error). And a backhand or blind pass is not thrown
+    // across the front of his own net (within PASS.ownNetClear m of its centre): two own goals came that way.
+    for (let end = -1; end <= 1; end += 2) {
+      const gx = end * RINK.goalLineX, vx = aim.x - p.x;
+      if (vx * end <= 0) continue;
+      const u = (gx - p.x) / vx;
+      const l = u * d;
+      // (Before the aim too: a pass from in front to a man behind the goal line goes by the post, not through the mouth.)
+      if (l - d < PASS.netBeyond && Math.abs(p.y + (aim.y - p.y) * u) < RINK.netHalfWidth + PASS.netCone * l) return null;
+    }
+    if (hand !== 'forehand' && segDist(-dir * RINK.goalLineX, 0, p.x, p.y, aim.x, aim.y) < PASS.ownNetClear) return null;
     // A body standing in the lane stops the pass (no option); an opponent who can get a stick into it before the puck
     // gets there covers it (`cover`, the best of them): the pass is riskier, not impossible.
     const ax = aim.x - p.x, ay = aim.y - p.y, l2 = d * d;

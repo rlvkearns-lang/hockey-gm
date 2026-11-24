@@ -259,3 +259,28 @@ describe('the passer\'s checker (Task 8 review)', () => {
     expect(Math.min(...at)).toBe(3);
   });
 });
+
+// Task 8b close-out: the no-shot goals traced on seeds 1-16 (a lead pass aimed into the goal mouth, a pass from in front
+// to a man behind the goal line, a blind pass across his own crease).
+describe('no pass is aimed at a net (Task 8b close-out)', () => {
+  const plan = (from: [number, number], facing: number, to: [number, number], toVel: [number, number] = [0, 0]): PassPlan | null => {
+    const st = stateWith({ carrier: 'home', puckX: from[0], puckY: from[1], carrierSlot: 'C' });
+    only(st, ['home:C', 'home:LW']);
+    const c = skater(st, 'home', 'C'); c.pos = { x: from[0], y: from[1] }; c.facing = facing; puckOnBlade(st, c, defs.get('home-C')!);
+    place(st, 'home:LW', to[0], to[1]); const lw = skater(st, 'home', 'LW'); lw.vel = { x: toVel[0], y: toVel[1] }; lw.facing = Math.atan2(from[1] - to[1], from[0] - to[0]);
+    return planPass(st, c, lw, defs, {} as PassPlan);
+  };
+  it('a pass that would slide on into the net he attacks if missed is no option; the same pass to a man who is not going there is', () => {
+    // From the corner to a man driving the net: his blade will be in the goal mouth's line when it arrives.
+    expect(plan([24, -9], Math.PI / 2, [23.5, -2.5], [5, 2.5])).toBeNull();
+    expect(plan([24, -9], Math.PI / 2, [19, 0])).not.toBeNull();
+  });
+  it('a backhand or blind pass across the front of his own net is no option; a forehand one is', () => {
+    // Home defends the net at -27.13. From beside it to a man on the other side, 2.5 m out from the goal line.
+    const across = (facing: number): PassPlan | null => plan([-24.6, -6], facing, [-24.2, 6]);
+    const fore = across(Math.PI / 2); expect(fore).not.toBeNull(); expect(fore!.hand).toBe('forehand');
+    let refused = 0;
+    for (const f of [0, -Math.PI / 2, Math.PI, -2.4, 2.6]) { const pl = across(f); if (pl === null) refused++; else expect(pl.hand).toBe('forehand'); }
+    expect(refused).toBeGreaterThanOrEqual(2);
+  });
+});

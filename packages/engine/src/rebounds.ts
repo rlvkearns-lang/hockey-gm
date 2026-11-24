@@ -68,7 +68,7 @@ function endDotNear(end: 1 | -1, p: Vec2): Vec2 {
  * plus 0.3 per point of reboundControl under 100 off straight out (50 at 50), so that it is still in front half a second
  * later. Sets state.lastSave (a held save's is cleared by the whistle). Returns the kind.
  */
-export function saveOutcome(state: GameState, goalieSide: Side, f: SaveFacts, cross: Crossing, rng: Rng, out: GameEvent[]): SaveKind {
+export function saveOutcome(state: GameState, goalieSide: Side, f: SaveFacts, cross: Crossing, rng: Rng, out: GameEvent[], cause: 'save' | 'cover' = 'save'): SaveKind {
   const c = saveOutcomeChances(f);
   const u = rng.next();
   const kind: SaveKind = u < c.held ? 'held' : u < c.held + c.steered ? 'steered' : 'rebound';
@@ -88,7 +88,7 @@ export function saveOutcome(state: GameState, goalieSide: Side, f: SaveFacts, cr
     g.poseT = COVER_SECONDS;
     pk.vel.x = 0;
     pk.vel.y = 0;
-    out.push(gameEvent(state, { type: 'freeze', side: goalieSide, playerId: g.id, otherId: null, pos: pk.pos, detail: { cause: 'save' } }));
+    out.push(gameEvent(state, { type: 'freeze', side: goalieSide, playerId: g.id, otherId: null, pos: pk.pos, detail: { cause } }));
     stopPlay(state, endDotNear(end, pk.pos));
     return kind;
   }
