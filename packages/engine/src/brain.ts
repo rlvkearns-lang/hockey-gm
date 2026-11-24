@@ -60,6 +60,8 @@ function readKey(sit: Situation): string {
 
 const D = TUNING.brain.decide;
 const READ_GAP_TICKS = Math.round(D.readGap / DT_);
+/** A plan is chosen afresh once it is this old (ticks): TUNING.value.noise.readSeconds, how long one read of the play lasts. */
+const READ_TICKS = Math.round(TUNING.value.noise.readSeconds / DT_);
 const decideScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
 
 /** The standing opponent nearest `s` and how far he is (m), written into nearScratch. */
@@ -117,6 +119,9 @@ function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Ma
   // his list; while his plan is still the best he sees he keeps at it, and the hold starts again. (An expiry that
   // always drew again was a clock: 1,900 of 5,300 decisions a game.)
   const expired = state.tick >= plan.until;
+  // He never keeps at one plan longer than he trusts one read of the play (TUNING.value.noise.readSeconds): then he
+  // chooses afresh, whatever he sees (no plan is held for ever: a carrier shielding the puck with nobody coming for it).
+  if (expired && state.tick - plan.tick >= READ_TICKS) return 'hold';
   if (planBeaten(opts, me, sit, plan, expired ? D.marginHeld : D.margin)) return expired ? 'hold' : 'better';
   if (expired) plan.until = state.tick + holdTicks(sit);
   return null;

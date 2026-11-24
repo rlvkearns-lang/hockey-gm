@@ -344,7 +344,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const held = sit.held;
   const moveOn = V.hold * held;
   // Passing: worth less in his first O.pass.settle s with it (he has not settled it), more the longer he has it.
-  const passOn = V.hold * B.holdBoost.pass * (held - O.pass.settle), shootOn = moveOn * B.holdBoost.shoot;
+  // (Task 8b: the two sides have their own weights; before he has settled it the pass is held back by holdBoost.unsettled.)
+  const passOn = V.hold * (held >= O.pass.settle ? B.holdBoost.pass : B.holdBoost.unsettled) * (held - O.pass.settle), shootOn = moveOn * B.holdBoost.shoot;
   const settled = O.pass.settleMin + (1 - O.pass.settleMin) * clamp(held / O.pass.settle, 0, 1);
 
   // Offside: with the puck outside the zone, any teammate wholly in it (or about to be) puts his team offside if the
@@ -495,7 +496,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     tly = clamp(tly, -RINK.halfWidth + 1.5, RINK.halfWidth - 1.5);
     // A lane that ends where he already is (in a corner, against the boards) is no carry: he would arrive at once and
     // choose again (Task 8b: 1,100 such arrivals a game with the carry wide down low).
-    if (hyp(trx - srx, tly - sly) < CARRY_MIN) return;
+    // (Only in the zone: outside it, held up at the line, a short carry back is his way to wait for his team to tag up.)
+    if (!outside && hyp(trx - srx, tly - sly) < CARRY_MIN) return;
     // Never carry the puck in while a teammate is still in the zone.
     if (outside && mateOffside && trx > BLUE - B.holdUpGap) trx = BLUE - B.holdUpGap;
     tw.x = trx * dir; tw.y = tly * dir;

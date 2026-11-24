@@ -66,7 +66,7 @@ export const TUNING = deepFreeze({
      * The longer he has had the puck the more he wants to move it on: each second (TUNING.value.hold, at most holdCap)
      * adds hold * holdBoost.shoot to a shot's value and hold * holdBoost.pass to a pass's (options.ts).
      */
-    holdBoost: { shoot: 0, pass: 6 },
+    holdBoost: { shoot: 0, pass: 6, unsettled: 1.33 },
     /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
     protectStep: 2,
     protectSpeedCap: 0.4,
@@ -118,7 +118,7 @@ export const TUNING = deepFreeze({
    * openRadius (m): a skater getting open looks at 8 spots this far round his job's anchor (officeRadius behind the net).
    * reboundRange (m): a rebound loose within this far of the net is the net-front men's to go for (job-targets.ts).
    */
-  jobs: { keep: 3, keepNet: 6, openRadius: 3, officeRadius: 1.2, reboundRange: 6 },
+  jobs: { keep: 3, keepNet: 10, openRadius: 3, officeRadius: 1.2, reboundRange: 6 },
   /**
    * Passing lanes (lanes.ts): a lane is open with `open` (m) of clear ice round it and no opponent within `space` (m) of
    * its end; a skater has a clear path to the net with no opponent ahead within clearPath (m) of his line to it.
@@ -155,7 +155,7 @@ export const TUNING = deepFreeze({
     deke: 0.6,
     /** A pass's chance falls by skill.pass per point of passing under 100, a carry's by skill.carry per point of puckHandling under 100, pressured or not. */
     skill: { pass: 0.001, carry: 0.001 },
-    pick: { base: 0.016, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
+    pick: { base: 0.0147, perPoint: 0.00012, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
     /**
      * The shot's value (Task 7; Task 7 review, Important 2): P(goal) * (1 - here) plus, for each thing that can follow a
      * shot that does not score (blocked, wide, held, steered to a corner, a rebound: Task 8's outcome model), its chance
@@ -180,7 +180,7 @@ export const TUNING = deepFreeze({
       blocked: { keep: 0.24, rush: 0.34 },
       wide: { keep: 0.28, rush: 0.15 },
     },
-    stick: 0.036, shadowed: 0.5, turnoverCost: 0.6, hold: 0.003, holdCap: 10,
+    stick: 0.034, shadowed: 0.5, turnoverCost: 0.6, hold: 0.003, holdCap: 10,
     goal: 0.2, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
 
@@ -226,7 +226,7 @@ export const TUNING = deepFreeze({
        * 0.40 to 0.55, 0.39 completed 0.59, 0.63 completed 0.73 to 0.81, 0.78 completed 0.85, 0.89 completed 0.87. The
        * chance used is fit.base + fit.slope * that product.
        */
-      fit: { base: 0.25, slope: 0.72 },
+      fit: { base: 0.2, slope: 0.78 },
     },
     /**
      * Task 8b, set from play (seeds 1-6, decisions in the zone he attacks; the other side has the puck within 2 s): after
@@ -234,13 +234,13 @@ export const TUNING = deepFreeze({
      * protect 0.04 and 0.13 (valued 0.03 and 0.255). carry.pressure was 0.35, protect.loss 0.4.
      */
     carry: { base: 0.95, pressure: 0.24, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
-    hold: { base: 0.97, pressure: 0.1, keep: 0.9 },
+    hold: { base: 0.97, pressure: 0.1, keep: 0.8 },
     wrap: { base: 0.9, pressure: 0.2, laneFrom: 1.5, laneCost: 0.3, goal: 0.55, open: 1.2 },
     protect: { base: 0.97, loss: 0.275, lossPerPoint: 0.0025, idle: 0.01 },
     clearIdle: 0.04,
     blindRim: 0.6,
     /** A shot at a goalie still in his last save's pose is worth 1 + recovering times as much at its start (Task 8b). */
-    recovering: 1,
+    recovering: 2,
     shotLane: [0.5, 1.0] as [number, number],
     shotBlocked: [0.3, 0.6] as [number, number],
     scoreSoft: 0.5,
@@ -262,7 +262,7 @@ export const TUNING = deepFreeze({
    *   rush least).
    * Set once so Task 8b's guards pass; Task 14 tunes it to NHL attempt numbers (see task-8b-report.md).
    */
-  patience: { base: 1.35, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, tacticFactor: 1, max: 2 },
+  patience: { base: 1.25, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, tacticFactor: 1, max: 2 },
 
   /**
    * Score effects (team-play.ts scoreMargin, brain, poke checks), kept to real-hockey size. A margin is comfortable from
@@ -381,7 +381,7 @@ export const TUNING = deepFreeze({
        * A shooter turns his body up to setTurn rad per metre out toward his forehand as he winds up (Task 8: a
        * backhand is a shot in tight with the net off his forehand, or with it well behind him).
        */
-      setTurn: (10 * Math.PI) / 180,
+      setTurn: (8 * Math.PI) / 180,
     },
   },
 
@@ -473,7 +473,7 @@ export const TUNING = deepFreeze({
      */
     rebound: {
       heldFrom: 25, heldPerSpeed: 0.004, heldScreened: 0.08, heldTipped: 0.12,
-      steered: { base: 0.28, perPoint: 0.005, tipped: 0.1 },
+      steered: { base: 0.24, perPoint: 0.005, tipped: 0.1 },
       steeredSpeed: [6, 9] as [number, number],
       steeredAngle: [(55 * Math.PI) / 180, (80 * Math.PI) / 180] as [number, number],
       speed: [2.5, 6] as [number, number],
