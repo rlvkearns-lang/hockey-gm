@@ -336,7 +336,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // Settled on it, and the chance he handles it (passing.ts receiveChance, against the best there is).
     chance *= settled * (pp.chance / RECEIVE_BEST) * O.pass.hand[pp.hand];
     // A lane an opponent can get his stick into first (pp.cover) is riskier, the less so the better he passes.
-    chance *= 1 - pp.cover * clamp(O.pass.cover - O.pass.coverPerPoint * passSkill, 0, 1);
+    chance *= 1 - Math.sqrt(pp.cover) * clamp(O.pass.cover - O.pass.coverPerPoint * passSkill, 0, 1);
+    // A man on the receiver as it arrives (pp.contest) can take it off him or knock it loose as he gets it.
+    chance *= 1 - pp.contest * O.pass.contest;
     // The goalie and the net frames are in the way of a pass as much as a skater is (passLaneWidth, to the aim).
     const w = pp.lane;
     if (w < O.pass.narrow) chance *= O.pass.narrowFactor; else if (w < L.open) chance *= V.shadowed;

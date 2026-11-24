@@ -111,6 +111,7 @@ const MAX_KICK = 1.2;
 /** The carried puck moves at most the carrier's own travel plus CARRY_TURN (m) a tick, and never more than CARRY_STEP (m). */
 const CARRY_TURN = 0.2;
 const CARRY_STEP = 0.4;
+const frameProbe = { x: 0, y: 0 };
 const PICKUP_MAX_SPEED = 12;
 /** A pass that comes off his stick (a bobble) leaves at BOBBLE_SPEED m/s, turned by up to BOBBLE_TURN rad. */
 const BOBBLE_SPEED: [number, number] = [2, 4];
@@ -359,6 +360,14 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     const dx = t.x - p.pos.x, dy = t.y - p.pos.y, l = hypot2(dx, dy);
     const step = Math.min(CARRY_STEP, hypot2(carrier.vel.x, carrier.vel.y) * DT + CARRY_TURN);
     if (l > step) { t.x = p.pos.x + (dx / l) * step; t.y = p.pos.y + (dy / l) * step; }
+    // A step that would end inside a frame stops at the frame (the furthest point of it outside), so that pushing it
+    // out (below) never moves it further than the step.
+    if (!inFrame(p.pos) && inFrame(t)) {
+      const x0 = p.pos.x, y0 = p.pos.y, mx = t.x - x0, my = t.y - y0;
+      let lo = 0, hi = 1;
+      for (let k = 0; k < 10; k++) { const mid = (lo + hi) / 2; frameProbe.x = x0 + mx * mid; frameProbe.y = y0 + my * mid; if (inFrame(frameProbe)) hi = mid; else lo = mid; }
+      t.x = x0 + mx * lo; t.y = y0 + my * lo;
+    }
     p.pos.x = t.x;
     p.pos.y = t.y;
     p.vel.x = carrier.vel.x;
@@ -371,6 +380,12 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     noVel.x = 0;
     noVel.y = 0;
     resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);
+  }
+
+  /** Whether `q` is inside a net frame grown by the puck's radius. */
+  function inFrame(q: { x: number; y: number }): boolean {
+    const x = q.x * (q.x >= 0 ? 1 : -1), r = PUCK_RADIUS;
+    return x > RINK.goalLineX - r && x < RINK.goalLineX + RINK.netDepth + r && Math.abs(q.y) < RINK.netHalfWidth + r;
   }
 
   /** Moves `q`, when it is inside a net frame grown by the puck's radius, out through the nearest of its back and sides. */
@@ -426,12 +441,15 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
         break;
       }
     }
+    let passSide: Side | null = null;
+    if (pass !== null) for (const k of state.skaters) if (k.id === pass.fromId) passSide = k.side;
     if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
       let bestD = Infinity;
       for (const s of skaters) {
         if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id) || isTiedUp(state, s.id)) continue;
-        // A pass's receiver takes it only as a pass (above, with its draw) until it has come off his stick.
-        if (pass !== null && !pass.bobbled && s.id === pass.toId) continue;
+        // A pass's receiver takes it only as a pass (above, with its draw) until it has come off his stick, and an
+        // opponent only by picking it off (actions.ts tryIntercept, his one try).
+        if (pass !== null && !pass.bobbled && (s.id === pass.toId || s.side !== passSide)) continue;
         const b = bladePos(s.pos, s.facing, bodyById.get(s.id)!.def.shoots, bladeScratch);
         const db = segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y), dc = dist(s.pos, p.pos);
         // In his feet he kicks it up to his stick: only when the blade is within MAX_KICK of it.
