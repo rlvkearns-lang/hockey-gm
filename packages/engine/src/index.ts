@@ -19,4 +19,5 @@ export type { RngState } from './rng';
 export { FACEOFF_DOTS, RINK, zoneOf, type Zone } from './rink';
 export { BENCH_DOORS } from './bench';
 export { bodyRadius } from './skating';
+export { BLADE } from './blade';
 export { BRAIN_INTERVAL_TICKS, DT, PERIODS, PERIOD_SECONDS } from './constants';

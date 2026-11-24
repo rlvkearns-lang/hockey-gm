@@ -291,7 +291,7 @@ export function rate(kind: Decision['kind'], d: PlayerDef, state: GameState): nu
 }
 
 /**
- * Mean lateral miss (m) at the receiver of 400 passes (seeds 1..400) by `d` to a still teammate 15 m away,
+ * Mean lateral miss (m) at the receiver (from the pass's aim, his blade) of 400 passes (seeds 1..400) by `d` to a still teammate 15 m away,
  * with no opponent near either of them.
  */
 export function meanMiss(d: PlayerDef): number {
@@ -306,8 +306,8 @@ export function meanMiss(d: PlayerDef): number {
     const from = { ...st.puck.pos };
     executePass(st, 'home-C', receiver.id, ds, createRng(seed));
     const v = st.puck.vel, sp = Math.hypot(v.x, v.y);
-    const rx = receiver.pos.x - from.x, ry = receiver.pos.y - from.y;
-    total += Math.abs(rx * v.y - ry * v.x) / sp; // distance from the receiver to the puck's line
+    const aim = st.pendingPass!.aim, rx = aim.x - from.x, ry = aim.y - from.y;
+    total += Math.abs(rx * v.y - ry * v.x) / sp; // distance from where it was aimed (his blade) to the puck's line
   }
   return total / 400;
 }

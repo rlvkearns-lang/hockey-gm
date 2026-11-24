@@ -55,7 +55,7 @@ describe('play measures: definitions', () => {
   it('a pass is completed only when its intended receiver is the next carrier', () => {
     const st = stateWith({ carrier: 'home', puckX: 0 }); const obs = createObserver(gameSetupOf(st));
     st.carrierId = null;
-    feed(obs, st, 1, [ev(st, 'pass', { side: 'home', playerId: 'home-RW', otherId: 'home-C', detail: { kind: 'pass', distance: 5 } })]);
+    feed(obs, st, 1, [ev(st, 'pass', { side: 'home', playerId: 'home-RW', otherId: 'home-C', detail: { kind: 'pass', distance: 5, hand: 'forehand' } })]);
     feed(obs, st, 3);
     st.carrierId = 'home-LW';
     feed(obs, st, 1);
@@ -64,7 +64,7 @@ describe('play measures: definitions', () => {
     expect(measuresOf([run]).passCompletion).toBe(0);
     // and the same pass taken by home-C is completed
     st.carrierId = null;
-    feed(obs, st, 1, [ev(st, 'pass', { side: 'home', playerId: 'home-LW', otherId: 'home-C', detail: { kind: 'pass', distance: 5 } })]);
+    feed(obs, st, 1, [ev(st, 'pass', { side: 'home', playerId: 'home-LW', otherId: 'home-C', detail: { kind: 'pass', distance: 5, hand: 'forehand' } })]);
     st.carrierId = 'home-C';
     feed(obs, st, 1);
     expect(obs.counters().passesCompleted).toBe(1);
@@ -73,7 +73,7 @@ describe('play measures: definitions', () => {
   it('a point pass that slides out over the blue line is not kept', () => {
     const st = stateWith({ carrier: 'home', puckX: 20, carrierSlot: 'C' }); const obs = createObserver(gameSetupOf(st));
     st.carrierId = null;
-    feed(obs, st, 1, [ev(st, 'pass', { side: 'home', playerId: 'home-C', otherId: 'home-LD', detail: { kind: 'pass', distance: 6 } })]);
+    feed(obs, st, 1, [ev(st, 'pass', { side: 'home', playerId: 'home-C', otherId: 'home-LD', detail: { kind: 'pass', distance: 6, hand: 'forehand' } })]);
     for (let k = 1; k <= 10; k++) { st.puck.pos.x = 20 - 1.3 * k; feed(obs, st, 1); }
     st.carrierId = 'home-LD';
     feed(obs, st, 1);
@@ -85,7 +85,7 @@ describe('play measures: definitions', () => {
   it('a point pass held inside the line until the defenceman takes it is kept', () => {
     const st = stateWith({ carrier: 'home', puckX: 20, carrierSlot: 'C' }); const obs = createObserver(gameSetupOf(st));
     st.carrierId = null;
-    feed(obs, st, 1, [ev(st, 'pass', { side: 'home', playerId: 'home-C', otherId: 'home-LD', detail: { kind: 'pass', distance: 6 } })]);
+    feed(obs, st, 1, [ev(st, 'pass', { side: 'home', playerId: 'home-C', otherId: 'home-LD', detail: { kind: 'pass', distance: 6, hand: 'forehand' } })]);
     for (let k = 1; k <= 10; k++) { st.puck.pos.x = 20 - 0.5 * k; feed(obs, st, 1); }
     st.carrierId = 'home-LD';
     feed(obs, st, 1);

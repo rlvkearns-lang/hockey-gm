@@ -54,9 +54,11 @@ export const pokeCheckContest: Contest<'pokeCheck'> = {
     const state = ctx.state;
     const carrier = carrierNow(ctx);
     if (!carrier || carrier.side === s.side || !isFree(carrier) || state.puck.z > 0) return null;
+    // In range of the puck (on the carrier's blade), and in front of the carrier or beside him.
+    const pk = state.puck.pos;
+    if (hypot2(s.pos.x - pk.x, s.pos.y - pk.y) > T.triggerRange) return null;
     const dx = s.pos.x - carrier.pos.x, dy = s.pos.y - carrier.pos.y;
     const d = hypot2(dx, dy);
-    if (d > T.triggerRange) return null;
     if (d > 0 && (dcos(carrier.facing) * dx + dsin(carrier.facing) * dy) / d < T.frontCos) return null;
     if (onCooldown(state, s.id, KIND)) return null;
     // He makes up his mind once per cooldown: poke now, or keep his position.
@@ -97,7 +99,7 @@ export const pokeCheckContest: Contest<'pokeCheck'> = {
 
     if (c.stage === 'reach') {
       if (c.stageT < REACH_SECONDS - STAGE_EPS) return null;
-      if (dist(checker.pos, carrier.pos) > T.stickReach) return { winnerId: null, puck: 'unchanged', outcome: 'outOfReach' }; // the stick cannot get there
+      if (dist(checker.pos, state.puck.pos) > T.stickReach) return { winnerId: null, puck: 'unchanged', outcome: 'outOfReach' }; // the stick cannot get to the puck
       c.data.outcome = roll(c, ctx, checker, carrier);
       c.leader = c.data.outcome === 'take' || c.data.outcome === 'loose' ? checker.id : carrier.id;
       enterStage(c, 'resolve');

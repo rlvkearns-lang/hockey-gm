@@ -20,7 +20,8 @@ export type PuckEvent =
   | { kind: 'onNet'; end: 1 | -1; y: number; z: number; speed: number }
   | { kind: 'overNet'; end: 1 | -1 };
 
-const ICE_DECAY = 0.38; // per second, on speed, while on the ice
+/** Per second, on speed, while the puck slides on the ice (its speed falls as exp(-ICE_DECAY * t)). */
+export const ICE_DECAY = 0.38;
 const BOARDS_RESTITUTION = 0.55;
 const NET_RESTITUTION = 0.3;
 const POST_RESTITUTION = 0.6;

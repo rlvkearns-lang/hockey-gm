@@ -73,6 +73,18 @@ function assignNumbers(seed: number, players: PlayerDef[]): void {
   for (const p of players) p.number = p.position === 'G' ? goalie() : skater();
 }
 
+/** Share of goalies who catch with the left hand (the glove on the left). */
+const CATCHES_LEFT = 0.88;
+
+/**
+ * Goalies' catching hands: 'L' for 88%, 'R' for 12%, drawn from a stream of their own (seed + 0.25), so they leave the
+ * players themselves exactly as they were.
+ */
+function assignCatches(seed: number, players: PlayerDef[]): void {
+  const rng = createRng(seed + 0.25);
+  for (const p of players) if (p.position === 'G') p.catches = rng.chance(CATCHES_LEFT) ? 'L' : 'R';
+}
+
 /** 12 forwards, 6 defencemen, 2 goalies. `overall` is the mean attribute before type bias. */
 export function generateTeam(seed: number, name: string, abbr: string, overall = 70): TeamDef {
   const rng = createRng(seed);
@@ -98,6 +110,7 @@ export function generateTeam(seed: number, name: string, abbr: string, overall =
   const goalie = add('G', 'Goalie');
   add('G', 'Goalie');
   assignNumbers(seed, players);
+  assignCatches(seed, players);
 
   return {
     id: abbr.toLowerCase(),

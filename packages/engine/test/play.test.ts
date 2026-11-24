@@ -53,11 +53,11 @@ describe('A1: commitment (Task 3)', () => {
     expect(m().glideShare).toBeGreaterThan(0.30); expect(m().topSpeedShare).toBeGreaterThan(0.17); expect(m().sprintRunSeconds).toBeGreaterThan(1.2);
   }, 60_000);
   it('A1: skaters never overlap a goalie, and a race win never moves the puck to the winner', () => { expect(counters().goalieOverlapTicks).toBe(0); expect(counters().raceJumpTicks).toBe(0); }, 60_000);
-  it('A1: players hold up at the blue line: under 12 offsides a game on seeds 1, 2, 3 and 8 (12 to 18 after Task 2)', () => {
+  it('A1: players hold up at the blue line: under 10 offsides a game on seeds 1, 2, 3 and 8 (12 to 18 after Task 2, 7.75 after Task 5)', () => {
     const offsides = (r: GameResult): number => r.events.filter((e) => e.type === 'offside').length;
     const total = games().reduce((a, r) => a + offsides(r), 0) + offsides(simulateGame(gameSetup(8)));
-    // Task 6 tightens this to under 10 (pass aim at the line); see task-3-report.md and task-5-report.md
-    expect(total / 4).toBeLessThan(12);
+    // Task 6 tightened this from 12 (point passes aimed inside the line); see task-5-report.md and task-6-report.md
+    expect(total / 4).toBeLessThan(10);
   }, 60_000);
 });
 
@@ -87,4 +87,15 @@ describe('A3: decisions with the puck (Task 5)', () => {
   it('A2/A3: behind the net is used: at least 8 possessions there, 2 passes out front and 0.3 wraparounds a game', () => {
     expect(m().behindNetPossessionsPerGame).toBeGreaterThanOrEqual(8); expect(m().passesOutFrontPerGame).toBeGreaterThanOrEqual(2); expect(m().wrapAttemptsPerGame).toBeGreaterThanOrEqual(0.3);
   }, 60_000);
+});
+
+describe('A3: passes that can be received, the puck on the blade (Task 6)', () => {
+  it('A3: the carried puck is on the shooting side in over 99% of carrying ticks', () => { expect(counters().carryWrongSide / counters().carryTicks).toBeLessThan(0.01); }, 60_000);
+  it('A3: point passes stay in: over 90% kept (was 48%) and over 75% completed (was 37%)', () => { expect(m().pointPassKeptShare).toBeGreaterThan(0.90); expect(m().pointPassCompletion).toBeGreaterThan(0.75); }, 60_000);
+  it('A3: passes are completed 75% to 92% of the time (was 86.5%)', () => { expect(m().passCompletion).toBeGreaterThan(0.75); expect(m().passCompletion).toBeLessThan(0.92); }, 60_000);
+  it('A3: a pickup moves the puck at most 1.2 m', () => { expect(counters().pickupSnapMax).toBeLessThanOrEqual(1.2); }, 60_000);
+  // Before Task 6, 1 to 3 goals a game came from a pass, rim or clear that slid in with no shot (1.6 a game over seeds 1-8).
+  it('A3: a pass almost never slides into the net: at most one goal in seeds 1-8 from a pass, rim, dump or clear with no shot', () => {
+    expect(countGames([1, 2, 3, 4, 5, 6, 7, 8]).passGoals).toBeLessThanOrEqual(1);
+  }, 120_000);
 });

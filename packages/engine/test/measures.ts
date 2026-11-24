@@ -35,7 +35,8 @@ export type PlayCounterKey =
   | 'goalieOverlapTicks' | 'raceJumpTicks'
   | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
-  | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain';
+  | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain'
+  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'passGoals';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -51,7 +52,13 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderInside',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain',
+  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'passGoals',
 ];
+
+/** Counters that hold a largest value, not a sum: games combine by taking the largest. */
+const MAX_KEYS: ReadonlySet<PlayCounterKey> = new Set<PlayCounterKey>(['pickupSnapMax']);
+/** Adds counter `k` of one game (`v`) into the running total `c`. */
+const addInto = (c: PlayCounters, k: PlayCounterKey, v: number): void => { c[k] = MAX_KEYS.has(k) ? Math.max(c[k], v) : c[k] + v; };
 
 export type PlayMeasures = {
   stationaryShare: number; glideShare: number; topSpeedShare: number; sprintRunSeconds: number; backwardShareWithPuck: number; retargetShare: number;
@@ -100,8 +107,12 @@ const NET_FRONT_MAN = 2;
 const NET_FRONT_INSIDE = 1.6;
 /** A goalie's body radius (TUNING.goalieBody.radius). */
 const GOALIE_RADIUS = 0.55;
-/** A race win moves the puck at most the pickup reach plus the carry reach, with this slack (m), beyond the puck's own travel that tick. */
-const RACE_JUMP_MAX = 0.9 + 0.6 + 0.2;
+/**
+ * A race win moves the puck at most the most a pickup moves it (a kick from his feet to his blade, 1.2 m: Task 6) plus
+ * his stride that tick, with slack (0.5 m), beyond the puck's own travel that tick. (Before Task 6: the pickup radius
+ * 0.9 plus the carry reach 0.6, plus 0.2.)
+ */
+const RACE_JUMP_MAX = 1.2 + 0.5;
 const BEHIND_Y = 4;
 /** A carrier in the zone he attacks is pressed with a standing defender within this far (m) of him. */
 const CARRIER_PRESSED = 3;
@@ -152,6 +163,12 @@ export function createObserver(setup: GameSetup): Observer {
   /** The carrier at the end of the last tick, and whether he was on a breakaway then. */
   let prevBreakaway: { id: string; rx: number; clear: boolean; mates: Map<string, number> } | null = null;
   const optionScratch: Option[] = [];
+  /** The last release (its side and kind), for a goal with no shot. */
+  let lastRel: { side: Side | null; kind: string } | null = null;
+  /** Whether play was live with nobody carrying at the end of the last tick. */
+  let wasLoose = false;
+  const shoots = new Map<string, 1 | -1>();
+  for (const [id, d] of defs) shoots.set(id, d.shoots === 'L' ? 1 : -1);
   /** The carrier's plan at the end of the last tick. */
   let prevPlan: { id: string; kind: string; lane: string | null } | null = null;
 
@@ -214,6 +231,7 @@ export function createObserver(setup: GameSetup): Observer {
           break;
         }
         case 'release': {
+          lastRel = { side: e.side, kind: e.detail.kind };
           if (e.detail.kind !== 'shot' || e.playerId === null) break;
           c.attempts++;
           const s = skaterById(st, e.playerId);
@@ -229,6 +247,8 @@ export function createObserver(setup: GameSetup): Observer {
           break;
         case 'goal':
           c.goals++;
+          // A puck its own side let go without shooting (a pass, rim, dump or clear) that went in with no shot.
+          if (e.detail.releaseTick === null && lastRel !== null && lastRel.kind !== 'shot' && lastRel.side === e.side) c.passGoals++;
           break;
         case 'battle':
           if (DECIDED.has(e.detail.how) && e.playerId !== null) { c.battlesDecided++; openBattles.push({ winner: e.playerId, tick }); }
@@ -421,6 +441,28 @@ export function createObserver(setup: GameSetup): Observer {
     contacts = next;
   }
 
+  /**
+   * The carried puck: a live tick with a carrier counts (carryTicks), and is on the wrong side when the puck is not on
+   * his shooting side of his facing (cross(facing, puck - him) * handSign < 0). A tick on which someone takes a loose
+   * puck (tryPickup or an interception: no contest ended that tick, as contest hand-overs have their own measures): how
+   * far the puck moved beyond its own travel that tick (pickupSnapMax, the largest). Call before puck(), which moves
+   * prevPuck on.
+   */
+  function carry(st: GameState, events: readonly GameEvent[]): void {
+    const live = st.phase === 'live';
+    const cs = live ? skaterById(st, st.carrierId) : undefined;
+    if (cs !== undefined) {
+      c.carryTicks++;
+      const dx = st.puck.pos.x - cs.pos.x, dy = st.puck.pos.y - cs.pos.y;
+      if ((Math.cos(cs.facing) * dy - Math.sin(cs.facing) * dx) * (shoots.get(cs.id) ?? 1) < 0) c.carryWrongSide++;
+      if (wasLoose && prevPuck !== null && prevPuck.live && !events.some((e) => e.type === 'contestEnd')) {
+        const move = Math.hypot(st.puck.pos.x - prevPuck.x, st.puck.pos.y - prevPuck.y) - prevPuck.speed * DT;
+        if (move > c.pickupSnapMax) c.pickupSnapMax = move;
+      }
+    }
+    wasLoose = live && cs === undefined;
+  }
+
   function puck(st: GameState): void {
     const live = st.phase === 'live', p = st.puck, speed = speedOf(p.vel);
     if (live && prevPuck !== null && prevPuck.live) {
@@ -448,6 +490,7 @@ export function createObserver(setup: GameSetup): Observer {
       afterEvents(st);
       carrierMind(st);
       bodies(st);
+      carry(st, events);
       puck(st);
     },
     counters: () => ({ ...c }),
@@ -459,7 +502,7 @@ const ratio = (a: number, b: number): number => (b === 0 ? 0 : a / b);
 
 export function measuresOf(games: { counters: PlayCounters; maxPuckJump: number }[]): PlayMeasures {
   const c = emptyCounters();
-  for (const g of games) for (const k of PLAY_COUNTER_KEYS) c[k] += g.counters[k] ?? 0;
+  for (const g of games) for (const k of PLAY_COUNTER_KEYS) addInto(c, k, g.counters[k] ?? 0);
   const n = games.length, perGame = (x: number): number => ratio(x, n), perTeam = (x: number): number => ratio(x, 2 * n);
   return {
     stationaryShare: ratio(c.stationaryTicks, c.skaterTicks),
@@ -516,6 +559,6 @@ export function measureGames(seeds: number[]): PlayMeasures {
 /** The same games' counters, summed field by field. */
 export function countGames(seeds: number[]): PlayCounters {
   const c = emptyCounters();
-  for (const r of seeds.map(observeSeed)) for (const k of PLAY_COUNTER_KEYS) c[k] += r.counters[k];
+  for (const r of seeds.map(observeSeed)) for (const k of PLAY_COUNTER_KEYS) addInto(c, k, r.counters[k]);
   return c;
 }

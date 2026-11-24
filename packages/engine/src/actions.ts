@@ -1,4 +1,6 @@
 import { DT as DT_ } from './constants';
+import { bladePos as bladePos_ } from './blade';
+import { forcedPass as forcedPass_, HAND_ERROR as HAND_ERROR_, interceptChance as interceptChance_, planPass as planPass_, stickInterceptChance as stickInterceptChance_, type PassPlan } from './passing';
 import { crossesEndBox as crossesEndBox_ } from './lanes';
 import { boardsNormal as boardsNormal_, distToBoards as distToBoards_, RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
@@ -12,6 +14,12 @@ import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, GRAVITY as GRAVITY_, skaterById as skaterById_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const DT = DT_;
+const bladePos = bladePos_;
+const forcedPass = forcedPass_;
+const HAND_ERROR = HAND_ERROR_;
+const interceptChance = interceptChance_;
+const planPass = planPass_;
+const stickInterceptChance = stickInterceptChance_;
 const RINK = RINK_;
 const crossesEndBox = crossesEndBox_;
 const boardsNormal = boardsNormal_;
@@ -37,6 +45,11 @@ const MAX_SHOT_LIFT = 10;
 const PASS = TUNING.pass;
 const SHOT = TUNING.shot;
 const DUMP = TUNING.dump;
+/** Scratch: the pass being made, and an opponent's blade. */
+const passPlan = {} as PassPlan;
+const bladeScratch: Vec2 = { x: 0, y: 0 };
+
+export { interceptChance } from './passing';
 
 
 /** 0 (nobody within 5 m) to 1 (an opponent on top of him). */
@@ -59,9 +72,20 @@ export function recordTouch(state: GameState, id: string, side: Side): void {
   if (t.ids.length > MAX_TOUCHES) { t.ids.shift(); t.ticks.shift(); }
 }
 
-/** The players `ids` may not pick the puck up for RELEASE_NO_PICKUP_SECONDS. */
+/**
+ * The players `ids` may not pick the puck up for RELEASE_NO_PICKUP_SECONDS. Anyone already blocked stays blocked (until
+ * the later of the two ends): a pass deflected at once does not free its passer to take it back.
+ */
 export function blockPickup(state: GameState, ids: string[]): void {
-  state.pickupBlock = { ids, untilTick: state.tick + Math.round(RELEASE_NO_PICKUP_SECONDS / DT) };
+  const until = state.tick + Math.round(RELEASE_NO_PICKUP_SECONDS / DT);
+  const b = state.pickupBlock;
+  if (b !== null && state.tick < b.untilTick) {
+    const merged = b.ids.slice();
+    for (const id of ids) if (!merged.includes(id)) merged.push(id);
+    state.pickupBlock = { ids: merged, untilTick: Math.max(b.untilTick, until) };
+    return;
+  }
+  state.pickupBlock = { ids, untilTick: until };
 }
 
 /**
@@ -90,23 +114,27 @@ function release(
 }
 
 /**
- * Pass along the ice to `toId`, led to where he will be. Speed TUNING.pass.speed (base + per point of passing); off by a
- * normal error that shrinks with passing and grows with pressure. Its `release` and `pass` events go into `out`.
+ * Pass along the ice to `toId` as passing.ts plans it (planPass: aimed at his blade where he will be, weighted for its
+ * length and hand), or, when planPass says it is no option (the brain decided it all the same), a forehand pass to him
+ * (forcedPass). Off by a normal error that shrinks with passing and grows with pressure, times 1.6 off the backhand and
+ * 2.2 behind him. Its `release` and `pass` events go into `out`.
  */
 export function executePass(state: GameState, fromId: string, toId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
   const from = skaterById(state, fromId), to = skaterById(state, toId);
   const passing = defs.get(fromId)!.attrs.passing;
-  const speed = PASS.speed.base + passing * PASS.speed.perPoint;
+  const plan = planPass(state, from, to, defs, passPlan) ?? forcedPass(state, from, to, defs, passPlan);
   const p = state.puck.pos;
-  const l = hypot2(to.pos.x - p.x, to.pos.y - p.y);
-  const lead = l / speed;
-  const aimX = to.pos.x + to.vel.x * lead, aimY = to.pos.y + to.vel.y * lead;
+  const aim = plan.aim;
   const pressure = pressureOn(state, from);
-  const sigma = PASS.error.base + (100 - passing) * PASS.error.perPoint + pressure * PASS.error.pressure;
-  const angle = datan2(aimY - p.y, aimX - p.x) + rng.gauss() * sigma;
-  out.push(gameEvent(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'pass', distance: l } }));
-  release(state, from, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'pass', toId);
-  state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((lead + PASS.graceSeconds) / DT), tried: [], pressure };
+  const sigma = (PASS.error.base + (100 - passing) * PASS.error.perPoint + pressure * PASS.error.pressure) * HAND_ERROR[plan.hand];
+  const angle = datan2(aim.y - p.y, aim.x - p.x) + rng.gauss() * sigma;
+  const l = hypot2(aim.x - p.x, aim.y - p.y);
+  out.push(gameEvent(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'pass', distance: l, hand: plan.hand } }));
+  release(state, from, dcos(angle) * plan.speed, dsin(angle) * plan.speed, 0, out, 'pass', toId);
+  state.pendingPass = {
+    fromId, toId, untilTick: state.tick + Math.round((plan.arriveSeconds + PASS.graceSeconds) / DT), tried: [], pressure,
+    aim: { x: aim.x, y: aim.y }, bobbled: false,
+  };
 }
 
 /**
@@ -178,7 +206,7 @@ export function executeDump(state: GameState, fromId: string, defs: Map<string, 
   const speed = DUMP.speed.base + passing * DUMP.speed.perPoint;
   const sigma = DUMP.errorFactor * (PASS.error.base + (100 - passing) * PASS.error.perPoint);
   const angle = datan2(ty - p.y, tx - p.x) + rng.gauss() * sigma;
-  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'dump', distance: null } }));
+  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'dump', distance: null, hand: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, DUMP.vz, out, 'dump');
 }
 
@@ -223,9 +251,9 @@ export function executeRim(state: GameState, fromId: string, toId: string | null
   const sigma = PASS.error.base + (100 - passing) * PASS.error.perPoint + pressure * PASS.error.pressure;
   const angle = datan2(aim.y - p.y, aim.x - p.x) + rng.gauss() * sigma;
   const l = hypot2(to.x - p.x, to.y - p.y);
-  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'rim', distance: toId === null ? null : l } }));
+  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'rim', distance: toId === null ? null : l, hand: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump', toId);
-  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], pressure };
+  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], pressure, aim: { x: to.x, y: to.y }, bobbled: false };
 }
 
 /**
@@ -243,26 +271,17 @@ export function executeClear(state: GameState, fromId: string, defs: Map<string,
   const speed = RIM.clearSpeed.base + passing * RIM.clearSpeed.perPoint;
   const sigma = DUMP.errorFactor * (PASS.error.base + (100 - passing) * PASS.error.perPoint);
   const angle = datan2(aimScratch.y - p.y, aimScratch.x - p.x) + rng.gauss() * sigma;
-  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'clear', distance: null } }));
+  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'clear', distance: null, hand: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump');
 }
 
 /**
- * Chance that `d` intercepts a pass going `speed` m/s that comes within reach:
- * base + stickChecking * perStick + defensivePositioning * perPositioning (TUNING.pass.intercept), scaled down for fast
- * passes, then clamped to [0.03, 0.97].
- */
-export function interceptChance(d: PlayerDef, speed: number): number {
-  const base = PASS.intercept.base + d.attrs.stickChecking * PASS.intercept.perStick + d.attrs.defensivePositioning * PASS.intercept.perPositioning;
-  const [lo, hi] = PASS.interceptSpeed;
-  return clamp(base * (1 - 0.5 * clamp((speed - lo) / (hi - lo), 0, 1)), 0.03, 0.97);
-}
-
-/**
  * A pass still on its way (state.pendingPass) at PASS.interceptSpeed[0] m/s or faster: each opposing skater (on the ice,
- * not leaving, not down, not steered by a contest) whose body came within PASS.interceptRange of the puck's path this tick (from
- * `prev` to its position now) gets one try. On success the pass is over and a `turnover` is returned: 60% he takes it
- * (`taker`, now the carrier; the caller puts the puck on his stick), 40% he deflects it loose (`taker` null).
+ * not leaving, not down, not steered by a contest) gets one try when his stick blade came within PASS.stickLane of the
+ * puck's path this tick (from `prev` to its position now), with stickInterceptChance, or, with no stick in the lane,
+ * his body within PASS.interceptRange of it, with interceptChance. On success the pass is over and a `turnover` is
+ * returned. With his stick there, he takes it PASS.interceptTake of the time (`taker`, now the carrier; the caller puts
+ * the puck on his blade) and otherwise deflects it loose (`taker` null); off his body it always goes loose.
  */
 export function tryIntercept(
   state: GameState, defs: Map<string, PlayerDef>, rng: Rng, prev: Vec2,
@@ -275,10 +294,13 @@ export function tryIntercept(
   const from = skaterById(state, pass.fromId);
   for (const s of state.skaters) {
     if (!s.onIce || s.leaving || s.downT > 0 || steeredByContest(state, s) || s.side === from.side || pass.tried.includes(s.id)) continue;
-    if (segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) > PASS.interceptRange) continue;
+    const d = defs.get(s.id)!;
+    const blade = bladePos(s.pos, s.facing, d.shoots, bladeScratch);
+    const stick = segDistXY(blade.x, blade.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.stickLane;
+    if (!stick && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) > PASS.interceptRange) continue;
     pass.tried.push(s.id);
-    if (!rng.chance(interceptChance(defs.get(s.id)!, speed))) continue;
-    const take = rng.chance(PASS.interceptTake);
+    if (!rng.chance(stick ? stickInterceptChance(d, speed) : interceptChance(d, speed))) continue;
+    const take = rng.chance(PASS.interceptTake) && stick;
     state.pendingPass = null;
     state.lastTouch = { id: s.id, side: s.side };
     state.possession = s.side;

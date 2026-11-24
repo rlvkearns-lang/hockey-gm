@@ -156,7 +156,8 @@ export const TUNING = deepFreeze({
    * (m) more. A pass works with chance pass.base - pass.perMetre per metre over pass.from - pressure * (pass.pressure -
    * pass.pressurePerPoint * passing), times pass.settleMin rising to 1 over his first pass.settle (s) with the puck,
    * times pass.narrowFactor under pass.narrow (m) of lane, times pass.crowded + space / pass.crowdedPer with an opponent
-   * within TUNING.lanes.space of the receiver; a pass across the front adds V.goal * pass.across * his shot quality *
+   * within TUNING.lanes.space of the receiver, times pass.hand for how he must play it (Task 6: a backhand or a pass
+   * behind him goes wider); a pass across the front adds V.goal * pass.across * his shot quality *
    * (sideways metres / pass.acrossFull, at most 1). A carry works with carry.base - pressure * (carry.pressure -
    * carry.pressurePerPoint * puckHandling), less laneCost * (laneFrom - lane) / laneFrom under laneFrom (m) of lane. Behind
    * the net the hold works with hold.base - pressure * hold.pressure and keeps hold.keep of his best pass out front; a
@@ -172,6 +173,7 @@ export const TUNING = deepFreeze({
     pass: {
       base: 0.97, perMetre: 0.006, from: 12, pressure: 0.3, pressurePerPoint: 0.002, settle: 1, settleMin: 0.9,
       narrow: 0.5, narrowFactor: 0.2, crowded: 0.5, crowdedPer: 3, across: 0.6, acrossFull: 6,
+      hand: { forehand: 1, backhand: 0.85, behind: 0.65 },
     },
     carry: { base: 0.95, pressure: 0.35, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
     hold: { base: 0.97, pressure: 0.1, keep: 0.9 },
@@ -211,7 +213,27 @@ export const TUNING = deepFreeze({
     /** A deflected pass keeps this share of its speed and turns by a random angle in this range (rad), either way. */
     deflectKeep: 0.35,
     deflectTurn: [0.5, 1.5] as [number, number],
+    /**
+     * passing.ts (Task 6). An opponent closes a lane when his distance to the pass's path less stickReach (m), skated at
+     * 4 m/s, gets him there before the puck. His blade within stickLane (m) of the path tries with interceptChance times
+     * stickFactor. No pass arrives faster than maxReceiveSpeed (m/s). A point man is aimed no nearer the blue line than
+     * pointInside (m). A backhand goes at `speed` of a forehand's weight with `error` times its direction error, no
+     * further than `range` (m); so does a pass behind him.
+     */
+    stickReach: 1.2,
+    stickLane: 0.75,
+    stickFactor: 1.5,
+    maxReceiveSpeed: 16,
+    pointInside: 1.5,
+    backhand: { speed: 0.75, error: 1.6, range: 15 },
+    behind: { speed: 0.6, error: 2.2, range: 8 },
   },
+
+  /**
+   * The stick blade (blade.ts, Task 6): forward (m) ahead of his centre along his facing and side (m) to his shooting
+   * side. A loose puck is picked up with the blade within pickupReach (m) of it.
+   */
+  blade: { forward: 0.9, side: 0.4, pickupReach: 0.75 },
 
   /** Shots (actions.ts). */
   shot: {
@@ -310,7 +332,7 @@ export const TUNING = deepFreeze({
 
   /** Poke checks (contests/poke-check.ts). */
   poke: {
-    /** A defender this close (m) to the carrier, in front of him or beside him, pokes at the puck... */
+    /** A defender this close (m) to the puck (on the carrier's blade), in front of the carrier or beside him, pokes at it... */
     triggerRange: 1.6,
     /** ...where "beside" reaches this far behind square: the cosine of the angle off the carrier's facing is at least this... */
     frontCos: -0.2,
@@ -319,7 +341,7 @@ export const TUNING = deepFreeze({
     /** Attempt chance: attemptBase + attemptPerPoint * (stickChecking - 50), within [0.03, 0.97]. */
     attemptBase: 0.12,
     attemptPerPoint: 0.004,
-    /** Beyond this distance (m) at the end of the reach the stick cannot get there: the contest ends with no result. */
+    /** Beyond this distance (m) from the puck at the end of the reach the stick cannot get there: the contest ends with no result. */
     stickReach: 2.2,
     /** The carrier is favoured by this many rating points. */
     carrierEdge: 12,

@@ -1,4 +1,5 @@
 import { blockPickup } from '../actions';
+import { bladePos } from '../blade';
 import { DT } from '../constants';
 import { distToBoards } from '../rink';
 import { movementOf, wrapAngle, type Movement } from '../skating';
@@ -19,8 +20,11 @@ const REACH = 0.9;
 /** `resolve` shows the outcome this long (s); a race not reached within RACE_MAX_SECONDS is off. */
 const RESOLVE_SECONDS = 0.1;
 const RACE_MAX_SECONDS = 2;
-/** After the draw the winner has this long (s) to get within REACH of the puck and pick it up, or the race is off. */
+/** After the draw the winner has this long (s) to get his blade to the puck (canTake) and pick it up, or the race is off. */
 const PICKUP_MAX_SECONDS = 1;
+/** In his feet (m from his centre), and the most a kick up to his blade moves it (m): as game.ts tryPickup. */
+const IN_FEET = 0.45;
+const MAX_KICK = 1.2;
 /** The loser yields: he is steered this far (m) to his side of the winner's line to the puck. */
 const YIELD_OFFSET = 1.5;
 /** A bounce leaves the puck at this speed (m/s), any direction. */
@@ -180,7 +184,7 @@ export const looseRaceContest: Contest<'looseRace'> = {
     if (o === 'a' || o === 'b') {
       // The winner skates to the puck and picks it up there; if he does not get there in time, the race is off.
       const w = o === 'a' ? a : b;
-      if (c.stageT >= RESOLVE_SECONDS - STAGE_EPS && dist(w.pos, p.pos) <= REACH) {
+      if (c.stageT >= RESOLVE_SECONDS - STAGE_EPS && canTake(ctx, w, p.pos)) {
         for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
         return { winnerId: w.id, puck: 'toWinner', outcome: 'won' };
       }
@@ -196,6 +200,17 @@ export const looseRaceContest: Contest<'looseRace'> = {
     return end(c, ctx, null, 'bounce');
   },
 };
+
+const bladeScratch: Vec2 = { x: 0, y: 0 };
+/**
+ * Whether the winner `w` can take the puck at `p` (Task 6, as game.ts tryPickup): his blade within
+ * TUNING.blade.pickupReach of it, or it in his feet (centre within IN_FEET) with the blade within MAX_KICK of it.
+ */
+function canTake(ctx: ContestCtx, w: SkaterState, p: Vec2): boolean {
+  const b = bladePos(w.pos, w.facing, ctx.defs.get(w.id)!.shoots, bladeScratch);
+  const db = dist(b, p);
+  return db <= TUNING.blade.pickupReach || (dist(w.pos, p) <= IN_FEET && db <= MAX_KICK);
+}
 
 function end(c: ContestStateOf<'looseRace'>, ctx: ContestCtx, winnerId: string | null, outcome: ContestOutcome): ContestResult {
   for (const id of c.participants) setCooldown(ctx.state, id, KIND, T.cooldownSeconds);

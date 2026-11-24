@@ -1,4 +1,6 @@
 import { blockPickup as blockPickup_, recordTouch as recordTouch_, tryIntercept as tryIntercept_ } from './actions';
+import { bladePos as bladePos_ } from './blade';
+import { comesFromBehind as comesFromBehind_, receiveChance as receiveChance_ } from './passing';
 import { BENCH_DOORS as BENCH_DOORS_, benchTick as benchTick_, finishChanges as finishChanges_, initialBench as initialBench_ } from './bench';
 import { resolveBodies as resolveBodies_, resolveGoalies as resolveGoalies_, routeAroundGoalies as routeAroundGoalies_ } from './bodies';
 import { brainTick as brainTick_ } from './brain';
@@ -22,10 +24,13 @@ import type {
 } from './types';
 import { validateSetup as validateSetup_ } from './validate';
 import { dist as dist_, hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
-import { dcos as dcos_, dsin as dsin_ } from './dmath';
+import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const blockPickup = blockPickup_;
+const bladePos = bladePos_;
+const comesFromBehind = comesFromBehind_;
+const receiveChance = receiveChance_;
 const recordTouch = recordTouch_;
 const tryIntercept = tryIntercept_;
 const BENCH_DOORS = BENCH_DOORS_;
@@ -80,6 +85,7 @@ const validateSetup = validateSetup_;
 const dist = dist_;
 const hypot2 = hypot2_;
 const segDistXY = segDistXY_;
+const datan2 = datan2_;
 const dcos = dcos_;
 const dsin = dsin_;
 const PUCK_RADIUS = PUCK_RADIUS_;
@@ -96,13 +102,23 @@ export type Game = {
 
 const PERIOD_TICKS = Math.round(PERIOD_SECONDS / DT);
 const STOPPED_SECONDS = 1.5;
-const PICKUP_RADIUS = 0.9;
+/** A loose puck is taken with the blade within TUNING.blade.pickupReach (m) of it, or in his feet: his centre within IN_FEET (m). */
+const PICKUP_REACH = TUNING_.blade.pickupReach;
+const IN_FEET = 0.45;
+/** A puck in his feet goes to his stick only from within this far (m) of the blade (the most a pickup moves it). */
+const MAX_KICK = 1.2;
+/** The carried puck moves at most the carrier's own travel plus CARRY_TURN (m) a tick, and never more than CARRY_STEP (m). */
+const CARRY_TURN = 0.25;
+const CARRY_STEP = 0.48;
 const PICKUP_MAX_SPEED = 12;
-/** How far ahead of the carrier's centre, along his facing, the puck sits. */
-const CARRY_REACH = 0.6;
+/** A pass that comes off his stick (a bobble) leaves at BOBBLE_SPEED m/s, turned by up to BOBBLE_TURN rad. */
+const BOBBLE_SPEED: [number, number] = [2, 4];
+const BOBBLE_TURN = 1;
 const EPS = 1e-9;
 /** Scratch velocity for clamping the carried puck (its velocity is the carrier's, not bounced). */
 const noVel = { x: 0, y: 0 };
+/** Scratch: a skater's blade. */
+const bladeScratch = { x: 0, y: 0 };
 const NO_IDS: string[] = [];
 /** A skater routes round a net frame grown by his radius plus ROUTE_SLACK (m), via a corner ROUTE_ROUND (m) further out. */
 const ROUTE_SLACK = 0.05;
@@ -331,25 +347,38 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
   const goalies: GoalieState[] = [];
   const goalieList = (): GoalieState[] => { goalies.length = 0; goalies.push(state.goalies.home, state.goalies.away); return goalies; };
 
+  /** The carried puck sits on his blade (blade.ts bladePos), on his side of a net frame and inside the boards. */
   function carryPuck(carrier: SkaterState): void {
     const p = state.puck;
-    p.pos.x = carrier.pos.x + dcos(carrier.facing) * CARRY_REACH;
-    p.pos.y = carrier.pos.y + dsin(carrier.facing) * CARRY_REACH;
+    const t = bladePos(carrier.pos, carrier.facing, bodyById.get(carrier.id)!.def.shoots, bladeScratch);
+    // On his side of a net frame (his body is kept out of the frame by resolveNets).
+    clipToNets(carrier.pos, t, PUCK_RADIUS);
+    // The puck follows the blade as he skates and turns, but never jumps: at most his own travel plus CARRY_TURN a tick,
+    // and never more than CARRY_STEP (where the blade swings past a post, it slides round it).
+    const dx = t.x - p.pos.x, dy = t.y - p.pos.y, l = hypot2(dx, dy);
+    const step = Math.min(CARRY_STEP, hypot2(carrier.vel.x, carrier.vel.y) * DT + CARRY_TURN);
+    if (l > step) { t.x = p.pos.x + (dx / l) * step; t.y = p.pos.y + (dy / l) * step; }
+    p.pos.x = t.x;
+    p.pos.y = t.y;
     p.vel.x = carrier.vel.x;
     p.vel.y = carrier.vel.y;
     p.z = 0;
     p.vz = 0;
-    // The puck stays on the carrier's side of a net frame (his body is kept out of the frame by resolveNets).
-    clipToNets(carrier.pos, p.pos, PUCK_RADIUS);
+    noVel.x = 0;
+    noVel.y = 0;
+    resolveNets(p.pos, noVel, PUCK_RADIUS);
     noVel.x = 0;
     noVel.y = 0;
     resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);
   }
 
   /**
-   * A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater (not down, not leaving, not steered
-   * by a contest, not blocked, his stick not tied up) within PICKUP_RADIUS. A pass's intended receiver takes it at any
-   * speed if it came within PICKUP_RADIUS of him this tick (from `prev` to now). Nobody takes a puck a board battle holds.
+   * A pass's receiver takes it when it came within TUNING.blade.pickupReach of his blade this tick (from `prev` to now),
+   * at any speed, after one draw against receiveChance (passing.ts): on a miss it bobbles off his stick (2 to 4 m/s,
+   * turned up to 1 rad), pendingPass.bobbled is set, he cannot touch it for RELEASE_NO_PICKUP_SECONDS, and his next
+   * touch takes it with no draw. A loose puck slower than PICKUP_MAX_SPEED goes to the nearest eligible skater whose
+   * blade it came within pickupReach of this tick, or whose centre it is within IN_FEET of. Eligible: not down, not
+   * leaving, not steered by a contest, not blocked, his stick not tied up. Nobody takes a puck a board battle holds.
    */
   function tryPickup(skaters: SkaterState[], prev: { x: number; y: number }): void {
     if (puckHeldByContest(state)) return;
@@ -361,16 +390,37 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     if (pass !== null) {
       for (const s of skaters) {
         if (s.id !== pass.toId) continue;
-        if (s.downT === 0 && !s.leaving && !steeredByContest(state, s) && !blocked.includes(s.id) && !isTiedUp(state, s.id) && segDistXY(s.pos.x, s.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PICKUP_RADIUS) best = s;
+        if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id) || isTiedUp(state, s.id)) break;
+        const d = bodyById.get(s.id)!.def;
+        const b = bladePos(s.pos, s.facing, d.shoots, bladeScratch);
+        if (segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y) > PICKUP_REACH) break;
+        if (!pass.bobbled) {
+          const speed = hypot2(p.vel.x, p.vel.y);
+          if (!rng.chance(receiveChance(d, speed, comesFromBehind(s.facing, p.vel.x, p.vel.y)))) {
+            // Off his stick: it bobbles away, and he needs a moment to get to it.
+            const a = datan2(p.vel.y, p.vel.x) + rng.range(-BOBBLE_TURN, BOBBLE_TURN), v = rng.range(BOBBLE_SPEED[0], BOBBLE_SPEED[1]);
+            p.vel.x = dcos(a) * v;
+            p.vel.y = dsin(a) * v;
+            pass.bobbled = true;
+            blockPickup(state, [s.id]);
+            return;
+          }
+        }
+        best = s;
         break;
       }
     }
     if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
-      let bestD = PICKUP_RADIUS;
+      let bestD = Infinity;
       for (const s of skaters) {
         if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id) || isTiedUp(state, s.id)) continue;
-        const d = dist(s.pos, p.pos);
-        if (d <= bestD) { bestD = d; best = s; }
+        // A pass's receiver takes it only as a pass (above, with its draw) until it has come off his stick.
+        if (pass !== null && !pass.bobbled && s.id === pass.toId) continue;
+        const b = bladePos(s.pos, s.facing, bodyById.get(s.id)!.def.shoots, bladeScratch);
+        const db = segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y), dc = dist(s.pos, p.pos);
+        // In his feet he kicks it up to his stick: only when the blade is within MAX_KICK of it.
+        const d = db <= PICKUP_REACH ? db : dc <= IN_FEET && dist(b, p.pos) <= MAX_KICK ? dc : Infinity;
+        if (d < bestD) { bestD = d; best = s; }
       }
     }
     if (!best) return;
@@ -381,6 +431,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     state.possession = best.side;
     carryPuck(best);
   }
+
 
   function liveTick(): void {
     const prevPuckX = state.puck.pos.x;

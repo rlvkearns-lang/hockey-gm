@@ -11,6 +11,9 @@ import { DT } from './constants';
 import { dangerMan as dangerMan_, laneOpen as laneOpen_, passLaneWidth as passLaneWidth_, spaceAt as spaceAt_ } from './lanes';
 import { clipToNets as clipToNets_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_ } from './rink';
 import { TUNING } from './tuning';
+import { BLADE } from './blade';
+import { dcos as dcos_, dsin as dsin_ } from './dmath';
+import { ICE_DECAY as PUCK_DECAY } from './puck';
 import type { GameState, Job, PlayerDef, Side, SkaterState, Tactics } from './types';
 import type { Want } from './commit';
 import { indexOf as indexOf_ } from './commit';
@@ -33,9 +36,14 @@ const dangerMan = dangerMan_;
 const laneOpen = laneOpen_;
 const passLaneWidth = passLaneWidth_;
 const spaceAt = spaceAt_;
+const dcos = dcos_;
+const dsin = dsin_;
 
 // Local copies of vec.ts helpers (hot loops: a call across modules costs more under the test runner's module wrapper).
 const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);
+/** A pass aimed within POINT_RECEIVE (m) of the blue line is taken at the point: his target stays POINT_HOLD (m) inside the line. */
+const POINT_RECEIVE = 4.5;
+const POINT_HOLD = 0.8;
 const distV = (a: Vec2, b: Vec2): number => hyp(a.x - b.x, a.y - b.y);
 function segD(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const abx = bx - ax, aby = by - ay;
@@ -595,6 +603,38 @@ function chaseSpot(state: GameState, s: SkaterState, out: Vec2): void {
   }
 }
 
+/**
+ * Where a pass's receiver goes (Task 6): onto the puck's actual path (the point of its slide nearest his blade, which
+ * is the pass's aim when it is on target and he is where it was aimed), with his centre placed so that his blade is there as he faces the puck. A point reception (aimed
+ * within POINT_RECEIVE of the blue line, the puck in the zone) never targets a spot nearer the line than POINT_HOLD (m):
+ * he stays between the puck and the line. Writes `out`.
+ */
+function receiveSpot(state: GameState, s: SkaterState, shoots: 'L' | 'R', out: Vec2): void {
+  const pass = state.pendingPass!;
+  const P = state.puck.pos, vel = state.puck.vel;
+  const dir = state.attackDir[s.side];
+  const v = hyp(vel.x, vel.y);
+  let mx = pass.aim.x, my = pass.aim.y, fx: number, fy: number;
+  if (v >= 1) {
+    const ux = vel.x / v, uy = vel.y / v;
+    // The point of its slide nearest his blade now (the shortest way onto its path).
+    const hb = shoots === 'L' ? BLADE.side : -BLADE.side, c = dcos(s.facing), sn = dsin(s.facing);
+    const bx = s.pos.x + BLADE.forward * c - hb * sn, by = s.pos.y + BLADE.forward * sn + hb * c;
+    const t = clamp((bx - P.x) * ux + (by - P.y) * uy, 0, v / PUCK_DECAY);
+    mx = P.x + ux * t;
+    my = P.y + uy * t;
+    fx = -ux; fy = -uy;
+  } else {
+    const dx = P.x - s.pos.x, dy = P.y - s.pos.y, l = hyp(dx, dy) || 1;
+    mx = P.x; my = P.y; fx = dx / l; fy = dy / l;
+  }
+  // Facing the puck (fx, fy), his blade is BLADE.forward ahead and BLADE.side to his shooting side (his left is (-fy, fx)).
+  const h = shoots === 'L' ? BLADE.side : -BLADE.side;
+  out.x = mx - BLADE.forward * fx + h * fy;
+  out.y = my - BLADE.forward * fy - h * fx;
+  if (P.x * dir > BLUE && pass.aim.x * dir < BLUE + POINT_RECEIVE && out.x * dir < BLUE + POINT_HOLD) out.x = (BLUE + POINT_HOLD) * dir;
+}
+
 const anchorScratch: Vec2 = { x: 0, y: 0 };
 const spotScratch: Vec2 = { x: 0, y: 0 };
 const BEHIND_TICKS = Math.round(BEHIND_CHASE_SECONDS / DT);
@@ -799,7 +839,24 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
   const a = NO_ANCHOR.has(job) ? anchorScratch : jobAnchor(state, s.side, job, tactics, anchorScratch);
   const opp = oppCarrier(state, s.side);
   switch (job) {
-    case 'chase': case 'receive':
+    case 'receive':
+      if (state.pendingPass !== null && state.pendingPass.toId === s.id) {
+        receiveSpot(state, s, defs.get(s.id)?.shoots ?? 'L', p);
+        out.follow = 'puck';
+        // He gets there and stops on the spot (a man skating through it takes his blade off the puck's path).
+        out.through = false;
+        out.slow = 'stop';
+        out.effort = 'sprint';
+        // He opens up to the pass: square to the puck, his blade on its path.
+        out.face = state.puck.pos;
+        return out;
+      }
+      chaseSpot(state, s, p);
+      out.follow = 'puck';
+      out.through = true;
+      out.effort = 'sprint';
+      return out;
+    case 'chase':
       chaseSpot(state, s, p);
       out.follow = 'puck';
       out.through = true;

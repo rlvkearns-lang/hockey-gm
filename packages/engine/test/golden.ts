@@ -38,7 +38,7 @@ class Hash {
 
 function hashTeam(h: Hash, t: TeamDef): void {
   for (const p of t.players) {
-    h.str(p.id); h.str(p.name); h.num(p.number); h.str(p.position); h.str(p.shoots); h.num(p.heightCm); h.num(p.weightKg);
+    h.str(p.id); h.str(p.name); h.num(p.number); h.str(p.position); h.str(p.shoots); h.str(p.catches ?? ''); h.num(p.heightCm); h.num(p.weightKg);
     h.str(p.type); h.str(p.subType ?? '');
     for (const k of SKATER_ATTRS) h.num(p.attrs[k]);
     if (p.goalie) for (const k of GOALIE_ATTRS) h.num(p.goalie[k]);

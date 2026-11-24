@@ -33,7 +33,7 @@ suite('describe', () => {
     expect(listed({ ...common, type: 'periodEnd', side: null, detail: { period: 1 } })).toBe(true);
   });
   it('classifies events and formats the time', () => {
-    expect(kindOf({ ...common, type: 'pass', detail: { kind: 'pass', distance: 9 } })).toBe('pass');
+    expect(kindOf({ ...common, type: 'pass', detail: { kind: 'pass', distance: 9, hand: 'forehand' } })).toBe('pass');
     expect(kindOf({ ...common, type: 'lineChange', detail: { unit: 'forwards', from: 0, to: 1, onTheFly: true, phase: 'rush' } })).toBe('lineChange');
     expect(kindOf({ ...common, type: 'goal', detail: { distance: 3, releaseTick: 0 } })).toBe('goal');
     expect(kindOf({ ...common, type: 'hit', detail: { result: 'landed', contestId: 1 } })).toBe('other');

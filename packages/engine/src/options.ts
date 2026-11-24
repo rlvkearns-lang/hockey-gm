@@ -21,10 +21,11 @@ import { goalieShade as goalieShade_, pressureOn as pressureOn_ } from './action
 import { composite as composite_ } from './attributes';
 import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { planOf as planOf_ } from './commit';
-import { clearPathToNet as clearPathToNet_, laneWidth as laneWidth_, passLaneWidth as passLaneWidth_, spaceAt as spaceAt_ } from './lanes';
+import { clearPathToNet as clearPathToNet_, laneWidth as laneWidth_, spaceAt as spaceAt_ } from './lanes';
+import { canReceivePass as canReceivePass_, planPass as planPass_, type PassPlan } from './passing';
 import { distToBoards as distToBoards_, RINK as RINK_ } from './rink';
 import { bodyRadius as bodyRadius_ } from './skating';
-import { isTiedUp as isTiedUp_, scoreMargin as scoreMargin_, steeredByContest as steeredByContest_ } from './team-play';
+import { scoreMargin as scoreMargin_ } from './team-play';
 import { TUNING } from './tuning';
 import { dcos as dcos_, dexp as dexp_, dpow as dpow_, dsin as dsin_ } from './dmath';
 import type { Rng } from './rng';
@@ -41,14 +42,13 @@ const PERIODS = PERIODS_;
 const planOf = planOf_;
 const clearPathToNet = clearPathToNet_;
 const laneWidth = laneWidth_;
-const passLaneWidth = passLaneWidth_;
+const canReceivePass = canReceivePass_;
+const planPass = planPass_;
 const spaceAt = spaceAt_;
 const RINK = RINK_;
 const distToBoards = distToBoards_;
 const bodyRadius = bodyRadius_;
-const isTiedUp = isTiedUp_;
 const scoreMargin = scoreMargin_;
-const steeredByContest = steeredByContest_;
 const dcos = dcos_;
 const dexp = dexp_;
 const dsin = dsin_;
@@ -147,13 +147,7 @@ export function threat(rx: number, ly: number): number {
 /** A spot is worth less with an opponent near it: O.openAt.min with one within `from` m, 1 with nobody within from + over. */
 const openAt = (space: number): number => O.openAt.min + (1 - O.openAt.min) * clamp((space - O.openAt.from) / O.openAt.over, 0, 1);
 
-/**
- * `t` can be passed to: on the ice, not heading off, not down, not steered by a contest, and his stick not tied up by
- * a net-front defender.
- */
-export function canReceivePass(state: GameState, t: SkaterState): boolean {
-  return t.onIce && !t.leaving && t.downT === 0 && !steeredByContest(state, t) && !isTiedUp(state, t.id);
-}
+export { canReceivePass } from './passing';
 
 function findSkater(state: GameState, id: string): SkaterState | null {
   for (const s of state.skaters) if (s.id === id) return s;
@@ -216,6 +210,9 @@ const passIds: string[] = [];
 const passValues: number[] = [];
 const passSeen: number[] = [];
 const passKey: Extract<Option, { kind: 'pass' }> = { kind: 'pass', toId: '', value: 0 };
+const planScratch = {} as PassPlan;
+/** The best chance a receiver has of handling a pass (passing.ts receiveChance's ceiling). */
+const RECEIVE_BEST = 0.97;
 const tw: Vec2 = { x: 0, y: 0 };
 
 /**
@@ -315,7 +312,6 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     const mrx = m.pos.x * dir, mly = m.pos.y * dir;
     const dx = m.pos.x - p.x, dy = m.pos.y - p.y;
     const l = hyp(dx, dy);
-    if (l < B.passRange[0] || l > B.passRange[1]) continue;
     // Never one who would be offside: with the puck outside, nobody wholly in the zone (or about to be).
     if (outside) {
       const mx = (m.pos.x + Math.max(0, m.vel.x * dir) * dir * B.offsideLookahead) * dir;
@@ -328,10 +324,16 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (mode === 'behind' && (mrx < OUT_FRONT_MIN_RX || mrx > GOAL)) continue;
     // Behind his back: seen only with good vision.
     if ((dx * fc + dy * fs) / (l || 1) < BEHIND_COS && a.vision < BEHIND_VISION) continue;
-    let chance = O.pass.base - O.pass.perMetre * Math.max(0, l - O.pass.from) - V.skill.pass * (100 - passSkill) - pressure * (O.pass.pressure - O.pass.pressurePerPoint * passSkill);
-    chance *= settled;
-    // The goalie and the net frames are in the way of a pass as much as a skater is.
-    const w = passLaneWidth(state, side, p, m.pos);
+    // A pass he can make (passing.ts planPass: the receiver can take it, its hand's range, nobody can get a stick into
+    // the lane first, not too hard), aimed at the receiver's blade.
+    const pp = planPass(state, s, m, defs, planScratch);
+    if (pp === null) continue;
+    const pl = hyp(pp.aim.x - p.x, pp.aim.y - p.y);
+    let chance = O.pass.base - O.pass.perMetre * Math.max(0, pl - O.pass.from) - V.skill.pass * (100 - passSkill) - pressure * (O.pass.pressure - O.pass.pressurePerPoint * passSkill);
+    // Settled on it, and the chance he handles it (passing.ts receiveChance, against the best there is).
+    chance *= settled * (pp.chance / RECEIVE_BEST) * O.pass.hand[pp.hand];
+    // The goalie and the net frames are in the way of a pass as much as a skater is (passLaneWidth, to the aim).
+    const w = pp.lane;
     if (w < O.pass.narrow) chance *= O.pass.narrowFactor; else if (w < L.open) chance *= V.shadowed;
     const space = spaceAt(state, side, m.pos);
     if (space < L.space) chance *= O.pass.crowded + space / O.pass.crowdedPer;

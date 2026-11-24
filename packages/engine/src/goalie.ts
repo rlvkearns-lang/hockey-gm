@@ -256,12 +256,22 @@ export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEv
   out.push(post ? gameEvent(state, { type: 'post', ...e }) : gameEvent(state, { type: 'miss', ...e }));
 }
 
-/** Pose for a save on a puck crossing at (y, z), from where it is against the goalie (his glove is on his left). */
-function savePose(g: GoalieState, y: number, z: number, end: 1 | -1): Exclude<GoaliePose, 'stance' | 'cover'> {
+/**
+ * Pose for a save by a goalie who catches with `catches`, of a puck crossing `dy` (m) across from his centre (in y) at
+ * height `z`, in the net at `netEnd` (-1: the net at -x). A high save on his catching side is `glove`, on the other side
+ * `blocker`; low, `pad` when more than PAD_OFFSET off his centre, else `butterfly`. His left is the engine's left: facing
+ * out of the net at -x (toward +x), his left is +y.
+ */
+export function poseFor(catches: 'L' | 'R', o: { netEnd: 1 | -1; dy: number; z: number }): Exclude<GoaliePose, 'stance' | 'cover'> {
   // Facing out of the net, his left is +y when the net is at -x (end -1), and -y when it is at +x.
-  const left = (y - g.pos.y) * -end;
-  if (z > HIGH_SAVE_Z) return left >= 0 ? 'glove' : 'blocker';
-  return Math.abs(y - g.pos.y) > PAD_OFFSET ? 'pad' : 'butterfly';
+  const left = o.dy * -o.netEnd;
+  if (o.z > HIGH_SAVE_Z) return (left >= 0) === (catches === 'L') ? 'glove' : 'blocker';
+  return Math.abs(o.dy) > PAD_OFFSET ? 'pad' : 'butterfly';
+}
+
+/** Pose for a save by `g` (catching with `catches`) on a puck crossing at (y, z). */
+function savePose(g: GoalieState, catches: 'L' | 'R', y: number, z: number, end: 1 | -1): Exclude<GoaliePose, 'stance' | 'cover'> {
+  return poseFor(catches, { netEnd: end, dy: y - g.pos.y, z });
 }
 
 /**
@@ -334,7 +344,7 @@ export function resolveOnNet(
   out.push(gameEvent(state, { type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, pos: state.puck.pos, detail: { distance, releaseTick, speed: ev.speed } }));
 
   if (rng.chance(p)) {
-    const pose = savePose(g, ev.y, ev.z, end);
+    const pose = savePose(g, defs.get(g.id)?.catches ?? 'L', ev.y, ev.z, end);
     g.pose = pose;
     g.poseT = POSE_SECONDS;
     out.push(gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: state.puck.pos, detail: { pose } }));

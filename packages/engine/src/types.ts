@@ -22,7 +22,10 @@ export type PlayerDef = {
   name: string;
   number: number;
   position: Position;
+  /** The side his stick blade is on: 'L' his left (facing + PI/2). */
   shoots: 'L' | 'R';
+  /** A goalie's catching hand (his glove), 'L' when absent. Ignored for skaters. */
+  catches?: 'L' | 'R';
   heightCm: number;
   weightKg: number;
   type: string;
@@ -288,9 +291,10 @@ export type GameState = {
   pickupBlock: { ids: string[]; untilTick: number } | null;
   /**
    * A pass on its way: its intended receiver skates onto it and may take it at any speed until tick `untilTick`.
-   * `tried` lists the opponents who have had their one chance to intercept it.
+   * `tried` lists the opponents who have had their one chance to intercept it. `aim` is where it was aimed (his blade
+   * where he would be when it arrived); `bobbled` is set once it has come off his stick (he takes it at the next touch).
    */
-  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; pressure: number } | null;
+  pendingPass: { fromId: string; toId: string; untilTick: number; tried: string[]; pressure: number; aim: Vec2; bobbled: boolean } | null;
   /**
    * A turnover that may still go in the box score (see turnovers.ts): `side`'s `playerId` won the puck off `otherId`
    * (a takeaway) or `otherId` gave it to him (a giveaway, credited to `otherId`) on `tick`; it counts once `side` has
@@ -367,6 +371,9 @@ export type TeamPhase = 'breakout' | 'rush' | 'ozone' | 'forecheck' | 'neutralDe
 export type SavePose = 'glove' | 'blocker' | 'pad' | 'butterfly';
 
 /** How a turnover happened (`turnover`); a box-score takeaway or giveaway keeps the turnover's `how`. */
+/** How a pass is played: off the forehand, the backhand, or behind him (blade.ts handFor). */
+export type PassHand = 'forehand' | 'backhand' | 'behind';
+
 export type TurnoverHow = 'poke' | 'pokeLoose' | 'hit' | 'battle' | 'battleLoose' | 'intercepted' | 'deflected';
 
 /**
@@ -380,9 +387,10 @@ export type EventDetails = {
   release: { kind: 'pass' | 'shot' | 'dump'; toId: string | null; vel: { x: number; y: number; z: number } };
   /**
    * A pass (otherId: its intended receiver), a dump-in (no receiver), a rim (hard round the boards, to a man or an area;
-   * otherId the man or null) or a clear (out of his own zone, no receiver), at its release.
+   * otherId the man or null) or a clear (out of his own zone, no receiver), at its release. `hand`: how a pass was
+   * played (null for a dump, rim or clear).
    */
-  pass: { kind: 'pass' | 'dump' | 'rim' | 'clear'; distance: number | null };
+  pass: { kind: 'pass' | 'dump' | 'rim' | 'clear'; distance: number | null; hand: PassHand | null };
   /** A shot on goal reached the net (otherId: the goalie); followed by `save` or `goal`. releaseTick null: not shot (a pass or loose puck that slid in). */
   shot: { distance: number; releaseTick: number | null; speed: number };
   save: { pose: SavePose };
