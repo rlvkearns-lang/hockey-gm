@@ -122,7 +122,8 @@ describe('A4: attempts (Task 7)', () => {
       for (const e of r.events) {
         if (e.type === 'release' && e.detail.kind === 'shot') { releases.push(e); outcomes.set(`${e.tick}:${e.playerId}`, []); }
         if (e.type === 'block' || e.type === 'miss' || e.type === 'post' || (e.type === 'shot' && e.detail.releaseTick !== null)) {
-          const shooter = e.type === 'block' ? e.otherId : e.playerId;
+          // After a tip the outcome is the tipper's, and tippedFrom names the shooter whose release it was.
+          const shooter = e.type === 'block' ? e.otherId : e.detail.tippedFrom ?? e.playerId;
           const k = `${e.detail.releaseTick}:${shooter}`;
           expect(outcomes.has(k), `${e.type} at ${e.tick} has no shot release`).toBe(true);
           outcomes.get(k)!.push(e.type);
@@ -135,7 +136,7 @@ describe('A4: attempts (Task 7)', () => {
       let open: GameEvent | null = null;
       for (const e of r.events) {
         if (e.type === 'shot') { expect(open).toBeNull(); open = e; }
-        else if (e.type === 'save' || (e.type === 'goal' && e.detail.releaseTick !== null)) { expect(open).not.toBeNull(); open = null; }
+        else if (e.type === 'save' || (e.type === 'goal' && e.detail.releaseTick !== null)) { expect(open).not.toBeNull(); expect(e.tick - open!.tick).toBeLessThanOrEqual(4); open = null; }
       }
       expect(open).toBeNull();
       for (const side of ['home', 'away'] as const) {
@@ -143,7 +144,9 @@ describe('A4: attempts (Task 7)', () => {
         expect(r.team[side].attempts).toBe(rel.length);
         expect(r.team[side].shots).toBe(r.events.filter((e) => e.type === 'shot' && e.side === side).length);
       }
-      for (const p of r.players) expect(p.attempts, p.id).toBe(releases.filter((e) => e.playerId === p.id).length);
+      // A player's attempts: the outcomes credited to him (a tipped shot is the tipper's; a block is the shooter's).
+      const credited = (id: string): number => r.events.filter((e) => ((e.type === 'shot' || e.type === 'miss' || e.type === 'post') && e.playerId === id) || (e.type === 'block' && e.otherId === id)).length;
+      for (const p of r.players) expect(p.attempts, p.id).toBe(credited(p.id));
     }
   }, 60_000);
   it('A4: defencemen shoot: at least 6 attempts a team a game from the defence (was 2)', () => { expect(m().defenceAttemptsPerTeam).toBeGreaterThanOrEqual(6); }, 60_000);
@@ -159,4 +162,34 @@ describe('A4: attempts (Task 7)', () => {
     expect(bh).toBeGreaterThan(0.05); expect(bh).toBeLessThan(0.20);
   }, 60_000);
   it('A4: every release of a shot names its type', () => { for (const r of games()) for (const e of r.events) if (e.type === 'release') expect(e.detail.shotType === null).toBe(e.detail.kind !== 'shot'); }, 60_000);
+});
+
+describe('A4: saves, rebounds and tips (Task 8)', () => {
+  it('A4: every shot on goal is followed by exactly one save or goal by the same goalie within 4 ticks, and no save comes without its shot', () => {
+    for (const r of games()) {
+      let open: GameEvent | null = null;
+      for (const e of r.events) {
+        if (e.type === 'shot') { expect(open).toBeNull(); open = e; }
+        else if (e.type === 'save' || (e.type === 'goal' && e.detail.releaseTick !== null)) {
+          expect(open).not.toBeNull(); expect(e.tick - open!.tick).toBeLessThanOrEqual(4);
+          expect(e.type === 'save' ? e.playerId : e.otherId).toBe(open!.otherId);
+          open = null;
+        }
+      }
+      expect(open).toBeNull();
+    }
+  }, 60_000);
+  it('A4: rebounds exist: 15% to 50% of saves leave one, and there are at least 6 second chances a game (was 2.3)', () => {
+    const saves = games().flatMap((r) => r.events.filter((e) => e.type === 'save'));
+    const rb = saves.filter((e) => e.type === 'save' && e.detail.kind === 'rebound').length / saves.length;
+    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m().reboundChancesPerGame).toBeGreaterThanOrEqual(6);
+  }, 60_000);
+  it('A4: tips happen: at least 2 a game, some on goal', () => {
+    const tips = sum(games().map((r) => r.events.filter((e) => e.type === 'tip').length)) / 3;
+    expect(tips).toBeGreaterThanOrEqual(2);
+    expect(games().some((r) => r.events.some((e) => e.type === 'shot' && e.detail.tippedFrom !== null))).toBe(true);
+  }, 60_000);
+  it('A4: the puck never moves further in a tick than its speed allows at a save or a tip', () => {
+    expect(counters().saveJumpTicks).toBe(0);
+  }, 60_000);
 });

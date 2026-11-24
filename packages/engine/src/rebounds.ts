@@ -1,0 +1,107 @@
+/**
+ * What a save does with the puck (Task 8): the goalie holds it (a whistle), steers it toward a corner, or leaves a
+ * rebound in front of him. The puck leaves from the save point, where it met him at his plane, never from behind him.
+ */
+import { gameEvent as gameEvent_ } from './events';
+import { stopPlay as stopPlay_ } from './faceoff';
+import { FACEOFF_DOTS as FACEOFF_DOTS_, resolveBoards as resolveBoards_ } from './rink';
+import type { Rng } from './rng';
+import { TUNING as TUNING_ } from './tuning';
+import type { Crossing, GameEvent, GameState, SaveKind, SavePose, Side } from './types';
+import type { Vec2 } from './vec';
+import { dcos as dcos_, dsin as dsin_ } from './dmath';
+import { clamp as clamp_, PUCK_RADIUS as PUCK_RADIUS_ } from './util';
+const gameEvent = gameEvent_;
+const stopPlay = stopPlay_;
+const FACEOFF_DOTS = FACEOFF_DOTS_;
+const resolveBoards = resolveBoards_;
+const TUNING = TUNING_;
+const dcos = dcos_;
+const dsin = dsin_;
+const clamp = clamp_;
+const PUCK_RADIUS = PUCK_RADIUS_;
+
+const G = TUNING.goalie;
+const R = TUNING.goalie.rebound;
+/** How long (s) he shows holding the puck. */
+const COVER_SECONDS = 1.2;
+
+/** What decides a save's outcome: his pose, the shot's speed (m/s), a screen, a tip, and his reboundControl. */
+export type SaveFacts = { pose: SavePose; speed: number; screened: boolean; tipped: boolean; reboundControl: number };
+
+/**
+ * Chances of each outcome; each within [0.03, 0.97] and summing to 1. held: G.freeze[pose] (base + perPoint *
+ * reboundControl) less 0.004 per m/s over 25, less 0.08 screened, less 0.12 tipped; of the rest, steered: 0.35 + 0.005 *
+ * (reboundControl - 50), less 0.1 tipped; the rest leave a rebound.
+ */
+export function saveOutcomeChances(f: SaveFacts): Record<SaveKind, number> {
+  const fz = G.freeze[f.pose];
+  const held = clamp(fz.base + fz.perPoint * f.reboundControl - R.heldPerSpeed * Math.max(0, f.speed - R.heldFrom)
+    - (f.screened ? R.heldScreened : 0) - (f.tipped ? R.heldTipped : 0), 0.03, 0.94);
+  const rest = 1 - held;
+  const share = R.steered.base + R.steered.perPoint * (f.reboundControl - 50) - (f.tipped ? R.steered.tipped : 0);
+  // Each of the two at least 0.03 (rest is at least 0.06).
+  const steered = clamp(rest * share, 0.03, rest - 0.03);
+  return { held, steered, rebound: rest - steered };
+}
+
+/** The end-zone faceoff dot on `end` nearest to `p`. */
+function endDotNear(end: 1 | -1, p: Vec2): Vec2 {
+  let best = FACEOFF_DOTS.end[0]!, bestD = Infinity;
+  for (const d of FACEOFF_DOTS.end) {
+    if (d.x * end <= 0) continue;
+    const dd = Math.abs(d.y - p.y);
+    if (dd < bestD) { bestD = dd; best = d; }
+  }
+  return best;
+}
+
+/**
+ * Draws the outcome of a save by the goalie of `goalieSide` and moves the puck from the save point (the puck is there
+ * now, `cross` says where on him). held: `freeze` (cause 'save') and a whistle, as before. steered: toward the corner on
+ * the side it came to (the side of his centre it met him on), 55 to 80 degrees off straight out, 6 to 9 m/s. rebound:
+ * within 35 degrees plus 0.3 per point of reboundControl under 100 of straight out (50 at 50), 2.5 to 6 m/s, so that it
+ * is still in front half a second later. Sets state.lastSave (a held save's is cleared by the whistle). Returns the kind.
+ */
+export function saveOutcome(state: GameState, goalieSide: Side, f: SaveFacts, cross: Crossing, rng: Rng, out: GameEvent[]): SaveKind {
+  const c = saveOutcomeChances(f);
+  const u = rng.next();
+  const kind: SaveKind = u < c.held ? 'held' : u < c.held + c.steered ? 'steered' : 'rebound';
+  const g = state.goalies[goalieSide];
+  const end = (-state.attackDir[goalieSide]) as 1 | -1;
+  const pk = state.puck;
+  state.lastSave = { side: goalieSide, tick: state.tick, kind };
+  state.carrierId = null;
+  state.lastTouch = { id: g.id, side: goalieSide };
+  state.icingWatch = null; // the goalie played it
+  pk.z = 0;
+  pk.vz = 0;
+  if (kind === 'held') {
+    g.pose = 'cover';
+    g.poseT = COVER_SECONDS;
+    pk.vel.x = 0;
+    pk.vel.y = 0;
+    out.push(gameEvent(state, { type: 'freeze', side: goalieSide, playerId: g.id, otherId: null, pos: pk.pos, detail: { cause: 'save' } }));
+    stopPlay(state, endDotNear(end, pk.pos));
+    return kind;
+  }
+  // Straight out from his net is -end along x. An angle `rel` off it turns toward +y for the net at -x (end -1) and
+  // toward -y for the net at +x: toward world side sy, rel = sy * -end.
+  const out0 = end === 1 ? Math.PI : 0;
+  let rel: number, speed: number;
+  if (kind === 'steered') {
+    // To the side it met him on (his left is world y * -end); dead centre, either.
+    const sy = cross.side !== 0 ? (cross.side * -end >= 0 ? 1 : -1) : rng.chance(0.5) ? 1 : -1;
+    rel = sy * -end * rng.range(R.steeredAngle[0], R.steeredAngle[1]);
+    speed = rng.range(R.steeredSpeed[0], R.steeredSpeed[1]);
+  } else {
+    const max = R.maxAngle.base + R.maxAngle.perPoint * (100 - f.reboundControl);
+    rel = rng.range(-max, max);
+    speed = rng.range(R.speed[0], R.speed[1]);
+  }
+  const a = out0 + rel;
+  pk.vel.x = dcos(a) * speed;
+  pk.vel.y = dsin(a) * speed;
+  resolveBoards(pk.pos, pk.vel, PUCK_RADIUS, 0);
+  return kind;
+}

@@ -63,7 +63,7 @@ function blockShare(d: PlayerDef, n: number): number {
     st.carrierId = null;
     st.puck.pos = { x: 15, y: 0 };
     st.puck.vel = { x: 30, y: 0 };
-    st.shotInFlight = { shooterId: shooter.id, side: 'home', from: { x: 15, y: 0 }, fromDist: 12.13, tick: 0, blockTried: [], shotType: 'wrist' };
+    st.shotInFlight = { shooterId: shooter.id, side: 'home', from: { x: 15, y: 0 }, fromDist: 12.13, tick: 0, blockTried: [], shotType: 'wrist', tippedBy: null, tipTried: [], rebound: false, screened: false, faced: false };
     shooter.pos = { x: 14.4, y: 0 };
     skater(st, 'away', 'LD').pos = { x: 16, y: 0 };
     const ds = new Map(defs);

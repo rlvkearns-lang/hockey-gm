@@ -3,32 +3,32 @@ import { DT as DT_ } from './constants';
 import { gameEvent as gameEvent_ } from './events';
 import { stopPlay as stopPlay_ } from './faceoff';
 import type { PuckEvent } from './puck';
-import { FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_, resolveBoards as resolveBoards_ } from './rink';
+import { FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
 import { wrapAngle as wrapAngle_ } from './skating';
 import { TUNING as TUNING_ } from './tuning';
-import type { GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, Side } from './types';
+import { saveOutcome as saveOutcome_ } from './rebounds';
+import type { Crossing, EventDetails, GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, ShotInFlight, Side } from './types';
 import { dist as dist_, hypot2 as hypot2_, type Vec2 } from './vec';
-import { datan2 as datan2_, dcos as dcos_, dexp as dexp_, dsin as dsin_, dtanh as dtanh_ } from './dmath';
-import { clamp as clamp_, findSkater as findSkater_, other as other_, PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
+import { datan2 as datan2_, dexp as dexp_, dtanh as dtanh_, hypot3 as hypot3_ } from './dmath';
+import { clamp as clamp_, GRAVITY as GRAVITY_, other as other_, PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const DT = DT_;
 const gameEvent = gameEvent_;
 const stopPlay = stopPlay_;
 const FACEOFF_DOTS = FACEOFF_DOTS_;
 const RINK = RINK_;
-const resolveBoards = resolveBoards_;
 const wrapAngle = wrapAngle_;
 const TUNING = TUNING_;
 const dist = dist_;
 const hypot2 = hypot2_;
 const datan2 = datan2_;
-const dcos = dcos_;
+const hypot3 = hypot3_;
+const GRAVITY = GRAVITY_;
+const saveOutcome = saveOutcome_;
 const dexp = dexp_;
-const dsin = dsin_;
 const dtanh = dtanh_;
 const clamp = clamp_;
-const findSkater = findSkater_;
 const other = other_;
 const PUCK_RADIUS = PUCK_RADIUS_;
 const SIDES = SIDES_;
@@ -44,8 +44,13 @@ const POSE_SPEED_FACTOR = 0.4;
 /** How long a save pose and a cover are shown (s). */
 const POSE_SECONDS = 0.6;
 const COVER_SECONDS = 1.2;
-/** Rebounds start this far (m) in front of the goalie. */
-const RB_START = 0.45;
+/** He faces only a shot on its way in clear of the posts (by POST_CLEAR m: the puck and the post's radius) and under the bar (by BAR_CLEAR m). */
+const POST_CLEAR = PUCK_RADIUS_ + 0.03 + 0.01;
+const BAR_CLEAR = 0.05;
+/** An attacker screens him within SCREEN_OFF (m) of a shot's line, SCREEN_NEAR to SCREEN_FAR (m) in front of him. */
+const SCREEN_OFF = 0.6;
+const SCREEN_NEAR = 0.8;
+const SCREEN_FAR = 4;
 /** A save above this height (m) is a glove or blocker save; below it, a pad save when this far (m) off his centre, else butterfly. */
 const HIGH_SAVE_Z = 0.5;
 const PAD_OFFSET = 0.35;
@@ -75,6 +80,10 @@ export type SaveInput = {
   height: number;
   /** His night (GameState.goalieNight): added to the log-odds. Default 0. */
   night?: number;
+  /** A tipped shot (Task 8): G.save.tipped off the log-odds. */
+  tipped?: boolean;
+  /** 0 to 1: how much of his last save's pose he still has to come out of (his poseT over the pose length): G.save.recovering at 1. */
+  recovering?: number;
 };
 
 /** Chance that the goalie stops a shot on net. Parity: clamped to [0.03, 0.97]. */
@@ -90,6 +99,8 @@ export function saveChance(input: SaveInput): number {
   const skillTerm = per * G.save.skillSpan * dtanh((skill - 70) / G.save.skillSpan);
   const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0)
     - (input.screened ? G.save.screened : 0)
+    - (input.tipped ? G.save.tipped : 0)
+    - G.save.recovering * clamp(input.recovering ?? 0, 0, 1)
     - G.save.perMovingSpeed * input.goalieMovingSpeed
     - G.save.perBodyMetre * Math.max(0, lm - G.save.body)
     - G.save.perStretchMetre * Math.max(0, lm - G.save.stretch)
@@ -232,16 +243,158 @@ function onIceIds(state: GameState): { home: string[]; away: string[] } {
   return ids;
 }
 
+/** A goalie's height (m) on a puck now at height `z` rising at `vz` after `t` s (under gravity, on the ice once it lands). */
+function heightAfter(z: number, vz: number, t: number): number {
+  if (z === 0 && vz === 0) return 0;
+  const h = z + vz * t - 0.5 * GRAVITY * t * t;
+  return h > 0 ? h : 0;
+}
+
+/** A goalie of `side` showing a save pose: how much of it is left, 0 to 1. */
+function recoveringOf(g: GoalieState): number {
+  return g.pose === 'stance' || g.pose === 'cover' ? 0 : clamp(g.poseT / POSE_SECONDS, 0, 1);
+}
+
 /**
- * The puck reached the goal line between the posts under the bar (stepPuck stopped it there). Emits `shot` for the
- * attacking side, then decides it with saveChance from where the goalie is against the shot's line, how square he is,
- * the shot's speed and distance, a screen, his movement and the height.
- * - Save: `save` (side and playerId the goalie's), a pose from where it crossed, then he holds it (`freeze`, play
- *   stops for the end-zone dot nearest the puck) or it rebounds loose in front of him, slower and straighter the
- *   better his reboundControl.
- * - Goal: `goal` for the shooter, with up to two previous distinct teammates in the touch chain as assists (only
- *   touches within TUNING.scoring.assistWindowSeconds of the goal count) and the
- *   skaters on the ice (`onIce`); the score goes up and play stops for a centre-ice faceoff.
+ * Whether an attacker of `att` (other than `shooterId`) screens a shot meeting the goalie at (cx, cy) along (ux, uy)
+ * (its unit direction): within SCREEN_OFF (0.6 m) of its line, between SCREEN_NEAR (0.8 m) and SCREEN_FAR (4 m) in front
+ * of the goalie.
+ */
+function screenedOnLine(state: GameState, att: Side, shooterId: string, cx: number, cy: number, ux: number, uy: number): boolean {
+  for (const s of state.skaters) {
+    if (!s.onIce || s.side !== att || s.downT > 0 || s.id === shooterId) continue;
+    const dx = s.pos.x - cx, dy = s.pos.y - cy;
+    const along = -(dx * ux + dy * uy);
+    if (along < SCREEN_NEAR || along > SCREEN_FAR) continue;
+    if (Math.abs(dx * uy - dy * ux) < SCREEN_OFF) return true;
+  }
+  return false;
+}
+
+/**
+ * Saves are made where the goalie is, not on the goal line. While a shot is in flight toward the net he defends and its path this
+ * tick crosses his plane (x = his x) on its way to a spot inside the posts (clear of them) and under the bar: the puck is moved to
+ * that crossing, `shot` is emitted, and saveChance decides (his squaring and the line's offset from his centre, the shot's speed,
+ * the time he had to see it from its release or its tip, a screen, a tip, his movement, the height, his night, and how far he
+ * still is in his last save's pose). A save emits `save` and hands the puck to saveOutcome (rebounds.ts) from that point; the
+ * puck does not move on this tick. A goal sets shot.faced and lets the puck go on; `goal` is emitted when it crosses the goal
+ * line (resolveOnNet, 1 to 3 ticks later, with no second `shot`). Returns true when it faced the shot this tick. A puck that
+ * reaches the goal line without having been faced (not a shot, or released from inside his plane) is resolved by resolveOnNet
+ * as before.
+ */
+export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[]): boolean {
+  const shot = state.shotInFlight;
+  if (shot === null || shot.faced || shot.beat === true || state.carrierId !== null) return false;
+  const pk = state.puck;
+  const end = state.attackDir[shot.side];
+  const vx = pk.vel.x, vy = pk.vel.y;
+  if (vx * end <= 0) return false;
+  const defSide = other(shot.side);
+  const g = state.goalies[defSide];
+  const gx = g.pos.x;
+  const x0 = pk.pos.x, y0 = pk.pos.y;
+  if ((x0 - gx) * end >= 0 || (x0 + vx * DT - gx) * end < 0) return false;
+  // Where it reaches the goal line: inside the posts, clear of them, and under the bar, or he does not face it.
+  const nx = end * GOAL;
+  const tl = (nx - x0) / vx;
+  const ly = y0 + vy * tl;
+  const lz = heightAfter(pk.z, pk.vz, tl);
+  if (Math.abs(ly) >= RINK.netHalfWidth || lz >= RINK.netHeight) return false;
+  // Within a post's (or the bar's) reach it may ring off it if he does not stop it: then only his save is decided here.
+  const near = Math.abs(ly) >= RINK.netHalfWidth - POST_CLEAR || lz >= RINK.netHeight - BAR_CLEAR;
+  const t = (gx - x0) / vx;
+  const cy = y0 + vy * t, cz = heightAfter(pk.z, pk.vz, t);
+  const cross: Crossing = { side: (cy - g.pos.y) * -end, height: cz };
+  const v = hypot2(vx, vy);
+  const speed = hypot3(vx, vy, pk.z === 0 && pk.vz === 0 ? 0 : pk.vz - GRAVITY * t);
+  const screened = state.screenedUntilTick[defSide] > state.tick || screenedOnLine(state, shot.side, shot.shooterId, gx, cy, vx / v, vy / v);
+  const f = shot.from;
+  const squareErr = Math.abs(wrapAngle(datan2(f.y - g.pos.y, f.x - g.pos.x) - g.facing));
+  const ga = goalieAttrs(defs, g.id);
+  const tipped = shot.tippedBy !== null;
+  const p = saveChance({
+    goalie: ga, lateralMiss: Math.abs(cy - g.pos.y) * Math.abs(vx) / v + squareErr * G.squareMissPerRad, shotSpeed: speed,
+    distance: hypot2(nx - f.x, ly - f.y), screened, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: cz,
+    night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
+  });
+  const shooterId = shot.tippedBy ?? shot.shooterId;
+  const at = { x: gx, y: cy };
+  const saved = rng.chance(p);
+  if (!saved && near) {
+    // It beats him on its way to the post: in, it is a shot and a goal at the line; off the post, a `post`.
+    shot.beat = true;
+    shot.screened = screened;
+    return true;
+  }
+  out.push(gameEvent(state, {
+    type: 'shot', side: shot.side, playerId: shooterId, otherId: g.id, pos: at,
+    detail: { distance: shot.fromDist, releaseTick: shot.tick, speed, cross, shotType: shot.shotType, tippedFrom: tipped ? shot.shooterId : null, screened, rebound: shot.rebound },
+  }));
+  shot.screened = screened;
+  if (!saved) {
+    // It beats him: on into the net (resolveOnNet scores it when it crosses the line).
+    shot.faced = true;
+    shot.cross = cross;
+    return true;
+  }
+  const pose = savePose(g, defs.get(g.id)?.catches ?? 'L', cy, cz, end);
+  g.pose = pose;
+  g.poseT = POSE_SECONDS;
+  pk.pos.x = gx;
+  pk.pos.y = cy;
+  state.shotInFlight = null;
+  const save = gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: at, detail: { pose, kind: 'rebound', cross } });
+  out.push(save);
+  save.detail.kind = saveOutcome(state, defSide, { pose, speed, screened, tipped, reboundControl: ga.reboundControl }, cross, rng, out);
+  return true;
+}
+
+/**
+ * The goal of a shot that beat the goalie (shot.faced) or of a puck that crossed the line, for `attSide`: `goal` for
+ * `shooterId` with up to two previous distinct teammates in the touch chain as assists (only touches within
+ * TUNING.scoring.assistWindowSeconds count) and the skaters on the ice (`onIce`); the score goes up and play stops for a
+ * centre-ice faceoff.
+ */
+function scoreGoal(state: GameState, attSide: Side, shooterId: string, detail: EventDetails['goal'], out: GameEvent[]): void {
+  const g = state.goalies[other(attSide)];
+  const t = state.touches;
+  const assists: string[] = [];
+  if (t.side === attSide) {
+    const since = state.tick - Math.round(TUNING.scoring.assistWindowSeconds / DT);
+    for (let i = t.ids.length - 1; i >= 0 && assists.length < 2; i--) {
+      const id = t.ids[i]!;
+      if (t.ticks[i]! < since) break; // older touches are too long ago to have set up the goal
+      if (id !== shooterId && !assists.includes(id)) assists.push(id);
+    }
+  }
+  state.score[attSide]++;
+  out.push(gameEvent(state, { type: 'goal', side: attSide, playerId: shooterId, otherId: g.id, assistIds: assists, pos: state.puck.pos, detail, onIce: onIceIds(state) }));
+  stopPlay(state, FACEOFF_DOTS.centre);
+}
+
+/** The `goal` detail of a shot that beat the goalie at `cross`. */
+function shotGoalDetail(shot: ShotInFlight, cross: Crossing): EventDetails['goal'] {
+  return { distance: shot.fromDist, releaseTick: shot.tick, cross, shotType: shot.shotType, tippedFrom: shot.tippedBy !== null ? shot.shooterId : null, screened: shot.screened, rebound: shot.rebound };
+}
+
+/**
+ * A shot that has beaten the goalie (shot.faced) when play is cut short before it crosses the line (the horn or a
+ * whistle): it is a goal (it is past him and on its way in).
+ */
+export function scoreFacedShot(state: GameState, out: GameEvent[]): void {
+  const shot = state.shotInFlight;
+  if (shot === null || !shot.faced) return;
+  state.shotInFlight = null;
+  scoreGoal(state, shot.side, shot.tippedBy ?? shot.shooterId, shotGoalDetail(shot, shot.cross ?? { side: 0, height: 0 }), out);
+}
+
+/**
+ * The puck reached the goal line between the posts under the bar (stepPuck stopped it there).
+ * - A shot that beat the goalie at his plane (shot.faced): `goal` (its `shot` came when it met him).
+ * - Otherwise (a shot released inside his plane, or a puck that was not shot) he plays it on the line: saveChance from where
+ *   he is against its line, how square he is, its speed and distance, a screen, his movement and the height. A shot emits
+ *   `shot`, then `save` (and saveOutcome: held, steered or a rebound, from the line) or `goal`. A puck that was not shot is
+ *   no shot on goal: he covers it (`freeze`, cause 'cover') or it is a goal with releaseTick null.
  * Events go into `out`.
  */
 export function resolveOnNet(
@@ -251,11 +404,26 @@ export function resolveOnNet(
   const defSide = defenderOf(state, end);
   const attSide = other(defSide);
   const g = state.goalies[defSide];
-  const ga = goalieAttrs(defs, g.id);
   const shot = state.shotInFlight !== null && state.shotInFlight.side === attSide ? state.shotInFlight : null;
   state.shotInFlight = null;
+  const cross: Crossing = { side: (ev.y - g.pos.y) * -end, height: ev.z };
+  if (shot !== null && shot.faced) {
+    scoreGoal(state, attSide, shot.tippedBy ?? shot.shooterId, shotGoalDetail(shot, shot.cross ?? cross), out);
+    return 'goal';
+  }
+  if (shot !== null && shot.beat === true) {
+    // It beat him at his plane by the post and went in: its `shot` and `goal` now, at the line.
+    const sid = shot.tippedBy ?? shot.shooterId;
+    out.push(gameEvent(state, {
+      type: 'shot', side: attSide, playerId: sid, otherId: g.id, pos: state.puck.pos,
+      detail: { distance: shot.fromDist, releaseTick: shot.tick, speed: ev.speed, cross, shotType: shot.shotType, tippedFrom: shot.tippedBy !== null ? shot.shooterId : null, screened: shot.screened, rebound: shot.rebound },
+    }));
+    scoreGoal(state, attSide, sid, shotGoalDetail(shot, cross), out);
+    return 'goal';
+  }
+  const ga = goalieAttrs(defs, g.id);
   const t = state.touches;
-  const shooterId = shot ? shot.shooterId : t.side === attSide ? t.ids[t.ids.length - 1] ?? creditFor(state, attSide) : creditFor(state, attSide);
+  const shooterId = shot ? shot.tippedBy ?? shot.shooterId : t.side === attSide ? t.ids[t.ids.length - 1] ?? creditFor(state, attSide) : creditFor(state, attSide);
   const netX = end * GOAL;
   const fx = shot ? shot.from.x : netX - end * 3, fy = shot ? shot.from.y : ev.y;
   const distance = hypot2(netX - fx, ev.y - fy);
@@ -269,64 +437,41 @@ export function resolveOnNet(
   const ll = hypot2(lx, ly) || 1;
   const offLine = Math.abs((g.pos.x - fx) * ly - (g.pos.y - fy) * lx) / ll;
   const squareErr = Math.abs(wrapAngle(datan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
+  const screened = state.screenedUntilTick[defSide] > state.tick;
+  const tipped = shot !== null && shot.tippedBy !== null;
   const p = saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
-    screened: state.screenedUntilTick[defSide] > state.tick, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
-    night: state.goalieNight[defSide],
+    screened, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
+    night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
   });
-  const releaseTick = shot ? shot.tick : null;
-  // Only a shot is a shot on goal (Task 7 review): a pass or loose puck that slides in is a goal with releaseTick null,
-  // and one he stops is no save (he covers it or plays it away).
-  if (shot) out.push(gameEvent(state, { type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, pos: state.puck.pos, detail: { distance, releaseTick, speed: ev.speed } }));
+  // Only a shot is a shot on goal (Task 7 review).
+  if (shot) {
+    out.push(gameEvent(state, {
+      type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, pos: state.puck.pos,
+      detail: { distance: shot.fromDist, releaseTick: shot.tick, speed: ev.speed, cross, shotType: shot.shotType, tippedFrom: tipped ? shot.shooterId : null, screened, rebound: shot.rebound },
+    }));
+    shot.screened = screened;
+  }
 
   if (rng.chance(p)) {
     const pose = savePose(g, defs.get(g.id)?.catches ?? 'L', ev.y, ev.z, end);
-    g.pose = pose;
-    g.poseT = POSE_SECONDS;
-    if (shot) out.push(gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: state.puck.pos, detail: { pose } }));
-    const rc = ga.reboundControl;
-    const pk = state.puck;
-    if (rng.chance(clamp(G.freeze[pose].base + G.freeze[pose].perPoint * rc, 0.03, 0.97))) {
+    if (!shot) {
+      // A puck that was not shot: he covers it.
       g.pose = 'cover';
       g.poseT = COVER_SECONDS;
-      out.push(gameEvent(state, { type: 'freeze', side: defSide, playerId: g.id, otherId: null, pos: pk.pos, detail: { cause: shot ? 'save' : 'cover' } }));
-      stopPlay(state, endDotNear(end, pk.pos));
+      out.push(gameEvent(state, { type: 'freeze', side: defSide, playerId: g.id, otherId: null, pos: state.puck.pos, detail: { cause: 'cover' } }));
+      stopPlay(state, endDotNear(end, state.puck.pos));
       return 'save';
     }
-    // Rebound: off the reflected line of the shot, turned by the pose and spread by poor rebound control.
-    const out0 = end === 1 ? Math.PI : 0;
-    let rel = wrapAngle(datan2(ly / ll, (-lx / ll)) - out0);
-    if (pose === 'blocker') rel -= G.blockerTurn;
-    else if (pose === 'pad') rel += (ev.y - g.pos.y) * -end >= 0 ? G.padTurn : -G.padTurn;
-    rel = clamp(rel + rng.gauss() * (G.reboundSpread.base + G.reboundSpread.perPoint * (100 - rc)), -G.reboundMaxAngle, G.reboundMaxAngle);
-    const angle = out0 + rel;
-    const speed = ev.speed * clamp(G.reboundSpeed.base - G.reboundSpeed.perPoint * rc, G.reboundSpeed.min, G.reboundSpeed.max) * G.reboundPoseSpeed[pose];
-    pk.pos.x = g.pos.x + dcos(angle) * RB_START;
-    pk.pos.y = g.pos.y + dsin(angle) * RB_START;
-    if (pk.pos.x * end > GOAL - 0.1) pk.pos.x = end * (GOAL - 0.1);
-    pk.vel.x = dcos(angle) * speed;
-    pk.vel.y = dsin(angle) * speed;
-    pk.z = 0;
-    pk.vz = 0;
-    resolveBoards(pk.pos, pk.vel, PUCK_RADIUS, 0);
-    state.carrierId = null;
-    state.lastTouch = { id: g.id, side: defSide };
-    state.icingWatch = null; // the goalie played it
+    g.pose = pose;
+    g.poseT = POSE_SECONDS;
+    const save = gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: state.puck.pos, detail: { pose, kind: 'rebound', cross } });
+    out.push(save);
+    save.detail.kind = saveOutcome(state, defSide, { pose, speed: ev.speed, screened, tipped, reboundControl: ga.reboundControl }, cross, rng, out);
     return 'save';
   }
 
-  // Goal.
-  const assists: string[] = [];
-  if (t.side === attSide) {
-    const since = state.tick - Math.round(TUNING.scoring.assistWindowSeconds / DT);
-    for (let i = t.ids.length - 1; i >= 0 && assists.length < 2; i--) {
-      const id = t.ids[i]!;
-      if (t.ticks[i]! < since) break; // older touches are too long ago to have set up the goal
-      if (id !== shooterId && !assists.includes(id)) assists.push(id);
-    }
-  }
-  state.score[attSide]++;
-  out.push(gameEvent(state, { type: 'goal', side: attSide, playerId: shooterId, otherId: g.id, assistIds: assists, pos: state.puck.pos, detail: { distance, releaseTick }, onIce: onIceIds(state) }));
-  stopPlay(state, FACEOFF_DOTS.centre);
+  scoreGoal(state, attSide, shooterId, shot ? shotGoalDetail(shot, cross)
+    : { distance, releaseTick: null, cross, shotType: null, tippedFrom: null, screened: false, rebound: false }, out);
   return 'goal';
 }

@@ -234,7 +234,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     pickupBlock: null, pendingPass: null, shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [], ticks: [] }, lastAttackTouch: { home: null, away: null },
     noChange: null, delayedOffside: null, icingWatch: null, lastRelease: null, contestCooldowns: [],
-    tiedUpUntil: [], reboundEdge: null, turnoverWatch: null,
+    tiedUpUntil: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
     bench: {
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
@@ -367,7 +367,7 @@ export function blockAttempt(d: PlayerDef): boolean {
   const shooter = skater(st, 'home', 'RW');
   st.carrierId = null;
   st.puck.vel = { x: 30, y: 0 };
-  st.shotInFlight = { shooterId: shooter.id, side: 'home', from: { x: 15, y: 0 }, fromDist: 12.13, tick: 0, blockTried: [], shotType: 'wrist' };
+  st.shotInFlight = { shooterId: shooter.id, side: 'home', from: { x: 15, y: 0 }, fromDist: 12.13, tick: 0, blockTried: [], shotType: 'wrist', tippedBy: null, tipTried: [], rebound: false, screened: false, faced: false };
   const blocker = skater(st, 'away', 'LD');
   for (const s of onIce(st, 'away')) if (s !== blocker) s.onIce = false;
   blocker.pos = { x: 16, y: 0 };
@@ -1212,7 +1212,7 @@ export function assistsWhenTouched(lwSecondsAgo: number): string[] {
     st.tick = now - 15;
     recordTouch(st, 'home-C', 'home');
     st.tick = now;
-    st.shotInFlight = { shooterId: 'home-C', side: 'home', from: { x: 20, y: 2 }, fromDist: 6.4, tick: now - 6, blockTried: [], shotType: 'wrist' };
+    st.shotInFlight = { shooterId: 'home-C', side: 'home', from: { x: 20, y: 2 }, fromDist: 6.4, tick: now - 6, blockTried: [], shotType: 'wrist', tippedBy: null, tipTried: [], rebound: false, screened: false, faced: false };
     const ds = new Map(defs);
     const gId = st.goalies.away.id;
     ds.set(gId, { ...def({ id: gId, position: 'G' }), goalie: g(30) });
@@ -1315,7 +1315,7 @@ export function detailKey(e: GameEvent): string {
     case 'freeze': return e.detail.cause;
     case 'takeaway': case 'giveaway': case 'turnover': return e.detail.how;
     case 'battle': return e.detail.how;
-    case 'save': return e.detail.pose;
+    case 'save': return `${e.detail.pose}:${e.detail.kind}`;
     case 'pass': return e.detail.kind;
     case 'lineChange': return e.detail.onTheFly ? 'onTheFly' : 'stoppage';
     case 'contestEnd': return e.detail.result;

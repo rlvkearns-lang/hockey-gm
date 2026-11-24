@@ -168,17 +168,40 @@ export type GoalieState = { id: string; pos: Vec2; vel: Vec2; facing: number; po
  */
 export type ShotType = 'wrist' | 'slap' | 'oneTimer' | 'backhand' | 'wraparound';
 
+/** What a save does with the puck (rebounds.ts): the goalie holds it, steers it to a corner, or leaves a rebound in front. */
+export type SaveKind = 'held' | 'steered' | 'rebound';
+/** Where the puck met the goalie: `side` metres from his centre toward his left (negative: his right), `height` metres above the ice. */
+export type Crossing = { side: number; height: number };
+
 /** A shot on its way, from its release until the puck reaches the net, misses, hits a post or is blocked. */
 export type ShotInFlight = {
   shooterId: string;
   side: Side;
-  /** Where it was released, and how far that was from the net centre (m). */
+  /** Where it was released (after a tip: where it was tipped), and how far that was from the net centre (m). */
   from: Vec2;
   fromDist: number;
+  /** The tick of the shooter's release (a tip keeps it). */
   tick: number;
   /** Defenders who have already had their one chance to block it. */
   blockTried: string[];
   shotType: ShotType;
+  /** The attacker who tipped it in front (tips.ts; it is then his shot), or null. */
+  tippedBy: string | null;
+  /** Attackers who have already had their one chance to tip it. */
+  tipTried: string[];
+  /** Released within TUNING.rebound.windowSeconds of a save on that net (state.lastSave still set). */
+  rebound: boolean;
+  /** The goalie was screened when it reached him (set when he faces it). */
+  screened: boolean;
+  /** The goalie has faced it at his plane and it beat him: it goes on into the net (goalie.ts faceShot). */
+  faced: boolean;
+  /** Where it met him, once faced (for its `goal` event). */
+  cross?: Crossing;
+  /**
+   * It beat him at his plane on its way to within a post's or the bar's reach (no `shot` yet): in, its `shot` and `goal`
+   * come at the line; off the post, it is a `post`.
+   */
+  beat?: boolean;
 };
 
 /** The kinds of staged contest (contests/*.ts). */
@@ -329,6 +352,11 @@ export type GameState = {
   teamJump: Record<Side, number>;
   /** Each goalie's night: added to his save chance's log-odds for the whole game (drawn at the start; a hot or cold night). */
   goalieNight: Record<Side, number>;
+  /**
+   * The last save that left the puck in play or was held: by the goalie of `side`, on `tick`, of `kind` (rebounds.ts).
+   * Cleared when that side carries the puck, the puck leaves that zone, TUNING.rebound.windowSeconds pass, or play stops.
+   */
+  lastSave: { side: Side; tick: number; kind: SaveKind } | null;
   /** The goalie of each side is screened while tick < this value (set by net-front battles). */
   screenedUntilTick: Record<Side, number>;
   /** Skater `id` has his stick tied up (no pass reception, no loose-puck pickup or race) while tick < `tick` (net-front). */
@@ -408,12 +436,22 @@ export type EventDetails = {
    * played (null for a dump, rim or clear).
    */
   pass: { kind: 'pass' | 'dump' | 'rim' | 'clear'; distance: number | null; hand: PassHand | null };
-  /** A shot on goal reached the net (otherId: the goalie); followed by `save` or `goal`. releaseTick null: not shot (a pass or loose puck that slid in). */
-  shot: { distance: number; releaseTick: number | null; speed: number };
-  save: { pose: SavePose };
-  goal: { distance: number; releaseTick: number | null };
-  miss: { distance: number; releaseTick: number };
-  post: { distance: number; releaseTick: number };
+  /**
+   * A shot on goal reached the goalie (otherId: the goalie): `pos` is where it met him (at his plane), `cross` where on
+   * him, `speed` its speed then (m/s). Followed by `save` (same tick) or `goal` (up to 4 ticks later, when it crosses the
+   * line). After a tip, playerId is the tipper and `tippedFrom` the shooter; `releaseTick` is the shooter's release.
+   * `screened`: an attacker screened the goalie; `rebound`: released within 3 s of a save on that net.
+   * (releaseTick is never null now: a puck that slides in with no shot has no `shot` event.)
+   */
+  shot: { distance: number; releaseTick: number | null; speed: number; cross: Crossing; shotType: ShotType | null; tippedFrom: string | null; screened: boolean; rebound: boolean };
+  /** The goalie (playerId) stopped otherId's shot with `pose`, where it met him (`cross`, `pos`), and held it, steered it to a corner or left a rebound (`kind`). */
+  save: { pose: SavePose; kind: SaveKind; cross: Crossing };
+  /** releaseTick null: it went in with no shot (a pass or loose puck): then `cross` is where it crossed the line, against the goalie. */
+  goal: { distance: number; releaseTick: number | null; cross: Crossing; shotType: ShotType | null; tippedFrom: string | null; screened: boolean; rebound: boolean };
+  miss: { distance: number; releaseTick: number; tippedFrom: string | null };
+  post: { distance: number; releaseTick: number; tippedFrom: string | null };
+  /** playerId deflected otherId's shot in front (pos: where); `vel` is the puck's velocity after it (m/s, z up). */
+  tip: { releaseTick: number; vel: { x: number; y: number; z: number } };
   /** playerId blocked otherId's shot. */
   block: { distance: number; releaseTick: number };
   hit: { result: 'landed' | 'absorbed' | 'bounced'; contestId: number };

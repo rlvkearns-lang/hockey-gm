@@ -8,9 +8,8 @@ import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } fro
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
 import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
-import { goalieTick as goalieTick_, resolveOnNet as resolveOnNet_ } from './goalie';
-import { trackShot as trackShot_, tryBlock as tryBlock_ } from './shots';
-import { stepPuck as stepPuck_, type PuckEvent } from './puck';
+import { goalieTick as goalieTick_, scoreFacedShot as scoreFacedShot_ } from './goalie';
+import { moveLoosePuck as moveLoosePuck_, trackShot as trackShot_ } from './shots';
 import { refereeTick as refereeTick_ } from './referee';
 import { clipToNets as clipToNets_, FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_, routeAroundNets as routeAroundNets_ } from './rink';
 import { createRng as createRng_, restoreRng as restoreRng_, type Rng } from './rng';
@@ -59,10 +58,9 @@ const restPuck = restPuck_;
 const setupFaceoff = setupFaceoff_;
 const snapToLineup = snapToLineup_;
 const goalieTick = goalieTick_;
-const resolveOnNet = resolveOnNet_;
+const scoreFacedShot = scoreFacedShot_;
 const trackShot = trackShot_;
-const tryBlock = tryBlock_;
-const stepPuck = stepPuck_;
+const moveLoosePuck = moveLoosePuck_;
 const refereeTick = refereeTick_;
 const clipToNets = clipToNets_;
 const FACEOFF_DOTS = FACEOFF_DOTS_;
@@ -171,7 +169,7 @@ function initialState(setup: GameSetup): GameState {
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
-    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null, turnoverWatch: null,
+    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
     bench: initialBench(setup),
     plans: initialPlans(skaters.length),
     carrierPlan: null,
@@ -484,7 +482,20 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
 
   /** A shot cut short by a whistle or the horn ends as a `miss` (Task 7 review: every shot release has one outcome). */
   function missAtWhistle(shot: ShotInFlight): void {
-    events.push(gameEvent(state, { type: 'miss', side: shot.side, playerId: shot.shooterId, otherId: state.goalies[shot.side === 'home' ? 'away' : 'home'].id, pos: state.puck.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick } }));
+    events.push(gameEvent(state, { type: 'miss', side: shot.side, playerId: shot.tippedBy ?? shot.shooterId, otherId: state.goalies[shot.side === 'home' ? 'away' : 'home'].id, pos: state.puck.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick, tippedFrom: shot.tippedBy !== null ? shot.shooterId : null } }));
+  }
+
+  /**
+   * state.lastSave lasts while the puck is loose or the attackers have it in that zone, for TUNING.rebound.windowSeconds:
+   * cleared when the goalie's side carries the puck or the puck leaves the zone (Task 8).
+   */
+  function watchLastSave(): void {
+    const ls = state.lastSave;
+    if (ls === null) return;
+    const end = -state.attackDir[ls.side];
+    const carrier = state.carrierId !== null ? state.skaters.find((k) => k.id === state.carrierId) : undefined;
+    if ((carrier !== undefined && carrier.side === ls.side) || state.puck.pos.x * end < RINK.blueLineX
+      || (state.tick - ls.tick) * DT > TUNING.rebound.windowSeconds) state.lastSave = null;
   }
 
   function liveTick(): void {
@@ -508,28 +519,29 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
         carryPuck(carrier);
       } else {
         state.carrierId = null;
-        tryBlock(state, defs, rng, events);
-        prevPuck.x = state.puck.pos.x;
-        prevPuck.y = state.puck.pos.y;
-        const puckEvents = stepPuck(state.puck, DT);
-        let onNet: Extract<PuckEvent, { kind: 'onNet' }> | null = null;
-        for (const ev of puckEvents) if (ev.kind === 'onNet') onNet = ev;
-        if (onNet) resolveOnNet(state, onNet, defs, rng, events);
-        else {
-          const caught = tryIntercept(state, defs, rng, prevPuck);
-          if (caught) {
-            events.push(caught.event);
-            if (caught.taker) carryPuck(caught.taker);
-            else tryPickup(skaters, prevPuck);
-          } else tryPickup(skaters, prevPuck);
+        // Tips, blocks, the goalie's save at his plane, the puck's step and the net (shots.ts moveLoosePuck).
+        const { puckEvents, onNet } = moveLoosePuck(state, defs, rng, events, prevPuck);
+        if (!onNet && state.phase === 'live') {
+          // Nobody touches a shot that is past the goalie on its way in.
+          if (state.shotInFlight === null || !state.shotInFlight.faced) {
+            const caught = tryIntercept(state, defs, rng, prevPuck);
+            if (caught) {
+              events.push(caught.event);
+              if (caught.taker) carryPuck(caught.taker);
+              else tryPickup(skaters, prevPuck);
+            } else tryPickup(skaters, prevPuck);
+          }
           trackShot(state, puckEvents, events);
         }
       }
+      watchLastSave();
     }
     const flying = state.shotInFlight;
     const call = refereeTick(state, prevPuckX, defs);
     // A whistle while a shot is still on its way ends it as a miss (every shot release has exactly one outcome).
-    if (call && flying !== null && state.shotInFlight === null) missAtWhistle(flying);
+    if (call && flying !== null && state.shotInFlight === null) {
+      if (flying.faced) { state.shotInFlight = flying; scoreFacedShot(state, events); } else missAtWhistle(flying);
+    }
     if (call) events.push(call);
     const turnover = confirmTurnover(state);
     if (turnover) events.push(turnover);
@@ -540,7 +552,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
 
     if (liveTicks >= PERIOD_TICKS) {
       // A shot still on its way at the horn is a miss (Task 7 review: every shot release has exactly one outcome).
-      if (state.shotInFlight !== null) missAtWhistle(state.shotInFlight);
+      // (A shot already past the goalie is in: it counts.)
+      if (state.shotInFlight !== null) { if (state.shotInFlight.faced) scoreFacedShot(state, events); else missAtWhistle(state.shotInFlight); }
       events.push(gameEvent(state, { type: 'periodEnd', side: null, playerId: null, otherId: null, pos: state.puck.pos, detail: { period: state.period } }));
       state.carrierId = null;
       state.carrierPlan = null;
@@ -553,6 +566,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
       state.tiedUpUntil = [];
       state.reboundEdge = null;
       state.turnoverWatch = null;
+      state.lastSave = null;
       clearContests(state);
       restPuck(state);
       state.phase = state.period >= PERIODS ? 'final' : 'intermission';

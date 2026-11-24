@@ -42,6 +42,7 @@ export function describe(e: GameEvent, defs: Map<string, PlayerDef>, abbr: Recor
       case 'miss': return `Shot wide: ${me}${metres(e.detail.distance)}`;
       case 'post': return `${me} hit the post`;
       case 'block': return `${me} blocked ${other}'s shot`;
+      case 'tip': return `Tip: ${me} deflected ${other}'s shot`;
       case 'hit': return e.detail.result === 'absorbed' ? `Hit: ${other} took a hit from ${me} and stayed on his feet`
         : e.detail.result === 'bounced' ? `Hit: ${me} bounced off ${other}` : `Hit: ${me} hit ${other}`;
       case 'turnover': return `Turnover: ${me} won the puck off ${other} ${TURNOVER_HOW[e.detail.how]}`;

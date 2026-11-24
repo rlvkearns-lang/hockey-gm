@@ -346,6 +346,8 @@ export const TUNING = deepFreeze({
       stretch: 1, perStretchMetre: 5,
       /** Per metre the shot arrives above `highFrom` (just under the bar is hardest). */
       highFrom: 0.9, perHighMetre: 1.5,
+      /** A tipped shot (Task 8); a goalie still in his last save's pose, at the start of it (scaled by how much of it is left). */
+      tipped: 0.9, recovering: 0.8,
     },
     /** Goalie skill for the save: weights of his attributes. */
     saveSkill: { reflexes: 0.35, positioning: 0.25, glove: 0.1, blocker: 0.1, lateral: 0.1, poise: 0.1 } as Partial<Record<keyof GoalieAttrs, number>>,
@@ -358,16 +360,31 @@ export const TUNING = deepFreeze({
       pad: { base: 0.15, perPoint: 0.003 },
       butterfly: { base: 0.25, perPoint: 0.004 },
     } as Record<SavePose, { base: number; perPoint: number }>,
-    /** Rebound speed as a share of the shot's: base less perPoint * reboundControl, within [min, max], times the pose's factor. */
-    reboundSpeed: { base: 0.3, perPoint: 0.0018, min: 0.08, max: 0.4 },
-    reboundPoseSpeed: { glove: 0.4, blocker: 1, pad: 1, butterfly: 0.7 } as Record<SavePose, number>,
-    /** Rebound direction: angular spread (rad, one sd) of base + perPoint * (100 - reboundControl); blocker saves turn blockerTurn rad to his right, pad saves padTurn rad wide. */
-    reboundSpread: { base: 0.2, perPoint: 0.008 },
-    blockerTurn: 0.7,
-    padTurn: 0.4,
-    /** Rebounds go out at most this far (rad) off straight out from the net. */
-    reboundMaxAngle: 1.35,
+    /**
+     * What a save does with the puck (rebounds.ts, Task 8). Held: freeze[pose] less heldPerSpeed per m/s over heldFrom,
+     * less heldScreened, less heldTipped. Of the rest, steered: steered.base + steered.perPoint * (reboundControl - 50),
+     * less steered.tipped; the rest leave a rebound. A steered puck goes 6 to 9 m/s toward the corner on the side it came
+     * to, 55 to 80 degrees off straight out; a rebound 2.5 to 6 m/s within maxAngle.base + maxAngle.perPoint *
+     * (100 - reboundControl) rad of straight out.
+     */
+    rebound: {
+      heldFrom: 25, heldPerSpeed: 0.004, heldScreened: 0.08, heldTipped: 0.12,
+      steered: { base: 0.35, perPoint: 0.005, tipped: 0.1 },
+      steeredSpeed: [6, 9] as [number, number],
+      steeredAngle: [(55 * Math.PI) / 180, (80 * Math.PI) / 180] as [number, number],
+      speed: [2.5, 6] as [number, number],
+      maxAngle: { base: (35 * Math.PI) / 180, perPoint: (0.3 * Math.PI) / 180 },
+    },
   },
+
+  /** A shot released within windowSeconds of a save on that net is a rebound shot (Task 8, rebounds.ts). */
+  rebound: { windowSeconds: 3 },
+  /**
+   * Tips in front (tips.ts, Task 8): chance base + perPoint * (hand-eye - 50); a shot below maxZ (m) from minDistance (m)
+   * out, an attacker's blade within reach (m) of its path; turned by gauss * turn (rad), vz changed by gauss * lift (m/s),
+   * keeping `keep` of its speed.
+   */
+  tip: { base: 0.10, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
 
   /** Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from the shooter; chance base + perPoint * shotBlocking. */
   block: {

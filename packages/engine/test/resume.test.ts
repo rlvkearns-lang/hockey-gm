@@ -32,6 +32,12 @@ describe('resuming a game from a snapshot', () => {
     ['mid-board-battle', (s) => s.contests.some((c) => c.kind === 'boardBattle' && c.stage === 'dig'), 30_000],
     ['mid-line-change', (s) => s.bench.home.forwards.changing || s.bench.away.defence.changing, 40_000],
     ['with a shot in flight', (s) => s.shotInFlight !== null, 60_000],
+    // Task 8: mid-flight past the goalie (a goal on its way in), with a rebound loose in front, mid-tip.
+    ['with a shot past the goalie on its way in', (s) => s.shotInFlight !== null && s.shotInFlight.faced, 10_000],
+    ['with a rebound loose in front', (s) => s.lastSave !== null && s.lastSave.kind === 'rebound' && s.carrierId === null, 10_000],
+    ['with a tipped shot in flight', (s) => s.shotInFlight !== null && s.shotInFlight.tippedBy !== null, 10_000],
+    // Task 7 review, Minor 4: a one-timer pass just taken.
+    ['just after a one-timer pass was taken', (s) => s.oneTimerTaken !== null && s.tick - s.oneTimerTaken.tick <= 1, 10_000],
     ['while play is stopped', (s) => s.phase === 'stopped', 70_000],
     ['in the third period, a turnover being watched', (s) => s.period === 3 && s.turnoverWatch !== null, 80_000],
     ['mid-hold (a spot target issued under 0.2 s ago)', (s) => s.plans.some((p, i) => s.skaters[i]!.onIce && p.follow === 'spot' && s.tick - p.targetTick > 0 && s.tick - p.targetTick < 6), 20_000],

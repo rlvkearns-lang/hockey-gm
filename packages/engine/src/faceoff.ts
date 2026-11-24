@@ -66,6 +66,7 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.lastRelease = null;
   state.tiedUpUntil = [];
   state.reboundEdge = null;
+  state.lastSave = null;
   clearContests(state);
   restPuck(state);
   state.faceoffSpot = { x: spot.x, y: spot.y };

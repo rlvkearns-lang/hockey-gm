@@ -5,16 +5,22 @@
 import { recordTouch as recordTouch_ } from './actions';
 import { DT as DT_ } from './constants';
 import { gameEvent as gameEvent_ } from './events';
-import type { PuckEvent } from './puck';
+import { stepPuck as stepPuck_, type PuckEvent } from './puck';
+import { faceShot as faceShot_, resolveOnNet as resolveOnNet_ } from './goalie';
+import { tryTip as tryTip_ } from './tips';
 import { RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
 import { TUNING as TUNING_ } from './tuning';
 import type { GameEvent, GameState, PlayerDef } from './types';
-import { dist as dist_, hypot2 as hypot2_ } from './vec';
+import { dist as dist_, hypot2 as hypot2_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, findSkater as findSkater_, other as other_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const recordTouch = recordTouch_;
+const stepPuck = stepPuck_;
+const faceShot = faceShot_;
+const resolveOnNet = resolveOnNet_;
+const tryTip = tryTip_;
 const DT = DT_;
 const gameEvent = gameEvent_;
 const RINK = RINK_;
@@ -44,7 +50,7 @@ const SHOT_MAX_SECONDS = 3;
 export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): boolean {
   const shot = state.shotInFlight;
   const pk = state.puck;
-  if (shot === null || pk.z >= BLOCK.maxZ) return false;
+  if (shot === null || shot.faced || shot.beat === true || pk.z >= BLOCK.maxZ) return false;
   const shooter = findSkater(state, shot.shooterId);
   const ax = pk.pos.x, ay = pk.pos.y, mx = pk.vel.x * DT, my = pk.vel.y * DT;
   const l2 = mx * mx + my * my;
@@ -82,7 +88,8 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
  */
 export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEvent[] = []): void {
   const shot = state.shotInFlight;
-  if (shot === null) return;
+  // A shot past the goalie is on its way in (resolveOnNet scores it at the line).
+  if (shot === null || shot.faced) return;
   const end = state.attackDir[shot.side];
   const pk = state.puck;
   let post = false, gone = false;
@@ -96,6 +103,35 @@ export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEv
     if (!gone) return;
   }
   state.shotInFlight = null;
-  const e = { side: shot.side, playerId: shot.shooterId, otherId: state.goalies[other(shot.side)].id, pos: pk.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick } };
+  // After a tip it is the tipper's, from the shooter (Task 8).
+  const e = { side: shot.side, playerId: shot.tippedBy ?? shot.shooterId, otherId: state.goalies[other(shot.side)].id, pos: pk.pos, detail: { distance: shot.fromDist, releaseTick: shot.tick, tippedFrom: shot.tippedBy !== null ? shot.shooterId : null } };
   out.push(post ? gameEvent(state, { type: 'post', ...e }) : gameEvent(state, { type: 'miss', ...e }));
+}
+
+const NO_PUCK_EVENTS: PuckEvent[] = [];
+
+/**
+ * The loose puck's move this tick (Task 8), in this order: a tip in front (tips.ts tryTip), a block (tryBlock), the goalie
+ * facing a shot at his plane (goalie.ts faceShot), then the puck's step and, when it reaches the goal line, resolveOnNet.
+ * After a tip or a save the puck has gone its way to the stick or the goalie and is not stepped again this tick (no
+ * puck moves further in a tick than its speed allows). Writes the puck's position before the step into `prev` (the
+ * stick, block or save point when there is one). Returns the step's puck events and whether it reached the net.
+ */
+export function moveLoosePuck(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[], prev: Vec2): { puckEvents: PuckEvent[]; onNet: boolean } {
+  const pk = state.puck;
+  let moved = !tryTip(state, defs, rng, out);
+  if (moved) {
+    tryBlock(state, defs, rng, out);
+    if (faceShot(state, defs, rng, out) && state.shotInFlight === null) moved = false;
+  }
+  prev.x = pk.pos.x;
+  prev.y = pk.pos.y;
+  if (!moved || state.phase !== 'live') return { puckEvents: NO_PUCK_EVENTS, onNet: false };
+  const puckEvents = stepPuck(pk, DT);
+  for (const ev of puckEvents) {
+    if (ev.kind !== 'onNet') continue;
+    resolveOnNet(state, ev, defs, rng, out);
+    return { puckEvents, onNet: true };
+  }
+  return { puckEvents, onNet: false };
 }

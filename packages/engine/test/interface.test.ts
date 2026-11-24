@@ -86,8 +86,8 @@ describe('the interface a viewer builds on', () => {
       const bad: string[] = [];
       for (const e of events) {
         if (e.type === 'pass' && releases.get(`${e.tick}:${e.playerId}`)?.type !== 'release') bad.push(`pass at ${e.tick}`);
-        if (e.type === 'miss' || e.type === 'post' || e.type === 'block' || (e.type === 'shot' && e.detail.releaseTick !== null)) {
-          const shooter = e.type === 'block' ? e.otherId : e.playerId;
+        if (e.type === 'miss' || e.type === 'post' || e.type === 'block' || e.type === 'tip' || ((e.type === 'shot' || e.type === 'goal') && e.detail.releaseTick !== null)) {
+          const shooter = e.type === 'block' || e.type === 'tip' ? e.otherId : e.detail.tippedFrom ?? e.playerId;
           const rel = releases.get(`${e.detail.releaseTick}:${shooter}`);
           if (rel?.type !== 'release' || rel.detail.kind !== 'shot') bad.push(`${e.type} at ${e.tick} has no shot release`);
         }
@@ -102,6 +102,18 @@ describe('the interface a viewer builds on', () => {
       for (const e of r.events) if (e.type === 'release') expect(e.detail.kind === 'shot' ? types.includes(e.detail.shotType ?? '') : e.detail.shotType === null).toBe(true);
       for (const t of [r.team.home, r.team.away]) expect(t.attempts).toBe(t.shots + t.missedShots + t.shotsBlocked);
       for (const p of r.players) expect(p.attempts).toBe(p.shots + p.missedShots + p.shotsBlocked);
+    }, GAME_TIMEOUT);
+    // Task 8 (additive): where a shot met the goalie, what the save did, tips.
+    it('shots, saves and goals say where the puck met the goalie; a save says what it did with it; a tip names its shooter', () => {
+      const r = result();
+      const kinds = new Set<string>();
+      for (const e of r.events) {
+        if (e.type === 'shot' || e.type === 'goal' || e.type === 'save') { expect(Number.isFinite(e.detail.cross.side)).toBe(true); expect(e.detail.cross.height).toBeGreaterThanOrEqual(0); }
+        if (e.type === 'save') kinds.add(e.detail.kind);
+        if (e.type === 'shot' || e.type === 'goal') { expect(typeof e.detail.screened).toBe('boolean'); expect(typeof e.detail.rebound).toBe('boolean'); }
+        if (e.type === 'tip') expect(e.otherId).not.toBe(e.playerId);
+      }
+      for (const k of ['held', 'steered', 'rebound']) expect(kinds.has(k)).toBe(true);
     }, GAME_TIMEOUT);
   });
 });

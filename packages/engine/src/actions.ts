@@ -9,7 +9,7 @@ import { TUNING as TUNING_ } from './tuning';
 import { watchTurnover as watchTurnover_ } from './turnovers';
 import { gameEvent as gameEvent_ } from './events';
 import { threat as threat_ } from './threat';
-import type { GameEvent, GameState, PlayerDef, ShotType, Side, SkaterState } from './types';
+import type { GameEvent, GameState, PlayerDef, ShotInFlight, ShotType, Side, SkaterState } from './types';
 import { hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, GRAVITY as GRAVITY_, skaterById as skaterById_ } from './util';
@@ -239,7 +239,7 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
     const dx = netX - p.x, dy = ty - p.y, l = hypot2(dx, dy) || 1;
     const v = SHOT.types.wraparound.speed;
     release(state, s, (dx / l) * v, (dy / l) * v, 0, out, 'shot', null, type);
-    state.shotInFlight = { shooterId, side: s.side, from, fromDist: d, tick: state.tick, blockTried: [], shotType: type };
+    state.shotInFlight = newShot(state, shooterId, s.side, from, d, type);
     return;
   }
   const sigma = (SHOT.spread.base + (100 - a.shootingAccuracy) * SHOT.spread.perPoint + d * SHOT.spread.perMetre
@@ -266,7 +266,14 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
   const t = l / speed;
   // Lifted to arrive at height z, but never harder than MAX_SHOT_LIFT (from beside the net that would launch it skyward).
   release(state, s, (dx / l) * speed, (dy / l) * speed, Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * t * t) / t), out, 'shot', null, type);
-  state.shotInFlight = { shooterId, side: s.side, from, fromDist: d, tick: state.tick, blockTried: [], shotType: type };
+  state.shotInFlight = newShot(state, shooterId, s.side, from, d, type);
+}
+
+/** A shot just released: a rebound shot when released within TUNING.rebound.windowSeconds of a save on that net (Task 8). */
+function newShot(state: GameState, shooterId: string, side: Side, from: Vec2, fromDist: number, shotType: ShotType): ShotInFlight {
+  const ls = state.lastSave;
+  const rebound = ls !== null && ls.side !== side && (state.tick - ls.tick) * DT <= TUNING.rebound.windowSeconds;
+  return { shooterId, side, from, fromDist, tick: state.tick, blockTried: [], shotType, tippedBy: null, tipTried: [], rebound, screened: false, faced: false };
 }
 
 /**

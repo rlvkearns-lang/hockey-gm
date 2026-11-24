@@ -36,7 +36,8 @@ export type PlayCounterKey =
   | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
-  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'passGoals';
+  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'passGoals'
+  | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -53,6 +54,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
   'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'passGoals',
+  'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
 ];
 
 /** Counters that hold a largest value, not a sum: games combine by taking the largest. */
@@ -159,7 +161,7 @@ export function createObserver(setup: GameSetup): Observer {
   /** Last tick each player was the carrier of a behind-the-net possession (0.5 s or more there). */
   const lastBehind = new Map<string, number>();
   let contacts = new Map<string, number>();
-  let prevPuck: { x: number; y: number; speed: number; live: boolean } | null = null;
+  let prevPuck: { x: number; y: number; speed: number; speed3: number; live: boolean } | null = null;
   /** The carrier at the end of the last tick, and whether he was on a breakaway then. */
   let prevBreakaway: { id: string; rx: number; clear: boolean; mates: Map<string, number> } | null = null;
   const optionScratch: Option[] = [];
@@ -241,12 +243,19 @@ export function createObserver(setup: GameSetup): Observer {
           if ((lastBehind.get(e.playerId) ?? -Infinity) >= tick - WRAP_TICKS) c.wrapAttempts++;
           break;
         }
+        case 'tip':
+          c.tips++;
+          break;
         case 'save':
           c.saves++;
+          // Task 8: what the save did with the puck.
+          if (e.detail.kind === 'held') c.savesHeld++; else if (e.detail.kind === 'steered') c.savesSteered++; else c.savesRebound++;
           if (e.side !== null) lastSave = { attack: otherSide(e.side), tick };
           break;
         case 'goal':
           c.goals++;
+          if (e.detail.rebound) c.goalsFromRebound++;
+          if (e.detail.tippedFrom !== null) c.goalsFromTip++;
           // A puck its own side let go without shooting (a pass, rim, dump or clear) that went in with no shot.
           if (e.detail.releaseTick === null && lastRel !== null && lastRel.kind !== 'shot' && lastRel.side === e.side) c.passGoals++;
           break;
@@ -470,8 +479,16 @@ export function createObserver(setup: GameSetup): Observer {
     wasLoose = live && cs === undefined;
   }
 
-  function puck(st: GameState): void {
+  function puck(st: GameState, events: readonly GameEvent[]): void {
     const live = st.phase === 'live', p = st.puck, speed = speedOf(p.vel);
+    // Task 8: on a tick with a save or a tip (the puck is moved to where it met the goalie or the stick), it moves no
+    // further than its speed before the tick allows (with 0.05 m slack).
+    // (A shot released on the same tick moves at its release speed.)
+    if (live && prevPuck !== null && prevPuck.live && events.some((e) => e.type === 'save' || e.type === 'tip')) {
+      let v = prevPuck.speed3;
+      for (const e of events) if (e.type === 'release') v = Math.max(v, Math.hypot(e.detail.vel.x, e.detail.vel.y, e.detail.vel.z));
+      if (Math.hypot(p.pos.x - prevPuck.x, p.pos.y - prevPuck.y) > v * DT + 0.05) c.saveJumpTicks++;
+    }
     if (live && prevPuck !== null && prevPuck.live) {
       const cs = skaterById(st, st.carrierId);
       const vmax = Math.max(prevPuck.speed, speed, cs !== undefined ? speedOf(cs.vel) : 0);
@@ -479,7 +496,7 @@ export function createObserver(setup: GameSetup): Observer {
       if (excess > JUMP_SLACK) c.puckJumpTicks++;
       if (excess > maxJump) maxJump = excess;
     }
-    prevPuck = { x: p.pos.x, y: p.pos.y, speed, live };
+    prevPuck = { x: p.pos.x, y: p.pos.y, speed, speed3: Math.hypot(p.vel.x, p.vel.y, p.vz), live };
   }
 
   return {
@@ -498,7 +515,7 @@ export function createObserver(setup: GameSetup): Observer {
       carrierMind(st);
       bodies(st);
       carry(st, events);
-      puck(st);
+      puck(st, events);
     },
     counters: () => ({ ...c }),
     maxPuckJump: () => maxJump,
