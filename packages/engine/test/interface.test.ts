@@ -95,5 +95,13 @@ describe('the interface a viewer builds on', () => {
       expect(bad.slice(0, 5)).toEqual([]);
       expect(events.filter((e) => e.type === 'release' && e.detail.kind === 'shot').length).toBeGreaterThan(40);
     }, GAME_TIMEOUT);
+    // Task 7 (additive): a shot's release names its type; the box score keeps attempts.
+    it('a shot release carries one of the shot types, any other release null; team and player lines carry attempts', () => {
+      const r = result();
+      const types = ['wrist', 'slap', 'oneTimer', 'backhand', 'wraparound'];
+      for (const e of r.events) if (e.type === 'release') expect(e.detail.kind === 'shot' ? types.includes(e.detail.shotType ?? '') : e.detail.shotType === null).toBe(true);
+      for (const t of [r.team.home, r.team.away]) expect(t.attempts).toBe(t.shots + t.missedShots + t.shotsBlocked);
+      for (const p of r.players) expect(p.attempts).toBe(p.shots + p.missedShots + p.shotsBlocked);
+    }, GAME_TIMEOUT);
   });
 });

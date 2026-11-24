@@ -4,6 +4,8 @@ import { generateTeam } from '../src/roster-gen';
 import { createRng } from '../src/rng';
 import { DT } from '../src/constants';
 import { RINK } from '../src/rink';
+import { bladePos } from '../src/blade';
+import { setup as robustSetup } from './helpers';
 import { isSkaterOf, runToPeriod, sum } from './helpers';
 
 /** Whole-game tests take about 1 s; this leaves room for a loaded machine. */
@@ -91,6 +93,23 @@ describe('game loop', () => {
     }
     expect(violations).toEqual([]);
   }, GAME_TIMEOUT * 3);
+  // Task 7: on seed 12 (the robustness set-up) a carried puck stuck behind a net frame while its carrier skated the length
+  // of the ice (a step into the frame was stopped there each tick instead of sliding round it).
+  // (A hand-over at a draw can start the puck up to about 4 m off; it then comes to his blade at a step a tick, so the
+  // check starts after 20 ticks with it.)
+  it('a carried puck stays with its carrier: within 1.6 m of his blade once he has had it 20 ticks', () => {
+    const g = createGame(robustSetup(12)); let worst = 0, who: string | null = null, since = 0;
+    const shoots = new Map([...robustSetup(12).home.players, ...robustSetup(12).away.players].map((p) => [p.id, p.shoots]));
+    while (!g.done) {
+      g.step(); const st = g.state;
+      if (st.phase !== 'live' || st.carrierId === null) { who = null; continue; }
+      if (st.carrierId !== who) { who = st.carrierId; since = st.tick; }
+      if (st.tick - since < 20) continue;
+      const c = st.skaters.find((s) => s.id === st.carrierId)!; const b = bladePos(c.pos, c.facing, shoots.get(c.id)!, { x: 0, y: 0 });
+      worst = Math.max(worst, Math.hypot(st.puck.pos.x - b.x, st.puck.pos.y - b.y));
+    }
+    expect(worst).toBeLessThanOrEqual(1.6);
+  }, GAME_TIMEOUT);
   it('no skater body overlaps a net frame', () => {
     const violations: string[] = [];
     const g = createGame(setup(1));

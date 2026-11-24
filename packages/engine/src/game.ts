@@ -362,13 +362,19 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     const dx = t.x - p.pos.x, dy = t.y - p.pos.y, l = hypot2(dx, dy);
     const step = Math.min(CARRY_STEP, hypot2(carrier.vel.x, carrier.vel.y) * DT + CARRY_TURN);
     if (l > step) { t.x = p.pos.x + (dx / l) * step; t.y = p.pos.y + (dy / l) * step; }
-    // A step that would end inside a frame stops at the frame (the furthest point of it outside), so that pushing it
-    // out (below) never moves it further than the step.
+    // A step that would end inside a frame goes to the frame (the furthest point of it outside) and slides along the face
+    // it met for the rest of the step, so it goes round the net toward the blade and never moves further than the step.
     if (!inFrame(p.pos) && inFrame(t)) {
       const x0 = p.pos.x, y0 = p.pos.y, mx = t.x - x0, my = t.y - y0;
       let lo = 0, hi = 1;
       for (let k = 0; k < 10; k++) { const mid = (lo + hi) / 2; frameProbe.x = x0 + mx * mid; frameProbe.y = y0 + my * mid; if (inFrame(frameProbe)) hi = mid; else lo = mid; }
-      t.x = x0 + mx * lo; t.y = y0 + my * lo;
+      const sx = x0 + mx * lo, sy = y0 + my * lo;
+      // The face it met: the back or a side (or the goal line, from in front), by where it stands against the frame.
+      const end = sx >= 0 ? 1 : -1, ax = sx * end, r = PUCK_RADIUS;
+      const back = RINK.goalLineX + RINK.netDepth + r, front = RINK.goalLineX - r, half = RINK.netHalfWidth + r;
+      let rx = mx * (1 - lo), ry = my * (1 - lo);
+      if (ax >= back - 1e-6 || ax <= front + 1e-6) rx = 0; else if (Math.abs(sy) >= half - 1e-6) ry = 0;
+      t.x = sx + rx; t.y = sy + ry;
     }
     p.pos.x = t.x;
     p.pos.y = t.y;
