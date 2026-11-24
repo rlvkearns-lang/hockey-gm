@@ -99,7 +99,10 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   // Task 8: pooled over seeds 1-16. About 30 point passes a game: on three seeds completion moved by 0.11 with a change
   // that does not touch passing (0.80 to 0.69 on seeds 1-3, 0.77 to 0.73 on 1-8, 0.75 to 0.78 on 9-16).
   it('A3: point passes stay in: over 90% kept (was 48%) and over 75% completed (was 37%), seeds 1-16 pooled', () => { expect(m16().pointPassKeptShare).toBeGreaterThan(0.90); expect(m16().pointPassCompletion).toBeGreaterThan(0.75); }, 240_000);
-  it('A3: passes are completed 75% to 92% of the time (was 86.5%)', () => { expect(m().passCompletion).toBeGreaterThan(0.75); expect(m().passCompletion).toBeLessThan(0.92); }, 60_000);
+  // Task 7 review, Important 1 (controller ruling): with slow passes no longer immune to interception, completion is to
+  // be 0.72 to 0.85 (it read 0.745 on seeds 1-8 and 1-16); pooled over seeds 1-16.
+  it('A3: passes are completed 72% to 85% of the time (was 86.5%), seeds 1-16 pooled', () => { expect(m16().passCompletion).toBeGreaterThan(0.72); expect(m16().passCompletion).toBeLessThan(0.85); }, 240_000);
+  it('A3: 600 to 900 passes a game', () => { expect(counters().passes / 3).toBeGreaterThan(600); expect(counters().passes / 3).toBeLessThan(900); }, 60_000);
   // A pickup: a loose puck or a pass taken (tryPickup) or a pass picked off; the move beyond the puck's own travel that
   // tick. Contest hand-overs (races, battles) have their own measures.
   // Task 6 review, Minor 8: the carried puck's step limit keeps it to about 0.4 m (it read 1.18 before that limit).

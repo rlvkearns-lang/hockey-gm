@@ -106,7 +106,7 @@ let seedSeq = 0;
  * along y = 0 from the home C to a still home LW (whose blade is at (11.1, 0)), with his blade `bladeOffLane` m and his
  * body `bodyOffLane` m (default 0.4 further) off the lane. Each pass is played out with the puck physics and tryIntercept.
  */
-function interceptShareWith(o: { bladeOffLane: number; bodyOffLane?: number }, n: number): number {
+function interceptShareWith(o: { bladeOffLane: number; bodyOffLane?: number; speed?: number }, n: number): number {
   const body = o.bodyOffLane ?? o.bladeOffLane + 0.4;
   // His facing: the one that puts his (left-shot) blade bladeOffLane off the lane with his body bodyOffLane off it.
   let facing = 0, err = Infinity;
@@ -125,7 +125,8 @@ function interceptShareWith(o: { bladeOffLane: number; bodyOffLane?: number }, n
     place(st, 'away:LD', 3, body); skater(st, 'away', 'LD').facing = facing;
     const rng = createRng(++seedSeq);
     executePass(st, 'home-C', 'home-LW', defs, rng);
-    for (let t = 0; t < 30 && st.pendingPass !== null; t++) {
+    if (o.speed !== undefined) { const v = Math.hypot(st.puck.vel.x, st.puck.vel.y); st.puck.vel.x *= o.speed / v; st.puck.vel.y *= o.speed / v; }
+    for (let t = 0; t < 60 && st.pendingPass !== null; t++) {
       st.tick++;
       const prev = { x: st.puck.pos.x, y: st.puck.pos.y };
       stepPuck(st.puck, DT);
@@ -210,6 +211,14 @@ describe('passing: a pass the receiver can take (Task 6)', () => {
     const stick = interceptShareWith({ bladeOffLane: 0.3 }, 2000), body = interceptShareWith({ bladeOffLane: 1.5, bodyOffLane: 0.85 }, 2000);
     expect(stick).toBeGreaterThan(body * 1.3); expect(stick).toBeLessThanOrEqual(0.97); expect(body).toBeGreaterThanOrEqual(0.03);
     expect(stickInterceptChance(def({ stickChecking: 100, defensivePositioning: 100 }), 12)).toBeLessThanOrEqual(0.97);
+  }, 60_000);
+  // Task 7 review, Important 1: a pass under 12 m/s was untouchable by an opponent. A slow pass through his stick is
+  // easier to pick off, not immune.
+  it('a 9 m/s pass through an opponent\'s stick is sometimes picked off, more often than a hard one, never certainly', () => {
+    const slow = interceptShareWith({ bladeOffLane: 0.3, speed: 9 }, 2000), hard = interceptShareWith({ bladeOffLane: 0.3, speed: 20 }, 2000);
+    expect(slow).toBeGreaterThan(0.1); expect(slow).toBeGreaterThan(hard); expect(slow).toBeLessThanOrEqual(0.97);
+    expect(stickInterceptChance(def({ stickChecking: 100, defensivePositioning: 100 }), 1)).toBeLessThanOrEqual(0.97);
+    expect(stickInterceptChance(def({}), 9)).toBeGreaterThan(stickInterceptChance(def({}), 12));
   }, 60_000);
   // Task 7 step 0: a covered lane is riskier, not removed.
   it('a pass into a covered lane is picked off or deflected clearly more often than one into an open lane', () => {

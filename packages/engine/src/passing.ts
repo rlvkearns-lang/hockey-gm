@@ -103,7 +103,9 @@ export function slideSeconds(d: number, v0: number): number {
 export function interceptChance(d: PlayerDef, speed: number): number {
   const base = PASS.intercept.base + d.attrs.stickChecking * PASS.intercept.perStick + d.attrs.defensivePositioning * PASS.intercept.perPositioning;
   const [lo, hi] = PASS.interceptSpeed;
-  return clamp(base * (1 - 0.5 * clamp((speed - lo) / (hi - lo), 0, 1)), 0.03, 0.97);
+  // Slower than lo it is easier still (Task 7 review): up to PASS.slowFactor times as likely for a dead puck.
+  const slow = speed < lo ? 1 + (PASS.slowFactor - 1) * (1 - Math.max(0, speed) / lo) : 1;
+  return clamp(base * slow * (1 - 0.5 * clamp((speed - lo) / (hi - lo), 0, 1)), 0.03, 0.97);
 }
 
 /** Interception chance for an opponent whose stick blade is within TUNING.pass.stickLane (0.75 m) of the path: interceptChance * TUNING.pass.stickFactor (1.5), clamped to [0.03, 0.97]. A body within interceptRange but no stick in the lane keeps interceptChance. */

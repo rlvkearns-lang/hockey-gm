@@ -13,6 +13,8 @@ describe('tuned engine smoke check', () => {
       expect(r.team[side].hits).toBeGreaterThan(3); expect(r.team[side].hits).toBeLessThan(60);
     }
     expect(count(r, 'faceoff')).toBeGreaterThan(25); expect(count(r, 'faceoff')).toBeLessThan(100);
-    expect(count(r, 'save') + goals).toBe(r.team.home.shots + r.team.away.shots);
+    // A goal with releaseTick null went in with no shot (no shot on goal: Task 7 review).
+    const shotGoals = r.events.filter((e) => e.type === 'goal' && e.detail.releaseTick !== null).length;
+    expect(count(r, 'save') + shotGoals).toBe(r.team.home.shots + r.team.away.shots);
   }, 20_000);
 });

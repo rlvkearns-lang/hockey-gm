@@ -53,6 +53,7 @@ const DUMP = TUNING.dump;
 const ONE_TIMER_RX = 18;
 /** Scratch: the pass being made, and an opponent's blade. */
 const passPlan = {} as PassPlan;
+const recvBlade: Vec2 = { x: 0, y: 0 };
 const bladeScratch: Vec2 = { x: 0, y: 0 };
 
 export { interceptChance } from './passing';
@@ -139,9 +140,19 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
   const oneTimer = isOneTimerPass(state, from, aim);
   release(state, from, dcos(angle) * plan.speed, dsin(angle) * plan.speed, 0, out, 'pass', toId);
   state.pendingPass = {
-    fromId, toId, untilTick: state.tick + Math.round((plan.arriveSeconds + PASS.graceSeconds) / DT), tried: [], pressure,
+    fromId, toId, untilTick: state.tick + Math.round((plan.arriveSeconds + PASS.graceSeconds) / DT), tried: checkersOf(state, from), pressure,
     aim: { x: aim.x, y: aim.y }, bobbled: false, cover: plan.cover, oneTimer,
   };
+}
+
+/**
+ * The opponents within PASS.clearOfPasser (m) of the passer as he lets it go: the pressure they put on him is in the pass's
+ * error (and a poke check is theirs to try), so, as with a shot and its blockers, they get no interception try at it.
+ */
+function checkersOf(state: GameState, from: SkaterState): string[] {
+  const ids: string[] = [];
+  for (const o of state.skaters) if (o.onIce && o.side !== from.side && hypot2(o.pos.x - from.pos.x, o.pos.y - from.pos.y) <= PASS.clearOfPasser) ids.push(o.id);
+  return ids;
 }
 
 /**
@@ -318,7 +329,7 @@ export function executeRim(state: GameState, fromId: string, toId: string | null
   const l = hypot2(to.x - p.x, to.y - p.y);
   out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'rim', distance: toId === null ? null : l, hand: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump', toId);
-  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], pressure, aim: { x: to.x, y: to.y }, bobbled: false, cover: 0, oneTimer: false };
+  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: checkersOf(state, s), pressure, aim: { x: to.x, y: to.y }, bobbled: false, cover: 0, oneTimer: false };
 }
 
 /**
@@ -341,7 +352,7 @@ export function executeClear(state: GameState, fromId: string, defs: Map<string,
 }
 
 /**
- * A pass still on its way (state.pendingPass) at PASS.interceptSpeed[0] m/s or faster: each opposing skater (on the ice,
+ * A pass still on its way (state.pendingPass) along the ice, at any speed (a slow one is easier to take): each opposing skater (on the ice,
  * not leaving, not down, not steered by a contest) gets one try when his stick blade came within PASS.stickLane of the
  * puck's path this tick (from `prev` to its position now), with stickInterceptChance, or, with no stick in the lane,
  * his body within PASS.interceptRange of it, with interceptChance, or, with neither and a lane that was covered when
@@ -358,14 +369,26 @@ export function tryIntercept(
   if (pass === null) return null;
   const p = state.puck;
   const speed = hypot2(p.vel.x, p.vel.y);
-  if (speed < PASS.interceptSpeed[0] || p.z > 0) return null;
+  // A lifted pass goes over sticks; any pass on the ice, slow ones included, can be picked off (Task 7 review).
+  if (p.z > 0) return null;
   const from = skaterById(state, pass.fromId);
   const rel = state.lastRelease;
   const releaseTick = rel !== null && rel.id === pass.fromId ? rel.tick : state.tick;
+  // Where along this tick's path (0 to 1) the receiver's blade meets it, if it does: a stick it reaches only after that
+  // comes too late (Task 7 review: the order of the tries is the order along the path).
+  const mx = p.pos.x - prev.x, my = p.pos.y - prev.y, m2 = mx * mx + my * my;
+  const along = (q: Vec2): number => (m2 === 0 ? 0 : clamp(((q.x - prev.x) * mx + (q.y - prev.y) * my) / m2, 0, 1));
+  let catchAt = 2;
+  const recv = pass.bobbled ? null : skaterById(state, pass.toId);
+  if (recv !== null && recv.onIce && recv.downT === 0) {
+    const rb = bladePos(recv.pos, recv.facing, defs.get(recv.id)!.shoots, recvBlade);
+    if (segDistXY(rb.x, rb.y, prev.x, prev.y, p.pos.x, p.pos.y) <= TUNING.blade.pickupReach) catchAt = along(rb);
+  }
   for (const s of state.skaters) {
     if (!s.onIce || s.leaving || s.downT > 0 || steeredByContest(state, s) || s.side === from.side || pass.tried.includes(s.id)) continue;
     const d = defs.get(s.id)!;
     const blade = bladePos(s.pos, s.facing, d.shoots, bladeScratch);
+    if (along(blade) > catchAt && along(s.pos) > catchAt) continue;
     const stick = segDistXY(blade.x, blade.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.stickLane;
     let chance: number;
     if (stick) chance = stickInterceptChance(d, speed);
