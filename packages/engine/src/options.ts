@@ -236,6 +236,8 @@ const habit = (v: number, tendency: number): number => { const h = 0.6 + 0.8 * t
 // Scratch for the passes he sees, best first (refilled on every call).
 const passIds: string[] = [];
 const passValues: number[] = [];
+const passSeen: number[] = [];
+const passKey: Extract<Option, { kind: 'pass' }> = { kind: 'pass', toId: '', value: 0 };
 const tw: Vec2 = { x: 0, y: 0 };
 
 /**
@@ -325,6 +327,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const seen = 1 + Math.floor(a.vision / 25);
   passIds.length = 0;
   passValues.length = 0;
+  passSeen.length = 0;
+  const plan = state.carrierPlan !== null && state.carrierPlan.id === s.id ? state.carrierPlan : null;
+  const T0 = pickTemperature(me, pressure);
   const fc = dcos(s.facing), fs = dsin(s.facing);
   const passSkill = a.passing;
   for (const m of state.skaters) {
@@ -345,7 +350,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (mode === 'behind' && (mrx < OUT_FRONT_MIN_RX || mrx > GOAL)) continue;
     // Behind his back: seen only with good vision.
     if ((dx * fc + dy * fs) / (l || 1) < BEHIND_COS && a.vision < BEHIND_VISION) continue;
-    let chance = clamp(0.97 - 0.006 * Math.max(0, l - 12) - pressure * (0.3 - 0.002 * passSkill), 0.03, 0.97) * settled;
+    let chance = clamp(0.97 - 0.006 * Math.max(0, l - 12) - V.skill.pass * (100 - passSkill) - pressure * (0.3 - 0.002 * passSkill), 0.03, 0.97) * settled;
     // The goalie and the net frames are in the way of a pass as much as a skater is.
     const w = passLaneWidth(state, side, p, m.pos);
     if (w < 0.5) chance *= 0.2; else if (w < L.open) chance *= V.shadowed;
@@ -363,12 +368,16 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // (and whoever else) is still inside, puts them offside.
     if (!outside && mrx < BLUE + 1) v -= V.offside;
     v = habit(v, tend.pass) + passOn;
-    let i = passValues.length;
-    while (i > 0 && passValues[i - 1]! < v) i--;
+    // Vision: he sees the best `seen` passes as he reads them (value plus the error of his read, fixed for the possession).
+    passKey.toId = m.id;
+    const sv = v + readError(plan, passKey, T0);
+    let i = passSeen.length;
+    while (i > 0 && passSeen[i - 1]! < sv) i--;
     if (i >= seen) continue;
+    passSeen.splice(i, 0, sv);
     passValues.splice(i, 0, v);
     passIds.splice(i, 0, m.id);
-    if (passValues.length > seen) { passValues.length = seen; passIds.length = seen; }
+    if (passValues.length > seen) { passValues.length = seen; passIds.length = seen; passSeen.length = seen; }
   }
   for (let i = 0; i < passIds.length; i++) out.push({ kind: 'pass', toId: passIds[i]!, value: passValues[i]! });
 
@@ -382,7 +391,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     tw.x = trx * dir; tw.y = tly * dir;
     const w = laneWidth(state, side, s.pos, tw);
     const block = w < 2.5 ? ((2.5 - w) / 2.5) * 0.5 : 0;
-    const chance = clamp(0.95 - pressure * (0.35 - 0.002 * ph) - block, 0.03, 0.97);
+    const chance = clamp(0.95 - V.skill.carry * (100 - ph) - pressure * (0.35 - 0.002 * ph) - block, 0.03, 0.97);
     // On a breakaway a carry at the net leads to the shot or deke at its end: worth that chance to score (the goalie
     // square to him), not the threat of the spot.
     // A carry that ends inside DEKE_FROM of the net ends in a deke, with the goalie to beat at close range: V.deke of it.
@@ -415,7 +424,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     const hy = Math.abs(oly) > RINK.netHalfWidth ? -sgn(oly) * HOLD_LY : clamp(sly, -HOLD_LY, HOLD_LY);
     tw.x = HOLD_RX * dir; tw.y = hy * dir;
     const keep = clamp(0.97 - pressure * 0.1, 0.03, 0.97);
-    const kept = passValues.length > 0 ? Math.max(0, passValues[0]! - passOn) * HOLD_KEEP : 0;
+    let bestPass = -Infinity;
+    for (const pv of passValues) if (pv > bestPass) bestPass = pv;
+    const kept = passValues.length > 0 ? Math.max(0, bestPass - passOn) * HOLD_KEEP : 0;
     out.push({ kind: 'carry', lane: 'hold', to: { x: tw.x + 0, y: tw.y + 0 }, value: keep * kept - (1 - keep) * loss - moveOn });
     // Wrap: to the post the goalie is further from, worth what a shot from there would be.
     const gl = state.goalies[side === 'home' ? 'away' : 'home'].pos;
@@ -591,12 +602,22 @@ export function topKindShare(options: readonly Option[], me: PlayerDef, sit: Sit
   return top / total;
 }
 
+/** His pick's temperature (TUNING.value.pick): lower for a smart, poised player, higher under pressure. */
+function pickTemperature(me: PlayerDef, pressure: number): number {
+  const P = V.pick, a = me.attrs;
+  return Math.max(P.min, P.base + P.perPoint * (100 - a.iq) + P.pressure * pressure - P.perPoise * a.poise);
+}
+
+/** The error in his read of option `o`, fixed for the possession: persist * T0 * GUMBEL_SD * a normal keyed by his plan's seed; 0 with no seed. */
+function readError(plan: CarrierPlan | null, o: Option, T0: number): number {
+  return plan !== null && plan.seed !== undefined ? V.noise.persist * GUMBEL_SD * seenError(plan.seed, o) * T0 : 0;
+}
+
 /** Fills pickW with each option's weight in the draw (the kind cap applied); returns their total. */
 function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: CarrierPlan | null): number {
-  const P = V.pick, a = me.attrs;
-  const T0 = Math.max(P.min, P.base + P.perPoint * (100 - a.iq) + P.pressure * sit.pressure - P.perPoise * a.poise);
-  // Once he has a read of the play (his plan's seed), most of his error is that read, fixed for the possession (an
-  // error of persist * T0 * GUMBEL_SD on each option), and the draw at each look is cooler (FRESH * T0).
+  const T0 = pickTemperature(me, sit.pressure);
+  // Once he has a read of the play (his plan's seed), most of his error is that read, fixed for the possession
+  // (readError), and the draw at each look is cooler (FRESH * T0).
   const seeded = plan !== null && plan.seed !== undefined;
   const T = seeded ? T0 * FRESH : T0;
   const n = options.length;
@@ -604,7 +625,7 @@ function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: 
   pickW.length = n;
   for (let i = 0; i < n; i++) {
     const o = options[i]!;
-    const z = seeded ? V.noise.persist * GUMBEL_SD * seenError(plan.seed!, o) * T0 : 0;
+    const z = readError(plan, o, T0);
     const v = o.value + (committed(o, plan) ? V.stick : 0) + z;
     pickW[i] = v;
     if (v > vmax) vmax = v;

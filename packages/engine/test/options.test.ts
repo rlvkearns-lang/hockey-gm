@@ -141,6 +141,41 @@ describe('the carrier values his options', () => {
   });
 });
 
+describe('what the carrier sees (Task 5 review)', () => {
+  /** Two open teammates ahead of the home RW in the neutral zone, nearly as good as each other; nobody near. */
+  const twoOpen = (): GameState => {
+    const st = stateWith({ carrier: 'home', puckX: -2, puckY: 0 }); for (const s of st.skaters) if (s.side === 'away') s.pos = { x: 20, y: s.pos.y };
+    place(st, 'home:C', 5, 4); place(st, 'home:LW', 5.2, -4); place(st, 'home:LD', -12, 5); place(st, 'home:RD', -12, -5);
+    return st;
+  };
+  /** The pass options listOptions gives the home RW (as `d`) in twoOpen, with his read of the play keyed by `seed`. */
+  const passesSeen = (d: PlayerDef, seed: number): string[] => {
+    const st = twoOpen();
+    st.carrierPlan = { id: 'home-RW', kind: 'carry', lane: null, toId: null, to: null, tick: 0, seed };
+    const opts: Option[] = []; listOptions(st, { ...d, id: 'home-RW', position: 'RW' }, defs, tactics.home, opts);
+    return opts.flatMap((o) => (o.kind === 'pass' ? [o.toId] : []));
+  };
+  it('vision cuts the passes by what he reads, not by what is true: a low-vision carrier sometimes misses the best one', () => {
+    const st = twoOpen(); const all: Option[] = []; listOptions(st, { ...def({ vision: 99 }), id: 'home-RW', position: 'RW' }, defs, tactics.home, all);
+    let best = '', bestV = -Infinity; for (const o of all) if (o.kind === 'pass' && o.value > bestV) { bestV = o.value; best = o.toId; }
+    const misses = (vision: number): number => { let k = 0; for (let seed = 1; seed <= 1000; seed++) if (!passesSeen(def({ vision, iq: 50, poise: 50 }), seed).includes(best)) k++; return k / 1000; };
+    const low = misses(20), high = misses(95);
+    expect(low).toBeGreaterThan(0.05); expect(high).toBeLessThan(low * 0.5);
+  });
+  it('a better passer values the same pass more with nobody on him, and a better puck handler the same carry', () => {
+    const st = stateWith({ carrier: 'home', puckX: -5, puckY: 0 }); for (const s of st.skaters) if (s.side === 'away') s.pos = { x: 20, y: s.pos.y };
+    place(st, 'home:C', 5, 3);
+    expect(readSituation(st, skater(st, 'home', 'RW')).pressure).toBe(0);
+    const value = (d: PlayerDef, pick: (o: Option) => boolean): number => {
+      const opts: Option[] = []; listOptions(st, { ...d, id: 'home-RW', position: 'RW' }, defs, tactics.home, opts);
+      return opts.find(pick)!.value;
+    };
+    const toC = (o: Option): boolean => o.kind === 'pass' && o.toId === 'home-C', wide = (o: Option): boolean => o.kind === 'carry' && o.lane === 'wide';
+    expect(value(def({ passing: 95, vision: 99 }), toC)).toBeGreaterThan(value(def({ passing: 30, vision: 99 }), toC));
+    expect(value(def({ puckHandling: 95 }), wide)).toBeGreaterThan(value(def({ puckHandling: 30 }), wide));
+  });
+});
+
 describe('rims (Task 5 review)', () => {
   it('a rim is offered along the boards or from behind the goal line, never from the slot', () => {
     const rims = (x: number, y: number): number => {
