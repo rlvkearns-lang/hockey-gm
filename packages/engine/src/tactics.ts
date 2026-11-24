@@ -3,8 +3,8 @@
  * the carrier's option values (options.ts) and to the jobs (jobs.ts, job-targets.ts), and the tactics that suit a
  * roster (naturalTactics, for generateTeam).
  *
- * Tactics shade, they never decide: every factor is a multiplier on an option's value (a positive value times it, a
- * negative one divided by it, as a habit does) or a shift of a job's spot, and every chance stays inside its clamp. The
+ * Tactics shade, they never decide: every factor multiplies an option's weight in the carrier's draw (a shift of its
+ * value, shade) or moves a job's spot, no option is removed, and every chance stays inside its clamp. The
  * men on the ice bend a tactic: an entry tactic's factors weaken for a line whose habits do not suit it (entryFactors).
  * The defaults play as the engine did before tactics. Per team only: per line and per game situation is a later step
  * (a line's or a situation's tactics would resolve here to the same ResolvedTactics).
@@ -54,11 +54,11 @@ export function lineHabit(state: GameState, side: Side, defs: Map<string, Player
 }
 
 /**
- * Multipliers on the carrier's neutral-zone options: `carryIn` on a carry toward the zone, `dump` on the dump-in. The
- * tactic's factors (TUNING.tactics.entry: carry 1.25 / 0.6, mixed 1 / 1, dump 0.8 / 1.6) are bent by the line: each
- * factor f becomes f ** e, e = max(bend.min, bend.perHabit * h), where h is the line's habit for what the tactic asks
- * for (`carryHabit` under 'carry', `dumpHabit` under 'dump'): an average line (0.5) plays it as written, grinders asked
- * to carry play it at about half strength and still dump more than a skilled line would.
+ * Factors on the carrier's neutral-zone options (applied with shade): `carryIn` on a carry toward the zone, `dump` on
+ * the dump-in. The tactic's factors (TUNING.tactics.entry) are bent by the line: each factor f becomes f ** e,
+ * e = max(bend.min, bend.perHabit * h), where h is the line's habit for what the tactic asks for (`carryHabit` under
+ * 'carry', `dumpHabit` under 'dump'): an average line (0.5) plays it as written, grinders asked to carry play it at
+ * about half strength and still dump more than a skilled line would.
  */
 export function entryFactors(t: ResolvedTactics, dumpHabit: number, carryHabit: number): { carryIn: number; dump: number } {
   const f = T.entry[t.zoneEntry];
@@ -82,16 +82,15 @@ const RELATIVE: Record<ResolvedTactics['offence'], OffenceFactors> = (() => {
 })();
 
 /**
- * Multipliers on the carrier's offensive-zone options for `t.offence`: the brief's factors (TUNING.tactics.offence:
- * cycle 1.3 / 1 / 0.8 / 1 / 1.2, pointShots 1 / 1.4 / 1.4 / 1 / 1, rush 0.8 / 0.9 / 1 / 1.3 / 0.8 for lowCycle,
- * pointPass, pointShot, rushShot, hold) divided by the default's, so the default (cycle) is all 1 and plays as before.
- * The object returned is shared and frozen.
+ * Factors on the carrier's offensive-zone options for `t.offence` (applied with shade): TUNING.tactics.offence's
+ * lowCycle, pointPass, pointShot, rushShot and hold, divided by the default's (cycle), so the default is all 1 and plays
+ * as before. The object returned is shared and frozen.
  */
 export function offenceFactors(t: ResolvedTactics): OffenceFactors {
   return RELATIVE[t.offence];
 }
 
-/** TUNING.patience's tactic factor for `offence`: cycle 1, pointShots 0.9, rush 0.8. */
+/** TUNING.patience's tactic factor for `offence` (TUNING.tactics.patience; cycle, the default, 1). */
 export function patienceFactor(offence: ResolvedTactics['offence']): number {
   return T.patience[offence];
 }

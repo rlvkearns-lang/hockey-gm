@@ -339,7 +339,8 @@ export function shieldingInBattle(state: GameState, s: SkaterState): boolean {
  * forwards on the ice); in the zone he attacks (offenceFactors) a rim, a pass to a man below the dots and the office
  * carry by lowCycle, a pass to a point man by pointPass, a shot from TUNING.options.farShot m or more by pointShot, a
  * shot on an odd-man rush by rushShot, protecting it and holding it behind the net by hold; and his patience by
- * patienceFactor. A factor k makes a positive value v * k and a negative one v / k (tactics.ts shade).
+ * patienceFactor. A factor k shifts a value by TUNING.tactics.temp * ln k (tactics.ts shade): the option's weight in
+ * an average player's draw is times k.
  */
 export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, out: Option[], situation: Situation = ownSituation, tactics: Tactics = NO_TACTICS): Option[] {
   out.length = 0;
