@@ -6,7 +6,15 @@ import { validateSetup } from '../src/validate';
 import { TUNING } from '../src/tuning';
 import { resolveTactics as resolveFromIndex } from '../src/index';
 import type { GameSetup, Side, Tactics } from '../src/types';
-import { gameSetup, stateWith } from './helpers';
+import { def, gameSetup, stateWith } from './helpers';
+import { pickTemperature, topKindShare, type Option, type Situation } from '../src/options';
+import type { PlayerDef } from '../src/types';
+
+/** The first option's share of the carrier's draw (options.ts weigh, uncapped), with two options of different kinds listed. */
+function topShare(opts: Option[], me: PlayerDef, sit: Situation): number {
+  const top = topKindShare(opts, me, sit, null);
+  return opts[0]!.value >= opts[1]!.value ? top : 1 - top;
+}
 import { observeGame, tacticCounts, tacticMeasures } from './measures';
 
 /** `s` with `side`'s tactics changed by `t` (the rosters are the same). */
@@ -50,11 +58,26 @@ describe('tactics: the input', () => {
     // (Close-out ruling 3b: a point-shot team is as patient as a cycle team, 1.0, to keep its attempts inside 40 to 70.)
     expect(patienceFactor('cycle')).toBeGreaterThanOrEqual(patienceFactor('pointShots')); expect(patienceFactor('pointShots')).toBeGreaterThan(patienceFactor('rush'));
   });
-  it('a factor k multiplies the option\'s weight in an average player\'s draw by k (a shift of temp * ln k on its value)', () => {
-    const T = TUNING.tactics.temp;
-    expect(shade(0.2, 1)).toBe(0.2);
-    expect(Math.exp((shade(-0.03, 4) - -0.03) / T)).toBeCloseTo(4, 6);
-    expect(Math.exp((shade(0.01, 0.5) - 0.01) / T)).toBeCloseTo(0.5, 6);
+  it('a factor k multiplies the option\'s weight in the carrier\'s draw by k (a shift of his temperature * ln k on its value)', () => {
+    const T = 0.0136;
+    expect(shade(0.2, 1, T)).toBe(0.2);
+    expect(Math.exp((shade(-0.03, 4, T) - -0.03) / T)).toBeCloseTo(4, 6);
+    expect(Math.exp((shade(0.01, 0.5, T) - 0.01) / T)).toBeCloseTo(0.5, 6);
+  });
+  it('for every player, smart and poised or not, under pressure or not, a factor k makes the option k times as likely against the rest (Task 11 review fix)', () => {
+    const sit = (pressure: number): Situation => ({ rx: 0, ly: 0, zone: 'N', pressure, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 });
+    for (const me of [def({ iq: 30, poise: 30 }), def({ iq: 99, poise: 99 }), def({ iq: 70, poise: 70 })]) {
+      for (const pressure of [0, 1]) {
+        const T = pickTemperature(me, pressure);
+        for (const k of [0.25, 4, 60]) {
+          const opts = (f: number): Option[] => [{ kind: 'dump', value: shade(-0.01, f, T) }, { kind: 'carry', lane: 'middle', to: { x: 0, y: 0 }, value: 0 }];
+          const odds = (f: number): number => { const p = topShare(opts(f), me, sit(pressure)); return p / (1 - p); };
+          // The dump's weight against the carry: its odds times k.
+          expect(odds(k) / odds(1), `iq/poise ${me.attrs.iq}, pressure ${pressure}, k ${k}`).toBeCloseTo(k, 6);
+        }
+      }
+    }
+    expect(pickTemperature(def({ iq: 30, poise: 30 }), 1)).toBeGreaterThan(1.5 * pickTemperature(def({ iq: 99, poise: 99 }), 0));
   });
   it('lineHabit is the mean habit of the forwards (or defencemen) on the ice', () => {
     const st = stateWith({ carrier: 'home', puckX: 0 });
@@ -102,8 +125,12 @@ describe('tactics: two teams look different', () => {
 });
 
 describe('tactics shade, they never decide (Review Focus 3)', () => {
-  it('for every entry and offence tactic (both teams, two games) one kind is certain before the cap in under 15% of ordinary decisions', () => {
-    for (const t of [{ zoneEntry: 'dump' }, { zoneEntry: 'carry' }, { offence: 'pointShots' }, { offence: 'rush' }] as Partial<Tactics>[]) {
+  it('for every tactic (both teams on it, two games) one kind is certain before the cap in under 15% of ordinary decisions (the forecheck, defence and pinch tactics too: Task 11 review fix)', () => {
+    const all: Partial<Tactics>[] = [
+      { zoneEntry: 'dump' }, { zoneEntry: 'carry' }, { offence: 'pointShots' }, { offence: 'rush' },
+      { forecheck: 'passive' }, { forecheck: 'aggressive' }, { defence: 'pressure' }, { pinch: 'often' }, { pinch: 'rarely' },
+    ];
+    for (const t of all) {
       const s = { ...gameSetup(1), home: { ...gameSetup(1).home, tactics: { ...gameSetup(1).home.tactics, ...t } }, away: { ...gameSetup(1).away, tactics: { ...gameSetup(1).away.tactics, ...t } } };
       const a = observeGame(s).counters, b = observeGame({ ...s, seed: 2 }).counters;
       expect((a.normalCertain + b.normalCertain) / (a.normalDecisionPoints + b.normalDecisionPoints), JSON.stringify(t)).toBeLessThan(0.15);

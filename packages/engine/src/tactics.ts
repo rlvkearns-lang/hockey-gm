@@ -6,7 +6,8 @@
  * Tactics shade, they never decide: every factor multiplies an option's weight in the carrier's draw (a shift of its
  * value, shade) or moves a job's spot, no option is removed, and every chance stays inside its clamp. The
  * men on the ice bend a tactic: an entry tactic's factors weaken for a line whose habits do not suit it (entryFactors).
- * The defaults play as the engine did before tactics. Per team only: per line and per game situation is a later step
+ * With the defaults the carrier values his options as before tactics; three job rules are new for every team (pinching,
+ * collapse holding the front of the net, the post held for the whole wait). Per team only: per line and per game situation is a later step
  * (a line's or a situation's tactics would resolve here to the same ResolvedTactics).
  *
  * Every number is in TUNING.tactics.
@@ -17,7 +18,7 @@ import type { GameState, Lines, PlayerDef, Side, Tactics, Tendencies } from './t
 
 export type ResolvedTactics = Required<Tactics>;
 
-/** What the four optional fields of Tactics are when absent: the play the engine had before tactics. */
+/** What the four optional fields of Tactics are when absent (the one place they are filled in: resolveTactics). */
 export const DEFAULT_TACTICS: Pick<ResolvedTactics, 'zoneEntry' | 'offence' | 'defence' | 'pinch'> = Object.freeze({
   zoneEntry: 'mixed', offence: 'cycle', defence: 'collapse', pinch: 'sometimes',
 });
@@ -96,13 +97,15 @@ export function patienceFactor(offence: ResolvedTactics['offence']): number {
 }
 
 /**
- * A tactic's factor `k` applied to an option's value `v`: v + TUNING.tactics.temp * ln k, so that for a player who picks
- * at the reference temperature (an average player, unpressured: TUNING.value.pick) the option's weight in his draw is
- * times k. (A plain multiple of the value did next to nothing: option values are small differences, often below zero,
- * and a dump 0.02 to 0.07 below his best option stayed there at 1.6 times its value.)
+ * A tactic's factor `k` applied to an option's value `v` for a carrier who picks at temperature `temp` (his own, at this
+ * decision: options.ts pickTemperature, from TUNING.value.pick): v + temp * ln k, so that the option's weight in his draw
+ * (exp(value / temp)) is times k, whoever he is (Task 11 review, Important 1: before, temp was a fixed copy of an
+ * average player's, so a factor acted as k ** (0.0136 / his temperature): the dump's 60 as 17 to 181). (A plain multiple
+ * of the value did next to nothing: option values are small differences, often below zero, and a dump 0.02 to 0.07
+ * below his best option stayed there at 1.6 times its value.)
  */
-export function shade(v: number, k: number): number {
-  return k === 1 ? v : v + T.temp * dlog(k);
+export function shade(v: number, k: number, temp: number): number {
+  return k === 1 ? v : v + temp * dlog(k);
 }
 
 const mean = (xs: readonly number[]): number => (xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length);

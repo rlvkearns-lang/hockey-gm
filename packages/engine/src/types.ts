@@ -54,8 +54,9 @@ export type Lines = {
 
 /**
  * A team's tactics (Task 11, tactics.ts). They shade the carrier's option values and the jobs; they never decide a play.
- * The four optional fields default as noted (tactics.ts resolveTactics); the defaults play as the engine did before
- * tactics existed. Per team only for now: per line and per game situation is a later step.
+ * The four optional fields default as noted (tactics.ts resolveTactics); with the defaults the carrier values his options
+ * as before tactics existed, but three job rules are new for every team (pinching, collapse holding the front of the
+ * net, the post held for the whole wait: TUNING.tactics). Per team only for now: per line and per game situation is a later step.
  */
 export type Tactics = {
   forecheck: 'passive' | 'balanced' | 'aggressive';

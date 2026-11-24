@@ -37,7 +37,7 @@ import { shotQuality as shotQuality_, threat as threat_ } from './threat';
 import { TUNING } from './tuning';
 import { dcos as dcos_, dexp as dexp_, dpow as dpow_, dsin as dsin_ } from './dmath';
 import type { Rng } from './rng';
-import { DEFAULT_TACTICS, entryFactors as entryFactors_, lineHabit as lineHabit_, offenceFactors as offenceFactors_, patienceFactor as patienceFactor_, shade as shade_, type ResolvedTactics } from './tactics';
+import { resolveTactics, entryFactors as entryFactors_, lineHabit as lineHabit_, offenceFactors as offenceFactors_, patienceFactor as patienceFactor_, shade as shade_, type ResolvedTactics } from './tactics';
 import type { CarrierPlan, CarryLane, GameState, PlayerDef, SavePose, Side, SkaterState, Tactics } from './types';
 import { saveOutcomeChances } from './rebounds';
 import type { Vec2 } from './vec';
@@ -297,7 +297,7 @@ const resolved = new WeakMap<Tactics, ResolvedTactics>();
 function resolvedOf(t: Tactics): ResolvedTactics {
   let r = resolved.get(t);
   if (r === undefined) {
-    r = { forecheck: t.forecheck, shiftSeconds: t.shiftSeconds, zoneEntry: t.zoneEntry ?? DEFAULT_TACTICS.zoneEntry, offence: t.offence ?? DEFAULT_TACTICS.offence, defence: t.defence ?? DEFAULT_TACTICS.defence, pinch: t.pinch ?? DEFAULT_TACTICS.pinch };
+    r = resolveTactics(t);
     resolved.set(t, r);
   }
   return r;
@@ -339,8 +339,8 @@ export function shieldingInBattle(state: GameState, s: SkaterState): boolean {
  * forwards on the ice); in the zone he attacks (offenceFactors) a rim, a pass to a man below the dots and the office
  * carry by lowCycle, a pass to a point man by pointPass, a shot from TUNING.options.farShot m or more by pointShot, a
  * shot on an odd-man rush by rushShot, protecting it and holding it behind the net by hold; and his patience by
- * patienceFactor. A factor k shifts a value by TUNING.tactics.temp * ln k (tactics.ts shade): the option's weight in
- * an average player's draw is times k.
+ * patienceFactor. A factor k shifts a value by his pick temperature * ln k (tactics.ts shade): the option's weight in
+ * his draw is times k.
  */
 export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, out: Option[], situation: Situation = ownSituation, tactics: Tactics = NO_TACTICS): Option[] {
   out.length = 0;
@@ -359,6 +359,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   // Tactics (Task 11): in the zone he attacks, the offence factors; in the neutral zone, the entry factors.
   const tac = resolvedOf(tactics);
   const off = offenceFactors(tac);
+  // His pick temperature at this decision: a tactic's factor k shifts a value by T0 * ln k (tactics.ts shade), so the
+  // option's weight in his draw (chooseOption, at the same temperature) is times k.
+  const T0 = pickTemperature(me, pressure);
   const inZone = rx > BLUE;
   let carryIn = 1, dumpK = 1;
   if (sit.zone === 'N' && tac.zoneEntry !== 'mixed') {
@@ -471,8 +474,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
         if (tie > 0) { const k = 1 - TUNING.engage.limits.shootValue * tie; v = v >= 0 ? v * k : v / k; }
       }
       // Tactics: a shot from the point, or one on an odd-man rush.
-      if (inZone && dNet >= FAR_SHOT) v = shade(v, off.pointShot);
-      if (mode === 'odd') v = shade(v, off.rushShot);
+      if (inZone && dNet >= FAR_SHOT) v = shade(v, off.pointShot, T0);
+      if (mode === 'odd') v = shade(v, off.rushShot, T0);
       const ot = state.oneTimerTaken;
       if (ot !== null && ot.id === s.id && state.tick - ot.tick <= TUNING.shot.types.oneTimerTicks) v += V.oneTimerBonus;
       out.push({ kind: 'shoot', value: v + shootOn });
@@ -485,7 +488,6 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   passValues.length = 0;
   passSeen.length = 0;
   const plan = state.carrierPlan !== null && state.carrierPlan.id === s.id ? state.carrierPlan : null;
-  const T0 = pickTemperature(me, pressure);
   const fc = dcos(s.facing), fs = dsin(s.facing);
   const passSkill = a.passing;
   for (const m of state.skaters) {
@@ -543,7 +545,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (!outside && mrx < BLUE + 1) v -= V.offside;
     v = habit(v, tend.pass);
     // Tactics: a pass to the point, or one low (the cycle).
-    if (inZone) v = shade(v, isPoint(state, m) ? off.pointPass : mrx > DOTS ? off.lowCycle : 1);
+    if (inZone) v = shade(v, isPoint(state, m) ? off.pointPass : mrx > DOTS ? off.lowCycle : 1, T0);
     v += passOn;
     // Vision: he sees the best `seen` passes as he reads them (value plus the error of his read, fixed for the possession).
     passKey.toId = m.id;
@@ -586,8 +588,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     let v = valueOf(chance, to);
     v = habit(v, tend.carry);
     // Tactics: a carry toward the zone from the neutral zone (entry), the office (the cycle).
-    if (sit.zone === 'N' && trx > srx) v = shade(v, carryIn);
-    else if (lane === 'office') v = shade(v, off.lowCycle);
+    if (sit.zone === 'N' && trx > srx) v = shade(v, carryIn, T0);
+    else if (lane === 'office') v = shade(v, off.lowCycle, T0);
     v -= moveOn;
     out.push({ kind: 'carry', lane, to: { x: tw.x + 0, y: tw.y + 0 }, value: v });
   };
@@ -616,7 +618,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     let bestPass = -Infinity;
     for (const pv of passValues) if (pv > bestPass) bestPass = pv;
     const kept = passValues.length > 0 ? Math.max(0, bestPass - passOn) * O.hold.keep : 0;
-    out.push({ kind: 'carry', lane: 'hold', to: { x: tw.x + 0, y: tw.y + 0 }, value: shade(keep * kept - (1 - keep) * loss, off.hold) - moveOn });
+    out.push({ kind: 'carry', lane: 'hold', to: { x: tw.x + 0, y: tw.y + 0 }, value: shade(keep * kept - (1 - keep) * loss, off.hold, T0) - moveOn });
     // Wrap: to the post the goalie is further from, worth what a shot from there would be.
     const gl = state.goalies[side === 'home' ? 'away' : 'home'].pos;
     const grx = gl.x * dir, gly = gl.y * dir;
@@ -667,7 +669,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // 0.34 of the time, about as after a carry; the race alone valued it lost half the time or more.)
     const chance = clamp(O.rimFit.base + O.rimFit.slope * race(state, s, tw, to) * (to === null ? O.blindRim : 1), 0.03, 0.97);
     const v = habit(valueOf(chance, keepAt(threat(drx, dly) * openAt(spaceAt(state, side, tw)), drx)), tend.pass);
-    out.push({ kind: 'rim', toId: to === null ? null : to.id, value: inZone ? shade(v, off.lowCycle) : v });
+    out.push({ kind: 'rim', toId: to === null ? null : to.id, value: inZone ? shade(v, off.lowCycle, T0) : v });
   }
 
   // ---- dump (neutral zone) or clear (own zone) ----
@@ -679,7 +681,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     chance = (chance + race(state, s, tw, null)) / 2;
     let v = valueOf(chance, threat(D.x, D.y), here + V.turnoverCost * threat(-D.x, D.y));
     if (rx < 0) v -= V.icing;
-    out.push({ kind: 'dump', value: shade(habit(v, tend.dump), dumpK) });
+    out.push({ kind: 'dump', value: shade(habit(v, tend.dump), dumpK, T0) });
   }
   if (mode === 'normal' && sit.zone === 'D') {
     const cx = RIM.clear.x;
@@ -696,7 +698,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     const keep = clamp(O.protect.base - pressure * ((outside ? O.protect.lossOut : O.protect.loss) - O.protect.lossPerPoint * composite(a, PROTECTING)), 0.03, 0.97);
     // Unpressured, shielding the puck only stands still: it costs O.protect.idle * (1 - pressure).
     const pv = valueOf(keep, here);
-    out.push({ kind: 'protect', value: (inZone ? shade(pv, off.hold) : pv) - moveOn - O.protect.idle * (1 - pressure) });
+    out.push({ kind: 'protect', value: (inZone ? shade(pv, off.hold, T0) : pv) - moveOn - O.protect.idle * (1 - pressure) });
   }
   if (out.length === 0) out.push({ kind: 'protect', value: 0 });
   return out;
@@ -879,7 +881,7 @@ export function planBeaten(options: readonly Option[], me: PlayerDef, sit: Situa
 }
 
 /** His pick's temperature (TUNING.value.pick): lower for a smart, poised player, higher under pressure. */
-function pickTemperature(me: PlayerDef, pressure: number): number {
+export function pickTemperature(me: PlayerDef, pressure: number): number {
   const P = V.pick, a = me.attrs;
   return Math.max(P.min, P.base + P.perPoint * (100 - a.iq) + P.pressure * pressure - P.perPoise * a.poise);
 }

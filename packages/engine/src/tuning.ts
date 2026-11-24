@@ -292,17 +292,20 @@ export const TUNING = deepFreeze({
   /**
    * Team tactics (tactics.ts, Task 11). Every factor a tactic applies is here; tactics shade option values and jobs and
    * never decide (no option is removed, every chance stays inside its clamp). The defaults (zoneEntry mixed, offence
-   * cycle, defence collapse, pinch sometimes; forecheck as set) keep the carrier's valuation exactly as before; three
-   * job rules are new for every team (pinching, collapse holding the front of the net, the post held for the whole wait).
+   * cycle, defence collapse, pinch sometimes; forecheck as set) keep the carrier's valuation exactly as before, but they
+   * do not play exactly as the engine did before tactics: three job rules are new for every team (pinching, collapse
+   * holding the front of the net, the post held for the whole wait).
    *
-   * - temp: a factor k is applied to an option's value as + temp * ln k (tactics.ts shade): for an average player
-   *   unpressured (his pick temperature, TUNING.value.pick, is about temp) it multiplies the option's weight in his draw
-   *   by k. (The brief's plain multiple of the value did next to nothing: values are small differences, often below 0.)
+   * A factor k is applied to an option's value as + T * ln k, T the carrier's own pick temperature at that decision
+   * (TUNING.value.pick; tactics.ts shade, Task 11 review fix): it multiplies the option's weight in his draw by k,
+   * whoever he is. (The brief's plain multiple of the value did next to nothing: values are small differences, often below 0.)
    * - entry: factors on the carrier's neutral-zone options (options.ts): `carryIn` on a carry toward the zone, `dump` on
    *   the dump. Set from play, far above the brief's 1.25 / 0.6 and 0.8 / 1.6: before tactics a team dumped about 4% of
    *   its entries (a dump sits 0.02 to 0.07 below his best option at the line, three to five temperatures); a weight
    *   factor of 30 on the dump gave 28%, 240 gave 32 to 40%, 3,000 gave 45%. Close-out ruling: the binding bar is the
    *   dump team at least 1.6 times the carry team's share and 0.25 or more, so 60 / 0.25. Numbers in task-11-report.md.
+   *   The bend below raises a factor to a power over 1 for a line keener than 0.5 on what is asked, so 60 is not the
+   *   ceiling: a grinder line (dump habit 0.6) plays the dump at 60 ** 1.2, about 136, and carryIn at 0.19.
    * - bend: the men on the ice bend an entry tactic: its factor f becomes f ** e, e = max(min, perHabit * h), h the
    *   mean habit of the on-ice forwards for what the tactic asks for (tend.carry under 'carry', tend.dump under 'dump').
    *   An average line (0.5) plays it as written; a line that does not like it (grinders asked to carry) plays it less.
@@ -311,7 +314,7 @@ export const TUNING = deepFreeze({
    * - offence: factors (lowCycle on a rim, a pass to a man below the dots and the office carry; pointPass on a pass to
    *   a point man; pointShot on a shot from options.farShot m or more; rushShot on a shot on an odd-man rush; hold on
    *   protecting it in the zone and holding it behind the net). options.ts uses them divided by the default's (cycle),
-   *   so the default plays as before. The brief's, except pointShots' pointPass 1.6 and pointShot 3 (brief 1.4 / 1.4:
+   *   so the default plays as before. The brief's, except pointShots' pointPass 2 and pointShot 4 (brief 1.4 / 1.4:
    *   defencemen's attempts rose 1.26 times, against the brief's 1.4).
    * - patience: TUNING.patience's tactic factor by offence (rush 0.5: at 0.8 a cycle team's possessions in the zone were
    *   1.14 times a rush team's, at 0.6 1.19, against the brief's 1.2).
@@ -328,12 +331,11 @@ export const TUNING = deepFreeze({
    *   waits at the post (job-targets.ts BEHIND_CHASE_SECONDS) and the others hold in front of the goal line.
    * - pinch (m): a point man goes down the wall for a loose or contested puck on his side within this far of him (and
    *   more than pinchDepth m deeper than him: one nearer the line is his to keep in, as before tactics), and
-   *   only while a teammate with job highForward is above the puck (nearer the blue line than it). pinchEager (m): one
+   *   only while a teammate with job highForward is above him (nearer the blue line than he is). pinchEager (m): one
    *   who may goes as if that much nearer the puck than he is (negative: further), against the other men for it.
    * - natural: generateTeam's rules (naturalTactics), from the roster alone (the brief's numbers).
    */
   tactics: {
-    temp: 0.0136,
     entry: { carry: { carryIn: 1.25, dump: 0.6 }, mixed: { carryIn: 1, dump: 1 }, dump: { carryIn: 0.25, dump: 60 } },
     bend: { perHabit: 2, min: 0.2 },
     offence: {
