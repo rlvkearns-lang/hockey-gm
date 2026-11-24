@@ -53,6 +53,19 @@ describe('roster-gen', () => {
   });
 });
 
+describe('roster-gen styles and badges (Task 12)', () => {
+  it('every player gets the badges his ratings earn and his style\'s block habit; goalies only goalie badges', async () => {
+    const { earnedBadges } = await import('../src/badges');
+    for (const seed of [1, 2, 3]) {
+      for (const p of generateTeam(seed, 'T', 'T').players) {
+        expect(p.badges).toEqual(earnedBadges(p));
+        if (p.position === 'G') { expect(p.tendencies.block).toBeUndefined(); continue; }
+        expect(p.tendencies.block).toBeGreaterThan(0); expect(p.tendencies.block).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
 describe('roster-gen tactics (Task 11)', () => {
   it('each team gets the tactics that suit its roster, with the usual shift lengths', async () => {
     const { naturalTactics } = await import('../src/tactics');

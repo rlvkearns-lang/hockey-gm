@@ -15,7 +15,24 @@ export type Tendencies = {
   forecheck: number;
   netFront: number;
   joinRush: number;
+  /** Getting in front of shots (Task 12, styles.ts). Default 0.5. */
+  block?: number;
 };
+
+/** A forward's style (Task 12, styles.ts). */
+export type ForwardStyle = 'Sniper' | 'Playmaker' | 'Power Forward' | 'Two-Way Forward' | 'Shutdown Forward' | 'Speedster' | 'Grinder' | 'Enforcer';
+/** A defenceman's style. */
+export type DefenceStyle = 'Offensive Defenceman' | 'Defensive Defenceman' | 'Two-Way Defenceman';
+/** How a skater plays: his primary style, and an optional secondary one of the same group (styles.ts). */
+export type Style = ForwardStyle | DefenceStyle;
+/**
+ * A trait a player has earned by being clearly good at one thing (Task 12, badges.ts): each has one small effect in play.
+ * Rebound Control and Glove Hand are goalies' badges.
+ */
+export type Badge =
+  | 'Heavy Slapshot' | 'One-Timer' | 'Quick Release' | 'Net-Front Finisher' | 'Burner' | 'Elusive' | 'Tireless'
+  | "Playmaker's Vision" | 'Stickhandler' | 'Breakout Passer' | 'Shot Blocker' | 'Stick Checker' | 'Big Hitter' | 'Shutdown'
+  | 'Board Battler' | 'Net-Front Presence' | 'Faceoff Specialist' | 'Rebound Control' | 'Glove Hand';
 
 export type PlayerDef = {
   id: string;
@@ -28,8 +45,14 @@ export type PlayerDef = {
   catches?: 'L' | 'R';
   heightCm: number;
   weightKg: number;
+  /** A PLAYER_TYPES key (for a generated player, his primary style's: styles.ts STYLES[..].typeKey). */
   type: string;
+  /** Kept for old setups; null for generated players (badges replace it). */
   subType: string | null;
+  /** His style, when set by hand (the override); when absent it is worked out from his attributes and habits (styles.ts styleOf). */
+  style?: { primary: Style; secondary: Style | null };
+  /** Badges he has earned (badges.ts). Default none. */
+  badges?: Badge[];
   attrs: SkaterAttrs;
   goalie: GoalieAttrs | null;
   tendencies: Tendencies;

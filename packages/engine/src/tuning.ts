@@ -807,4 +807,59 @@ export const TUNING = deepFreeze({
     /** A unit is due a change when its mean energy is below this. */
     tired: 0.45,
   },
+
+  /**
+   * Styles (styles.ts, Task 12). A generated skater has a secondary style with chance secondaryChance; his habits are
+   * secondaryShare of the secondary's and the rest the primary's; his attributes take the primary's bias plus
+   * secondaryBias of the secondary's. styleOf scores each style of his group by attrWeight of how well his attributes
+   * match its bias (0.5 + the mean bias-weighted difference from his own mean / attrSpan, within 0 to 1) and the rest by
+   * how well his habits match its habits (1 - the mean absolute difference); the next best is his secondary when its
+   * score is at least secondaryWithin of the best.
+   */
+  styles: { secondaryChance: 0.6, secondaryShare: 1 / 3, secondaryBias: 0.5, attrWeight: 0.5, attrSpan: 40, secondaryWithin: 0.85 },
+
+  /**
+   * Badges (badges.ts, Task 12): each badge's one effect, small, read where the badge acts (one guarded line there).
+   * Every chance it shades is clamped again ([0.1, 0.9] through winProb for contests, [0.03, 0.97] otherwise).
+   */
+  badges: {
+    /** Heavy Slapshot: a slapshot's speed times this. */
+    heavySlapSpeed: 1.08,
+    /** One-Timer: a one-timer's spread times this instead of TUNING.shot.types.oneTimer.spread. */
+    oneTimerSpread: 0.8,
+    /** Quick Release: pressure counts this share in his shot spread; the goalie's reaction time to his shot times reaction. */
+    quickReleasePressure: 0.6, quickReleaseReaction: 0.9,
+    /** Net-Front Finisher: tip chance plus tip; spread on a rebound shot times reboundSpread. */
+    finisherTip: 0.08, finisherReboundSpread: 0.85,
+    /** Burner: top speed times this. */
+    burnerSpeed: 1.03,
+    /** Elusive: carve times carve; the poke checker's carrier edge (TUNING.poke.carrierEdge) plus pokeEdge against him. */
+    elusiveCarve: 1.1, elusivePokeEdge: 4,
+    /** Tireless: energy drain times this. */
+    tirelessDrain: 0.85,
+    /** Playmaker's Vision: sees this many more pass options; the error of his read of an option times readError. */
+    visionExtraPasses: 1, visionReadError: 0.7,
+    /** Stickhandler: rating points in a poke check's hands rating. */
+    stickhandlerHands: 5,
+    /** Breakout Passer: passes from his own zone: direction error times error, forehand range plus range (m). */
+    breakoutError: 0.75, breakoutRange: 5,
+    /** Shot Blocker: block chance plus this. */
+    shotBlockerChance: 0.08,
+    /** Stick Checker: rating points in a poke check's stick rating; stick-in-lane interception factor (TUNING.pass.stickFactor 1.5). */
+    stickCheckerStick: 5, stickCheckerLaneFactor: 1.7,
+    /** Big Hitter: hitter rating points; added to the hit-degree score. */
+    bigHitterRating: 5, bigHitterDegree: 0.4,
+    /** Shutdown: poke (stick) and strip rating points against the man he marks; his cover gap is this much tighter (m). */
+    shutdownRating: 4, shutdownGap: 0.3,
+    /** Board Battler: rating points in a board battle's pin and dig draws. */
+    boardBattlerRating: 5,
+    /** Net-Front Presence: net-front body rating points; engagement rating points within netRange (m) of a net. */
+    netFrontBody: 6, netFrontEngage: 4, netFrontRange: 5,
+    /** Faceoff Specialist: faceoffs rating points. */
+    faceoffRating: 5,
+    /** Rebound Control (goalie): held and steered chances plus this each. */
+    reboundControlShare: 0.06,
+    /** Glove Hand (goalie): save log-odds on his catching side above gloveHeight (m); held chance on a glove save. */
+    gloveSave: 0.25, gloveHeight: 0.5, gloveHeld: 0.08,
+  },
 });

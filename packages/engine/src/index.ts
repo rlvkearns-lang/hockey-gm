@@ -6,6 +6,8 @@
  *   restoreGame (carry on from a snapshot of `state`).
  * - Input: validateSetup (throws a SetupError naming the problem), generateTeam (fictional test rosters with tactics that
  *   suit them), resolveTactics (a team's tactics with their defaults filled in), PLAYER_TYPES.
+ * - Players (Task 12): STYLES (each style's habits and bias), styleOf (a skater's primary and secondary style and his
+ *   label, worked out unless set by hand), styleLabel, BADGES (the badges a player may have).
  * - Data: the types (GameSetup in; GameState, GameEvent and GameResult out), rink geometry, the clock constants.
  */
 export { createGame, restoreGame, simulateGame, type Game } from './game';
@@ -13,6 +15,8 @@ export { SetupError, validateSetup, type SetupProblem } from './validate';
 export { generateTeam } from './roster-gen';
 export { resolveTactics, type ResolvedTactics } from './tactics';
 export { PLAYER_TYPES, type PlayerTypeDef } from './player-types';
+export { STYLES, styleLabel, styleOf, type StyleDef } from './styles';
+export { BADGES } from './badges';
 export { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from './attributes';
 export * from './types';
 export type { Vec2 } from './vec';

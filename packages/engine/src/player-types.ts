@@ -43,6 +43,14 @@ export const PLAYER_TYPES: Record<string, PlayerTypeDef> = {
     tendencies: t(0.4, 0.55, 0.4, 0.4, 0.4, 0.6, 0.3, 0.4),
     build: { heightCm: [180, 192], weightKg: [84, 96] },
   },
+  // Task 12: defence first, sent out against the other side's best line (not two-way: he wins his matchup, not the scoresheet).
+  'Shutdown Forward': {
+    positions: ['C', 'LW', 'RW'],
+    subTypes: ['Checking Forward', 'Penalty Killer'],
+    attrBias: { defensivePositioning: 18, stickChecking: 12, shotBlocking: 10, iq: 8, compete: 8, discipline: 6, shootingAccuracy: -8, puckHandling: -6 },
+    tendencies: t(0.25, 0.45, 0.3, 0.5, 0.5, 0.55, 0.2, 0.2),
+    build: { heightCm: [182, 194], weightKg: [86, 98] },
+  },
   Speedster: {
     positions: ['LW', 'RW', 'C'],
     subTypes: ['Rush Winger', 'Breakaway Threat'],

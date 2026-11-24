@@ -162,8 +162,10 @@ describe('tactics: generated teams', () => {
     for (const k of ['forecheck', 'zoneEntry', 'offence', 'defence', 'pinch'] as const) expect(new Set(ts.map((t) => t[k])).size).toBeGreaterThanOrEqual(2);
     expect(generateTeam(7, 'T', 'T').tactics).toEqual(generateTeam(7, 'T', 'T').tactics);
     // The roster itself is unchanged by this task (same players and lines as before it: a fingerprint taken then).
-    expect(fnv(JSON.stringify(generateTeam(7, 'T', 'T').players))).toBe('7d85cfb2');
-    expect(fnv(JSON.stringify(generateTeam(1, 'T', 'T').players))).toBe('ad9d2797');
+    // (Task 12 step 1 adds badges and the block habit, drawing nothing: without them the players are byte for byte as then.)
+    const old = (seed: number): string => JSON.stringify(generateTeam(seed, 'T', 'T').players.map(({ badges: _b, ...p }) => { const { block: _k, ...t } = p.tendencies; return { ...p, tendencies: t }; }));
+    expect(fnv(old(7))).toBe('7d85cfb2');
+    expect(fnv(old(1))).toBe('ad9d2797');
     expect(fnv(JSON.stringify(generateTeam(7, 'T', 'T').lines))).toBe('5f189b89');
     const t = generateTeam(7, 'T', 'T');
     expect(t.tactics).toMatchObject(naturalTactics(t.players, t.lines));

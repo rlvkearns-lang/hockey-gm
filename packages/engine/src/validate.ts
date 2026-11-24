@@ -1,11 +1,13 @@
 import { GOALIE_ATTRS, SKATER_ATTRS } from './attributes';
-import type { GameSetup, PlayerDef, TeamDef, Tendencies } from './types';
+import { BADGES, GOALIE_BADGES } from './badges';
+import { groupOf, STYLES } from './styles';
+import type { Badge, GameSetup, PlayerDef, Style, TeamDef, Tendencies } from './types';
 
 /** What is wrong with a setup (SetupError.code). */
 export type SetupProblem =
   | 'not-an-object' | 'bad-seed' | 'bad-chemistry' | 'bad-team' | 'duplicate-id' | 'bad-player' | 'bad-position'
   | 'bad-attribute' | 'missing-goalie-attributes' | 'bad-size' | 'bad-tendency' | 'bad-form' | 'bad-morale'
-  | 'bad-fatigue' | 'bad-tactics' | 'bad-lines';
+  | 'bad-fatigue' | 'bad-tactics' | 'bad-lines' | 'bad-style' | 'bad-badge';
 
 /** A GameSetup that cannot be played: `code` names the kind of problem, the message says exactly what and where. */
 export class SetupError extends Error {
@@ -63,6 +65,30 @@ function checkPlayer(team: TeamDef, p: PlayerDef): void {
   inRange(who, 'bad-fatigue', 'fatigue', p.fatigue, 0, 1);
   if (p.shoots !== 'L' && p.shoots !== 'R') fail('bad-player', `${who}: shoots must be 'L' or 'R', got ${String(p.shoots)}`);
   if (p.catches !== undefined && p.catches !== 'L' && p.catches !== 'R') fail('bad-player', `${who}: catches must be 'L' or 'R', got ${String(p.catches)}`);
+  if (p.tendencies.block !== undefined) inRange(who, 'bad-tendency', 'tendency block', p.tendencies.block, 0, 1);
+  if (p.style !== undefined) checkStyle(who, p);
+  if (p.badges !== undefined) checkBadges(who, p);
+}
+
+/** Task 12: a style set by hand is one of his position group's (a goalie has none); a secondary is another of that group, or null. */
+function checkStyle(who: string, p: PlayerDef): void {
+  const group = groupOf(p.position), st = p.style as { primary?: unknown; secondary?: unknown } | null;
+  if (group === null) return fail('bad-style', `${who}: a goalie has no style, got ${JSON.stringify(st)}`);
+  if (!isObj(st)) return fail('bad-style', `${who}: style must be { primary, secondary }, got ${String(st)}`);
+  const ofGroup = (v: unknown): v is Style => typeof v === 'string' && Object.hasOwn(STYLES, v) && STYLES[v as Style].group === group;
+  if (!ofGroup(st.primary)) fail('bad-style', `${who}: style.primary must be a style of his position (${group === 'F' ? 'a forward' : 'a defenceman'}), got ${String(st.primary)}`);
+  if (st.secondary !== null && (!ofGroup(st.secondary) || st.secondary === st.primary)) {
+    fail('bad-style', `${who}: style.secondary must be null or another style of his position, got ${String(st.secondary)}`);
+  }
+}
+
+/** Task 12: badges are known, and a goalie's badge is only on a goalie. */
+function checkBadges(who: string, p: PlayerDef): void {
+  if (!Array.isArray(p.badges)) return fail('bad-badge', `${who}: badges must be an array, got ${String(p.badges)}`);
+  for (const b of p.badges as unknown[]) {
+    if (!BADGES.includes(b as Badge)) fail('bad-badge', `${who}: unknown badge ${String(b)}`);
+    if (p.position !== 'G' && GOALIE_BADGES.includes(b as Badge)) fail('bad-badge', `${who}: ${String(b)} is a goalie's badge`);
+  }
 }
 
 function checkTactics(team: TeamDef): void {

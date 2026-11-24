@@ -3,7 +3,7 @@ import type { Golden } from './golden';
 /** Written by scripts/golden-update.ts; every runtime must reproduce these exactly. */
 export const GOLDEN_EXPECTED: Record<number, Golden> = {
   "7": {
-    "roster": "11df4b80fbc63f1c",
+    "roster": "6d38378ef6dd910a",
     "ticks": [
       "1:8b0d120264fb0259",
       "10:4b337b58e3441176",
@@ -18,7 +18,7 @@ export const GOLDEN_EXPECTED: Record<number, Golden> = {
     "events": 5937
   },
   "42": {
-    "roster": "596f86b673f2244e",
+    "roster": "e26abbfcee3434c8",
     "ticks": [
       "1:def2b654909d324c",
       "10:07e4328fcdf38e0b",
@@ -33,7 +33,7 @@ export const GOLDEN_EXPECTED: Record<number, Golden> = {
     "events": 6010
   },
   "123456": {
-    "roster": "5e3922be70d66a96",
+    "roster": "f99d99e603d1ae95",
     "ticks": [
       "1:f4eb765676f1472c",
       "10:0547e7d7db9cbcce",

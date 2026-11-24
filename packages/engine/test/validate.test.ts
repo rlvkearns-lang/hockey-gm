@@ -40,6 +40,16 @@ const cases: [string, Breaker, SetupProblem, RegExp][] = [
   ['chemistry names an unknown player', (s) => { s.chemistry = [{ a: 'ghost', b: s.home.players[1]!.id, value: 0.5 }]; }, 'bad-chemistry', /ghost/],
   ['seed NaN', (s) => { s.seed = NaN; }, 'bad-seed', /seed.*NaN/],
   ['seed a string', (s) => { (s as { seed: unknown }).seed = '42'; }, 'bad-seed', /seed must be a finite number/],
+  // Task 12: styles and badges, checked when present.
+  ['a style of the other group (Task 12)', (s) => { const p = s.home.players.find((x) => x.position === 'LD')!; p.style = { primary: 'Sniper', secondary: null }; }, 'bad-style', /style.*Sniper/],
+  ['a style that is not a style (Task 12)', (s) => { (s.home.players[0] as { style?: unknown }).style = { primary: 'Rover', secondary: null }; }, 'bad-style', /style.*Rover/],
+  ['a secondary style of the other group (Task 12)', (s) => { s.home.players[0]!.style = { primary: 'Sniper', secondary: 'Two-Way Defenceman' }; }, 'bad-style', /secondary.*Two-Way Defenceman/],
+  ['a secondary style the same as the primary (Task 12)', (s) => { s.home.players[0]!.style = { primary: 'Sniper', secondary: 'Sniper' }; }, 'bad-style', /secondary.*Sniper/],
+  ['a style on a goalie (Task 12)', (s) => { s.home.players.find((x) => x.position === 'G')!.style = { primary: 'Sniper', secondary: null }; }, 'bad-style', /goalie/],
+  ['an unknown badge (Task 12)', (s) => { s.home.players[0]!.badges = ['Clutch' as never]; }, 'bad-badge', /badge.*Clutch/],
+  ['badges not an array (Task 12)', (s) => { (s.home.players[0] as { badges?: unknown }).badges = 'Burner'; }, 'bad-badge', /badges/],
+  ['a goalie badge on a skater (Task 12)', (s) => { s.home.players.find((x) => x.position === 'C')!.badges = ['Glove Hand']; }, 'bad-badge', /Glove Hand/],
+  ['a block habit of 2 (Task 12)', (s) => { s.home.players[0]!.tendencies.block = 2; }, 'bad-tendency', /tendency block.*2/],
   ['position not a position', (s) => { (s.home.players[0] as { position: string }).position = 'X'; }, 'bad-position', /position/],
 ];
 
@@ -56,5 +66,14 @@ describe('validateSetup', () => {
   });
   it('accepts a generated setup', () => {
     expect(() => validateSetup(validSetup())).not.toThrow();
+  });
+  it('accepts an old setup without styles, badges or a block habit, and one that sets them well (Task 12)', () => {
+    const s = validSetup();
+    for (const p of s.home.players) { delete p.style; delete p.badges; delete p.tendencies.block; }
+    expect(() => validateSetup(s)).not.toThrow();
+    const c = s.away.players.find((x) => x.position === 'C')!, g = s.away.players.find((x) => x.position === 'G')!;
+    c.style = { primary: 'Power Forward', secondary: 'Sniper' }; c.badges = ['Big Hitter', 'Heavy Slapshot']; c.tendencies.block = 0.4;
+    g.badges = ['Glove Hand'];
+    expect(() => validateSetup(s)).not.toThrow();
   });
 });

@@ -45,6 +45,10 @@ function hashTeam(h: Hash, t: TeamDef): void {
     if (p.goalie) for (const k of GOALIE_ATTRS) h.num(p.goalie[k]);
     const td = p.tendencies;
     for (const v of [td.shoot, td.pass, td.carry, td.dump, td.hit, td.forecheck, td.netFront, td.joinRush]) h.num(v);
+    // Task 12: the block habit, a style set by hand, the badges.
+    h.num(td.block ?? -1); h.str(p.style?.primary ?? ''); h.str(p.style?.secondary ?? '');
+    for (const b of p.badges ?? []) h.str(b);
+    h.num(-2);
   }
   for (const line of t.lines.forwards) for (const id of line) h.str(id);
   for (const pair of t.lines.defence) for (const id of pair) h.str(id);

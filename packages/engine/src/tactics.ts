@@ -48,7 +48,7 @@ export function lineHabit(state: GameState, side: Side, defs: Map<string, Player
     if (!s.onIce || s.side !== side || s.slot === null || isD(s.slot) !== (group === 'D')) continue;
     const d = defs.get(s.id);
     if (d === undefined) continue;
-    sum += d.tendencies[habit];
+    sum += d.tendencies[habit] ?? 0.5;
     n++;
   }
   return n === 0 ? 0.5 : sum / n;

@@ -1,5 +1,7 @@
 import { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from './attributes';
+import { earnedBadges } from './badges';
 import { PLAYER_TYPES } from './player-types';
+import { STYLES } from './styles';
 import { createRng, type Rng } from './rng';
 import { naturalTactics } from './tactics';
 import type { PlayerDef, Position, TeamDef, Tendencies } from './types';
@@ -10,8 +12,11 @@ const LAST = ['Arden', 'Brandt', 'Carver', 'Dahl', 'Ekberg', 'Frost', 'Grey', 'H
 
 const rating = (v: number): number => clamp(Math.round(v), 1, 100);
 
+// Task 12 step 1: the Shutdown Forward is not drawn yet (rosters as before).
 const typesFor = (pos: Position): string[] =>
-  Object.keys(PLAYER_TYPES).filter((k) => PLAYER_TYPES[k]!.positions.includes(pos));
+  Object.keys(PLAYER_TYPES).filter((k) => k !== 'Shutdown Forward' && PLAYER_TYPES[k]!.positions.includes(pos));
+/** Task 12 step 1: a type's block habit, its style's (none for a goalie). */
+const blockOf = (typeName: string): number | undefined => Object.values(STYLES).find((st) => st.typeKey === typeName)?.habits.block;
 
 function makeSkaterAttrs(rng: Rng, overall: number, bias: Partial<SkaterAttrs>): SkaterAttrs {
   const attrs = {} as SkaterAttrs;
@@ -27,7 +32,7 @@ function makeGoalie(rng: Rng, overall: number): GoalieAttrs {
 
 function makeTendencies(rng: Rng, base: Tendencies): Tendencies {
   const out = { ...base };
-  for (const k of Object.keys(out) as (keyof Tendencies)[]) out[k] = clamp(base[k] + rng.gauss() * 0.08, 0, 1);
+  for (const k of Object.keys(out) as (keyof Tendencies)[]) out[k] = clamp((base[k] ?? 0.5) + rng.gauss() * 0.08, 0, 1);
   return out;
 }
 
@@ -36,7 +41,7 @@ function makePlayer(rng: Rng, team: string, n: number, position: Position, typeN
   const isGoalie = position === 'G';
   const [h0, h1] = def.build.heightCm;
   const [w0, w1] = def.build.weightKg;
-  return {
+  const p: PlayerDef = {
     id: `${team}-${n}`,
     name: `${rng.pick(FIRST)} ${rng.pick(LAST)}`,
     number: n,
@@ -54,6 +59,10 @@ function makePlayer(rng: Rng, team: string, n: number, position: Position, typeN
     morale: 0,
     fatigue: 0,
   };
+  const block = blockOf(typeName);
+  if (block !== undefined) p.tendencies.block = block;
+  p.badges = earnedBadges(p);
+  return p;
 }
 
 /** Numbers goalies wear; skaters wear anything else from 2 to 98. */
