@@ -87,6 +87,19 @@ describe('the carrier values his options', () => {
     const best = (d: PlayerDef): number => decisions(st, d, 2000).filter((x) => x.kind === 'pass' && x.toId === 'home-C').length / 2000;
     expect(best(def({ iq: 95, vision: 95, poise: 95 }))).toBeGreaterThan(best(def({ iq: 35, vision: 35, poise: 35 })) + 0.1);
   });
+  // Task 7 review, Important 2: a shot that does not score is worth what follows it (Task 8's outcomes), so a teammate
+  // nearer the rebound than any defender makes the same shot worth more.
+  it('a shot is worth more with a teammate first to the rebound than with a defender there', () => {
+    const shotValue = (who: 'home' | 'away'): number => {
+      const st = stateWith({ carrier: 'home', puckX: 14, puckY: 3, carrierSlot: 'C' });
+      for (const k of st.skaters) if (k.id !== 'home-C') k.pos = { x: -20, y: k.pos.y };
+      place(st, 'away:RD', 19, -8); place(st, 'away:C', 19, 8); // no breakaway, no odd-man rush
+      place(st, who === 'home' ? 'home:LW' : 'away:LD', 24.6, 0.5);
+      const o = listOptions(st, defs.get('home-C')!, defs, []).find((x) => x.kind === 'shoot');
+      return o ? o.value : -Infinity;
+    };
+    expect(shotValue('home')).toBeGreaterThan(shotValue('away'));
+  });
   it('threat grows toward the net: own zone under neutral zone under the point under the slot', () => {
     expect(threat(-20, 0)).toBeLessThan(threat(0, 0)); expect(threat(0, 0)).toBeLessThan(threat(10, 8)); expect(threat(10, 8)).toBeLessThan(threat(22, 0)); expect(threat(22, 0)).toBeLessThan(0.25);
   });

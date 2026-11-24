@@ -133,8 +133,7 @@ export const TUNING = deepFreeze({
    * near the net is worth `deke` of a shot from there. A pass lane under TUNING.lanes.open is
    * worth `shadowed` of an open one. `hold`: each second he has had the puck adds this much to shooting and passing and
    * takes it off carrying and protecting (at most holdCap seconds).
-   * Builder's additions: `goal` scales a shot's chance to score (shotQuality * skill * goal) (what a shot that does not
-   * score is still worth is `rebound`, Task 7); a habit also leans a value by
+   * Builder's additions: `goal` scales a shot's chance to score (shotQuality * skill * goal); a habit also leans a value by
    * habitShift * (tendency - 0.5); a pass or carry that puts
    * his team offside costs `offside`; a dump from his own half (icing) costs `icing`; a rim or dump goes to his team
    * with a chance of raceBase + racePerMetre * (how much nearer his nearest teammate is than their nearest man), at
@@ -149,12 +148,14 @@ export const TUNING = deepFreeze({
     skill: { pass: 0.001, carry: 0.001 },
     pick: { base: 0.017, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
     /**
-     * The shot's value (Task 7): a missed or saved shot is still worth `rebound` (a rebound, a tip, the puck kept in); a
-     * shot from 11 m or more gains `traffic` with a teammate in front of the net (job netFront within 3 m of the net
-     * centre) and is halved with no lane (laneWidth to the net under TUNING.block.path). A pass across the slot to a man
-     * whose threat is over oneTimerThreat is a one-timer pass; his first decision values the shot oneTimerBonus higher.
+     * The shot's value (Task 7; Task 7 review, Important 2): P(goal) * (1 - here) plus, for each thing that can follow a
+     * shot that does not score (blocked, wide, held, steered to a corner, a rebound: Task 8's outcome model), its chance
+     * times (its spot value - here), the same `here` as every other option (options.ts shotAfter). A shot from 11 m or
+     * more gains `traffic` in its chance to score with a teammate in front of the net (job netFront within 3 m of the net
+     * centre). A pass across the slot to a man whose threat is over oneTimerThreat is a one-timer pass; his first decision
+     * values the shot oneTimerBonus higher.
      */
-    rebound: 0.005, traffic: 0.02, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
+    traffic: 0.02, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
     stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
     goal: 0.13, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
