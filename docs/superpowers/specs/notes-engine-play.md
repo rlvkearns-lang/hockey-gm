@@ -134,3 +134,12 @@ What follows **[my call]**:
 - Owner (2026-11-24, after the calmer-camera page): nobody really goes into "Gretzky's office" (behind the net); players without the puck just stand around and do not try to get open; opposing players do the same and do not try to block passing lanes. For engine round 2 Part A: behind the net becomes a real place to play from (carry or cycle the puck there, set up, pass out front, wrap around); attackers without the puck move to get open; defenders without the puck put their body or stick in the passing lanes, not only on their man.
 
 - Owner (2026-11-24): "in the NHL players are always battling for position or puck, constantly being tied up or pushed around; here sometimes players just bounce around each other." For engine round 2 Part A: contact between opponents is engagement, not a bounce: tie-ups, box-outs, leaning and shoving for position away from the puck as well as on it.
+
+## Real-world scale (owner, 2026-11-24)
+
+The owner asked whether real NHL measurements can go into the engine: the rink to real size, everything to scale, real skating speed (McDavid at about 24 mph), real puck speed on a slapshot.
+
+- Already true: the engine is in metres, seconds and kilograms; the rink is a real 200 x 85 ft sheet with lines, dots, crease and net at real distances; players have real heights and weights.
+- Not true yet (checked in tuning.ts): top skating speed runs 7.6 to 9.2 m/s (17 to 20.6 mph) against roughly 20 to 25 mph in the NHL; shot speed is 29 to 39 m/s (65 to 87 mph) for every shot type, against wrist shots of roughly 70 to 90 mph and slapshots of 90 to 100+ mph. NHL figures here are from memory and need checking.
+- **[my call]** Re-tune A (Task 14) moves skating and shot speeds to real values (top speed by rating spanning about 20 to 24.5 mph; shot speed by shot type and shooting power), adds them to the NHL scorecard (top speed, bursts over 20 and 22 mph per game, shot speeds), and re-balances the totals.
+- **[my call]** League stage: the real-roster importer sets each player's speed and shot power from the NHL's published tracking data (top speed, hardest shot) where available, so a real player's engine top speed equals his measured one. Needs the stats hosts reachable or the data supplied.

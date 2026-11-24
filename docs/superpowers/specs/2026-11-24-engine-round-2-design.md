@@ -137,6 +137,10 @@ Targets per team per game at 5-on-5 **[my call, from recent NHL seasons scaled t
 
 New measures added to the calibration so "looks like hockey" can be checked: share of time each skater spends near-stationary while play is live; share of passes completed and of point passes kept in; rebounds per game; share of board battles where the winner comes away with it; zone time and shots per offensive-zone possession.
 
+### Real-world scale
+
+The owner (2026-11-24) wants everything to scale: the rink, skating speed ("McDavid can skate up to, what? 24 mph?"), puck speed on a slapshot. The rink, net and bodies are already real size. In Re-tune A, top skating speed is moved to real values (about 20 to 24.5 mph across the rating range) and shot speed depends on shot type and shooting power (wrist and snap shots roughly 70 to 90 mph, slapshots roughly 85 to 100+ mph), with the real figures checked against published tracking data and shown on the scorecard. **[my call]** on the exact ranges.
+
 ### NHL scorecard
 
 The owner (2026-11-24): "I just want it to simulate the real NHL as close as possible... I want to compare what we have to the NHL."
