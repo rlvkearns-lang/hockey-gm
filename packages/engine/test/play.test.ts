@@ -214,3 +214,12 @@ describe('A3: decisions at decision points (Task 8 fix round 2)', () => {
     }
   }, 600_000);
 });
+
+describe('A2/A4: the net front (Task 8 fix round 2)', () => {
+  it('A2: the net-front man holds his job: over half his spells in the zone last 2.5 s or more (median at least 2.5 s)', () => {
+    const c = counters(); expect(c.netFrontHolds).toBeGreaterThan(100); expect(c.netFrontHoldsLong / c.netFrontHolds).toBeGreaterThanOrEqual(0.5);
+  }, 60_000);
+  it('A4: an attacker is within 4 m of the net on at least 40% of saves of shots from 11 m or more', () => {
+    const c = counters(); expect(c.pointShotSaves).toBeGreaterThan(30); expect(c.pointShotSavesNear / c.pointShotSaves).toBeGreaterThanOrEqual(0.4);
+  }, 60_000);
+});

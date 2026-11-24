@@ -37,7 +37,8 @@ export type PlayCounterKey =
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
   | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'passGoals'
-  | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip';
+  | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
+  | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -55,6 +56,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
   'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'passGoals',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
+  'netFrontHolds', 'netFrontHoldsLong', 'pointShotSaves', 'pointShotSavesNear',
 ];
 
 /** Counters that hold a largest value, not a sum: games combine by taking the largest. */
@@ -92,6 +94,10 @@ const KEPT_IN_RX = 7.57;
 const ticksOf = (s: number): number => Math.round(s / DT);
 const POINT_PASS_TICKS = ticksOf(3);
 const REBOUND_TICKS = ticksOf(3);
+/** Net-front measures (Task 8 fix round 2): a long hold (s), a point shot (m), near the net (m). */
+const NET_FRONT_LONG = 2.5;
+const POINT_SHOT = 11;
+const NET_NEAR = 4;
 const CAME_AWAY_TICKS = ticksOf(1.5);
 const OZONE_SAMPLE_EVERY = 6;
 const LANE_CLEAR = 1.0;
@@ -499,9 +505,43 @@ export function createObserver(setup: GameSetup): Observer {
     prevPuck = { x: p.pos.x, y: p.pos.y, speed, speed3: Math.hypot(p.vel.x, p.vel.y, p.vz), live };
   }
 
+  /**
+   * Task 8 fix round 2. Net-front holds: a skater's spell with job netFront (a net-front battle, job `contest`, continues
+   * it) that ends while play is live and his team's committed phase is still ozone; long when it lasted NET_FRONT_LONG s
+   * or more (the median hold is NET_FRONT_LONG or more when over half are long). Saves of shots from POINT_SHOT m or more:
+   * whether an attacker stood within NET_NEAR m of the net centre on the tick before.
+   */
+  const nfSince = new Map<number, number>();
+  let prevAtt: { side: Side; x: number; y: number }[] = [];
+  let lastShotDist = 0;
+  function netFront(st: GameState, events: readonly GameEvent[]): void {
+    for (const e of events) {
+      if (e.type === 'shot') lastShotDist = e.detail.distance;
+      if (e.type !== 'save' || e.side === null || lastShotDist < POINT_SHOT) continue;
+      const att = otherSide(e.side), nx = -st.attackDir[e.side] * RINK.goalLineX;
+      c.pointShotSaves++;
+      if (prevAtt.some((k) => k.side === att && Math.hypot(k.x - nx, k.y) < NET_NEAR)) c.pointShotSavesNear++;
+    }
+    const live = st.phase === 'live';
+    st.plans.forEach((p, i) => {
+      const held = live && (p.job === 'netFront' || (nfSince.has(i) && p.job === 'contest'));
+      if (held && !nfSince.has(i)) nfSince.set(i, st.tick);
+      else if (!held && nfSince.has(i)) {
+        if (live && st.teamPhase[st.skaters[i]!.side].phase === 'ozone') {
+          c.netFrontHolds++;
+          if ((st.tick - nfSince.get(i)!) * DT >= NET_FRONT_LONG) c.netFrontHoldsLong++;
+        }
+        nfSince.delete(i);
+      }
+    });
+    prevAtt = [];
+    for (const k of st.skaters) if (k.onIce) prevAtt.push({ side: k.side, x: k.pos.x, y: k.pos.y });
+  }
+
   return {
     tick(st, events) {
       if (st.phase === 'live') c.liveTicks++;
+      netFront(st, events);
       skaters(st);
       jobs(st);
       const wasOzone = ozone;
