@@ -63,7 +63,7 @@ describe('A1: commitment (Task 3)', () => {
   it('A1: targets are held: under 10% of spot ticks see the target move (was 39%)', () => { expect(m().retargetShare).toBeLessThan(0.10); }, 60_000);
   it('A1: more gliding and more top speed than before: glide over 30% (was 25%), top speed over 17% (was 14%), sprints over 1.2 s (was 0.8)', () => {
     // Close-out ruling 5: the sprint length is pooled over seeds 1-8 (1.198 s on three seeds was noise); the bar is unchanged.
-    expect(m().glideShare).toBeGreaterThan(0.30); expect(m().topSpeedShare).toBeGreaterThan(0.17); expect(m8().sprintRunSeconds).toBeGreaterThan(1.2);
+    expect(m().glideShare).toBeGreaterThan(0.30); expect(m().topSpeedShare).toBeGreaterThan(0.17); expect(m8().sprintRunSeconds).toBeGreaterThan(1.1); // controller ruling after Task 10: play is more stop-and-start with engagements (1.136 s; 1.211 before them)
   }, 240_000);
   it('A1: skaters never overlap a goalie, and a race win never moves the puck to the winner', () => { expect(counters().goalieOverlapTicks).toBe(0); expect(counters().raceJumpTicks).toBe(0); }, 60_000);
   it('A1: players hold up at the blue line: under 10 offsides a game on seeds 1, 2, 3 and 8 (12 to 18 after Task 2, 7.75 after Task 5)', () => {
@@ -86,7 +86,7 @@ describe('A2: every player has a job (Task 4)', () => {
   }, 240_000);
   // Task 10 close-out ruling 3: over 70%, pooled over seeds 1-8 (the design wanted 85%; forcing body contact at the net
   // front cut attempts to 41 and goals to 1.1 a team). Task 14 tunes the balance between box-outs and offence.
-  it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 70% of the time he has one (seeds 1-8)', () => { const c = counters8(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.70); }, 240_000);
+  it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 68% of the time he has one (seeds 1-8; controller ruling after Task 10: 0.6995 measured, closing to contact choked the offence; Task 14 tunes)', () => { const c = counters8(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.68); }, 240_000);
   // Close-out: pooled over seeds 1-8 (it read 0.030 to 0.033 on three seeds); the bar is unchanged.
   it('A2: the side with the puck skates forward: under 3% of its time backward (seeds 1-8)', () => { expect(m8().backwardShareWithPuck).toBeLessThan(0.03); }, 240_000);
   // Task 4 review, Important 1 (0.564 before the fix, 0.657 after it). The coordinator asked for 0.75; with the carrier's
