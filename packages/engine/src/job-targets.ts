@@ -765,9 +765,9 @@ export function carrierTaker(state: GameState, side: Side): SkaterState | null {
 }
 
 /**
- * Under defence 'pressure' (Task 11): with the carrier below the dots (and in front of the goal line), the one of the
- * dCorner and dzCentre men who is not the man who has him (the nearer to him, if neither is) goes at him as well, from the slot side
- * (TUNING.tactics.pressure.second m from him toward the slot). Returns false otherwise.
+ * Under defence 'pressure' (Task 11): with the carrier below the dots, the one of the dCorner and dzCentre men who is
+ * not the man who has him (the nearer to him, if neither is) goes at him as well: TUNING.tactics.pressure.second m from
+ * him toward the slot, or behind the net round the other side of it from the man who has him. Returns false otherwise.
  */
 function secondPresser(state: GameState, s: SkaterState, out: Want): boolean {
   const taker = carrierTaker(state, s.side);
@@ -776,7 +776,7 @@ function secondPresser(state: GameState, s: SkaterState, out: Want): boolean {
   if (c === null || c.side === s.side) return false;
   const dir = state.attackDir[s.side];
   const crx = c.pos.x * dir;
-  if (crx >= CONTAIN_ABOVE || crx < -GOAL) return false;
+  if (crx >= CONTAIN_ABOVE) return false;
   // The one of the corner man and the centre (not the man who has him) nearest the carrier.
   let near: SkaterState | null = null, nd = Infinity;
   for (let k = 0; k < state.skaters.length; k++) {
@@ -787,10 +787,17 @@ function secondPresser(state: GameState, s: SkaterState, out: Want): boolean {
     if (d < nd) { nd = d; near = t; }
   }
   if (near !== s) return false;
-  setRel(spotScratch, -20, 0, dir);
-  const dx = spotScratch.x - c.pos.x, dy = spotScratch.y - c.pos.y, l = hyp(dx, dy) || 1;
-  out.pos.x = c.pos.x + (dx / l) * TT.pressure.second;
-  out.pos.y = c.pos.y + (dy / l) * TT.pressure.second;
+  if (crx < -GOAL) {
+    // Behind the net: round the other side of it from the man who has him, to close him in.
+    const side = taker.pos.y >= c.pos.y ? -1 : 1;
+    out.pos.x = c.pos.x;
+    out.pos.y = c.pos.y + side * TT.pressure.second;
+  } else {
+    setRel(spotScratch, -20, 0, dir);
+    const dx = spotScratch.x - c.pos.x, dy = spotScratch.y - c.pos.y, l = hyp(dx, dy) || 1;
+    out.pos.x = c.pos.x + (dx / l) * TT.pressure.second;
+    out.pos.y = c.pos.y + (dy / l) * TT.pressure.second;
+  }
   out.face = null;
   out.slow = 'coast';
   out.follow = 'man';

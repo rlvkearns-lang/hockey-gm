@@ -3,48 +3,48 @@ import type { Golden } from './golden';
 /** Written by scripts/golden-update.ts; every runtime must reproduce these exactly. */
 export const GOLDEN_EXPECTED: Record<number, Golden> = {
   "7": {
-    "roster": "f2afea500810be16",
+    "roster": "11df4b80fbc63f1c",
     "ticks": [
       "1:8b0d120264fb0259",
       "10:4b337b58e3441176",
       "100:9d287aa50604ec60",
-      "1000:9d7d48572c94cf02",
-      "10000:d98ceda89ae2379d",
-      "50000:82004dd8a2223ca2",
-      "100000:159954f9d445f9d1"
+      "1000:817bd092dc16ab87",
+      "10000:d4c91d83c5d29d34",
+      "50000:c1b1052d2482c410",
+      "100000:e58271ff83c54458"
     ],
-    "final": "2d0e6caf956683c7",
-    "score": "2-1",
-    "events": 5877
+    "final": "3d6b0bd883eb7ad7",
+    "score": "2-0",
+    "events": 5792
   },
   "42": {
-    "roster": "1a569608feefa31c",
+    "roster": "596f86b673f2244e",
     "ticks": [
       "1:def2b654909d324c",
       "10:07e4328fcdf38e0b",
-      "100:de0b886a6f96742e",
-      "1000:13bf040e28b49548",
-      "10000:b558364cf844a5bd",
-      "50000:f474376199236402",
-      "100000:d446b707de26399b"
+      "100:fee0226e35b0c71f",
+      "1000:16b0e5af1b7e1034",
+      "10000:423a358825dafd08",
+      "50000:b87f755d219fd991",
+      "100000:2682818fcdc12892"
     ],
-    "final": "1b83e5a17a0a7f62",
-    "score": "3-2",
-    "events": 5881
+    "final": "d996237f1959eda6",
+    "score": "9-8",
+    "events": 6325
   },
   "123456": {
-    "roster": "e2181b46075c2e03",
+    "roster": "5e3922be70d66a96",
     "ticks": [
       "1:f4eb765676f1472c",
       "10:0547e7d7db9cbcce",
       "100:aec03f8837fe67e1",
-      "1000:a73eaad1072744bc",
-      "10000:b64ff25dc3ce1df6",
-      "50000:1f9d1e5124d62cff",
-      "100000:a6acde4b74d5aa96"
+      "1000:4a87ea93657d85fd",
+      "10000:ad95c5f4a9647d1e",
+      "50000:51466c022dbac1fe",
+      "100000:33c4ae89e0ba8636"
     ],
-    "final": "ba76cd483214b405",
-    "score": "1-0",
-    "events": 5903
+    "final": "f7a75aa08c59bce0",
+    "score": "3-3",
+    "events": 5906
   }
 };

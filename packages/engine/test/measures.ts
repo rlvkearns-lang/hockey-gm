@@ -772,10 +772,10 @@ export function countGames(seeds: number[]): PlayCounters {
  *   (standing) within 3 m of him; dzoneCarrierTwo: two of them.
  * - allowedSlot / allowedPoint: the other side's attempts released in the slot (rx > 17, |ly| < 4.3, the shooter's
  *   frame) and from 11 m or more.
- * - behindSpells: an opposing carrier behind its net (beyond rx 27.43 of his attack, within 4 m of the middle) for 1.0 s;
- *   behindChased: of those, one of its skaters who was in front of the goal line when the spell began is behind it
- *   within 3 m of him then (he went round after him; holding the post, a man stays in front of the goal line; a man
- *   who was back there already, following him or tied up, is not a chase).
+ * - behindSpells: an opposing carrier behind its net (beyond rx 27.43 of his attack, within 4 m of the middle) for
+ *   1 s, or chased sooner; behindChased: of those, one of its skaters who was in front of the goal line when the
+ *   spell began came behind it within 3 m of him in its first second (he went round after him; holding the post, a
+ *   man stays in front of the goal line; a man who was back there already, following him or tied up, is no chase).
  * - pinches: one of its defencemen, standing in the offensive zone (rx > 6.62) with the puck loose there, is given the
  *   loose-puck job (chase or battleSupport) he did not hold; pinchesWithoutCover: of those, with no teammate holding job
  *   highForward nearer the blue line than the puck (each read from the tick before, when the jobs were handed out).
@@ -798,6 +798,8 @@ const HASH_RX = 21;
 const FORECHECK_SET = 2;
 /** A carrier behind the net is chased with a man behind the goal line within this far (m) of him. */
 const CHASED = 3;
+/** ... within this long (s) of his getting there (a collapsing team's man waits 1.5 s at the post). */
+const CHASE_WITHIN = 1;
 /** An attempt from the point: released above the tops of the circles (rx under 14). */
 const POINT_RX = 14;
 const PUCK_JOBS = new Set(['chase', 'battleSupport', 'receive']);
@@ -865,13 +867,13 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
         if (crx < -27.43 && Math.abs(cs.pos.y) < 4) {
           if (behind === null || behind.id !== cs.id) behind = { id: cs.id, ticks: 0, chased: false, front: new Set(st.skaters.filter((s) => s.onIce && s.side === side && s.pos.x * dir >= -GOAL).map((s) => s.id)) };
           behind.ticks++;
-          if (behind.ticks === ticksOf(1.0)) {
+          if (behind.ticks <= ticksOf(CHASE_WITHIN) && !behind.chased) {
             for (const s of st.skaters) {
               if (!s.onIce || s.side !== side || s.downT > 0) continue;
               if (behind.front.has(s.id) && s.pos.x * dir < -GOAL && Math.hypot(s.pos.x - cs.pos.x, s.pos.y - cs.pos.y) <= CHASED) { behind.chased = true; break; }
             }
-            c.behindSpells++;
-            if (behind.chased) c.behindChased++;
+            // A spell counts once he is chased or has been there CHASE_WITHIN s.
+            if (behind.chased || behind.ticks === ticksOf(CHASE_WITHIN)) { c.behindSpells++; if (behind.chased) c.behindChased++; }
           }
         } else behind = null;
       } else behind = null;
