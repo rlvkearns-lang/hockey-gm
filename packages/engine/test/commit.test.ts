@@ -1,8 +1,26 @@
 import { describe, it, expect } from 'vitest';
-import { commitTo, committedPhase, effortToReach, setTeamPhase, speedFor, updateTeamPhase, type Want } from '../src/commit';
+import { commitTo, committedPhase, effortToReach, holdJob, setTeamPhase, speedFor, updateTeamPhase, type Want } from '../src/commit';
 import { assignJobs } from '../src/team-play';
 import { resolveGoalies } from '../src/bodies';
 import { defs, mv, skater, stateWith, tactics } from './helpers';
+import type { GameState, ReplanReason } from '../src/types';
+
+/**
+ * Each replan trigger alone: home attacks with the puck at x 0, everyone has held his place a while and the last
+ * target was issued 2 ticks ago (inside the hold). `make` applies one cause and returns the skater it is for.
+ */
+const TRIGGERS: [ReplanReason, (st: GameState) => string][] = [
+  ['possession', (st) => { st.carrierId = 'away-C'; st.possession = 'away'; st.lastTouch = { id: 'away-C', side: 'away' }; return 'home-LD'; }],
+  ['passToMe', (st) => { st.carrierId = null; st.pendingPass = { fromId: 'home-RW', toId: 'home-LW', untilTick: st.tick + 30, tried: [], pressure: 0 }; return 'home-LW'; }],
+  ['loosePuckMine', (st) => { st.carrierId = null; skater(st, 'home', 'RW').pos = { x: -8, y: -9 }; skater(st, 'home', 'C').pos = { x: -0.5, y: 0.2 }; return 'home-C'; }],
+  ['phase', (st) => { st.teamPhase.home.sinceTick = st.tick; return 'home-LD'; }],
+  ['whistle', (st) => { st.plans[idx(st, 'home-LD')]!.job = 'lineUp'; return 'home-LD'; }],
+  ['contestEnd', (st) => { st.plans[idx(st, 'home-LD')]!.job = 'contest'; return 'home-LD'; }],
+  ['gotUp', (st) => { st.plans[idx(st, 'home-LD')]!.job = 'down'; return 'home-LD'; }],
+  ['steppedOn', (st) => { holdJob(st, idx(st, 'home-LD'), st.plans[idx(st, 'home-LD')]!.job, 'steppedOn'); return 'home-LD'; }],
+  ['offside', (st) => { st.delayedOffside = { side: 'home', y: 0 }; return 'home-LD'; }],
+];
+const idx = (st: GameState, id: string): number => st.skaters.findIndex((s) => s.id === id);
 
 describe('commitment', () => {
   it('one bobble does not flip the phase; a real change of possession does, after about half a second', () => {
@@ -29,6 +47,14 @@ describe('commitment', () => {
     assignJobs(st, defs, tactics); st.tick++; st.carrierId = null; st.pendingPass = { fromId: 'away-LD', toId: 'away-C', untilTick: st.tick + 30, tried: [], pressure: 0 }; st.possession = 'away';
     assignJobs(st, defs, tactics);
     expect(st.plans[i]!.job).toBe('receive'); expect(['passToMe', 'possession']).toContain(st.plans[i]!.reason); expect(st.plans[i]!.targetTick).toBe(st.tick);
+  });
+  it.each(TRIGGERS)('the %s trigger alone re-issues at once and names itself', (reason, make) => {
+    const st = stateWith({ carrier: 'home', puckX: 0 }); assignJobs(st, defs, tactics);
+    st.tick += 2;
+    for (const p of st.plans) p.targetTick = st.tick - 2;
+    const i = idx(st, make(st)); const s = st.skaters[i]!; s.target = { x: s.pos.x - 0.5, y: 12 };  // a stale held target, like a bench door
+    assignJobs(st, defs, tactics);
+    expect(st.plans[i]!.reason).toBe(reason); expect(st.plans[i]!.targetTick).toBe(st.tick); expect(s.target.y).not.toBe(12);
   });
   it('effort is chosen by need: a sprint to a far spot, a glide near it, and no sprint on empty legs', () => {
     expect(effortToReach(12)).toBe('sprint'); expect(effortToReach(5)).toBe('skate'); expect(effortToReach(2)).toBe('glide');
