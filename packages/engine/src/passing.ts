@@ -43,12 +43,10 @@ export type PassPlan = { toId: string; aim: Vec2; speed: number; hand: PassHand;
 const PASS = TUNING.pass;
 const K = ICE_DECAY;
 const BLUE = RINK.blueLineX;
-/** An opponent reaches for a lane at this speed (m/s). */
-const CLOSE_SPEED = 4;
-/** An opponent's body within this far (m) of a lane ahead of the puck stands in it: the pass cannot get through. */
-const BODY_IN_LANE = 0.3;
-/** An opponent closes on a receiver at this speed (m/s) while the pass travels (he also watches the passer). */
-const CONTEST_CLOSE = 1;
+/** TUNING.pass.closeSpeed, bodyInLane, contestClose (Task 7 review, Minor 5: moved to tuning.ts). */
+const CLOSE_SPEED = PASS.closeSpeed;
+const BODY_IN_LANE = PASS.bodyInLane;
+const CONTEST_CLOSE = PASS.contestClose;
 /** A pass must still be going this fast (m/s) when it gets there. */
 const MIN_ARRIVE = 3;
 /** The weight: speed = clamp(WEIGHT_BASE + WEIGHT_PER_METRE * distance, WEIGHT_MIN, his passing speed). */

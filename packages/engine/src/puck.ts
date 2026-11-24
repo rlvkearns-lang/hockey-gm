@@ -3,6 +3,7 @@ import { boardsNormal as boardsNormal_, RINK as RINK_, resolveBoards as resolveB
 import { hypot2 as hypot2_ } from './vec';
 import { dexp as dexp_, hypot3 as hypot3_ } from './dmath';
 import { GRAVITY as GRAVITY_, PUCK_RADIUS as PUCK_RADIUS_ } from './util';
+import { TUNING } from './tuning';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const RINK = RINK_;
 const resolveBoards = resolveBoards_;
@@ -28,12 +29,12 @@ export const ICE_DECAY = 0.38;
  * BOARDS_HARD_RESTITUTION at BOARDS_HARD or more (a hard puck dies into them and rides round: Task 7). A real hit (BOARDS_SKIM
  * m/s or more into them) keeps BOARDS_ALONG of the speed along them; a puck riding round them keeps all of it.
  */
-const BOARDS_RESTITUTION = 0.55;
-const BOARDS_HARD_RESTITUTION = 0.2;
-const BOARDS_SOFT = 8;
-const BOARDS_HARD = 25;
-const BOARDS_ALONG = 0.9;
-const BOARDS_SKIM = 2;
+const BOARDS_RESTITUTION = TUNING.boards.restitution;
+const BOARDS_HARD_RESTITUTION = TUNING.boards.hardRestitution;
+const BOARDS_SOFT = TUNING.boards.soft;
+const BOARDS_HARD = TUNING.boards.hard;
+const BOARDS_ALONG = TUNING.boards.along;
+const BOARDS_SKIM = TUNING.boards.skim;
 const boardsN = { x: 0, y: 0 };
 
 /** Keeps the puck inside the boards (rink.ts resolveBoards); on a hit, its bounce by the speed into them. Whether it hit. */

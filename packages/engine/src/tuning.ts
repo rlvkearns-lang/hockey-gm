@@ -194,6 +194,8 @@ export const TUNING = deepFreeze({
    * lane under shotLane (m) has shotBlocked of its chance; score effects act on a shot at scoreSoft of their size.
    */
   options: {
+    /** A shot from farShot (m) or more is a point shot; traffic is a netFront teammate within trafficNear (m) of the net centre (Task 7; moved here, review Minor 5). */
+    farShot: 11, trafficNear: 3,
     threat: { base: 0.005, ice: 0.035, shot: 0.15 },
     openAt: { min: 0.6, from: 1, over: 4 },
     pass: {
@@ -230,6 +232,11 @@ export const TUNING = deepFreeze({
 
   /** Passes and interceptions (actions.ts). */
   pass: {
+    /**
+     * Builder's constants (Task 7; moved here, review Minor 5): an opponent reaches for a lane at closeSpeed (m/s); his body
+     * within bodyInLane (m) of a lane ahead of the puck stands in it; he closes on a receiver at contestClose (m/s).
+     */
+    closeSpeed: 4, bodyInLane: 0.3, contestClose: 1,
     /** Speed (m/s): base plus per point of passing. */
     speed: { base: 13, perPoint: 0.09 },
     /** Direction error (rad, one standard deviation): a floor, per point of passing below 100, and at full pressure. */
@@ -312,6 +319,8 @@ export const TUNING = deepFreeze({
       backhand: { speed: 0.75, spread: 1.4 },
       wraparound: { speed: 9 },
       slapFrom: 11, slapPressure: 0.3, oneTimerTicks: 2, wrapPost: 1.2,
+      /** A one-timer pass crosses y = 0 beyond rx oneTimerRx; a wraparound is aimed wrapInside (m) inside the near post, wrapSpread (m, one sd) off it. */
+      oneTimerRx: 18, wrapInside: 0.15, wrapSpread: 0.1,
       /**
        * A shooter turns his body up to setTurn rad per metre out toward his forehand as he winds up (Task 8: a
        * backhand is a shot in tight with the net off his forehand, or with it well behind him).
@@ -329,6 +338,13 @@ export const TUNING = deepFreeze({
   rim: { speed: { base: 16, perPoint: 0.04 }, ahead: 4, corner: { back: 1, y: 8 }, path: 1.8, clearSpeed: { base: 14, perPoint: 0.04 }, clear: { x: -3 } },
   /** Dumps (actions.ts): to a spot this deep and wide (attack-relative m), chipped up at vz m/s; speed base + perPoint * passing. */
   dump: { spot: { x: 25.5, y: 8 }, vz: 2, speed: { base: 16, perPoint: 0.05 }, errorFactor: 1.5 },
+
+  /**
+   * The boards (puck.ts, Task 7; moved here, review Minor 5): they give back `restitution` of the speed into them at `soft`
+   * (m/s) or less, falling linearly to hardRestitution at `hard` or more; a real hit (`skim` m/s or more into them) keeps
+   * `along` of the speed along them.
+   */
+  boards: { restitution: 0.55, hardRestitution: 0.2, soft: 8, hard: 25, along: 0.9, skim: 2 },
 
   /** Goalies (goalie.ts). */
   goalie: {

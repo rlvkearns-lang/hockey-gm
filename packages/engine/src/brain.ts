@@ -1,4 +1,4 @@
-import { executeClear as executeClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
+import { atWrapPost as atWrapPost_, executeClear as executeClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
 import { BRAIN_INTERVAL_TICKS as BRAIN_INTERVAL_TICKS_, DT } from './constants';
 import { chooseOption as chooseOption_, listOptions as listOptions_, readSituationInto as readSituationInto_, type Option, type Situation } from './options';
 import { RINK } from './rink';
@@ -11,6 +11,7 @@ import { clamp as clamp_, findSkater as findSkater_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 // Never alias in a module on an import cycle: brain is on none.
 const executeClear = executeClear_;
+const atWrapPost = atWrapPost_;
 const executeDump = executeDump_;
 const executePass = executePass_;
 const executeRim = executeRim_;
@@ -42,12 +43,6 @@ const optionScratch: Option[] = [];
 const HOLD_FACE_RX = 20;
 /** brainTick's copy of the carrier's situation (written by decideCarrier, read for his carry speed). */
 const sitScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
-
-/** Whether the puck is within TUNING.shot.types.wrapPost (m) of a post of the net `s` attacks. */
-function nearPost(state: GameState, s: SkaterState): boolean {
-  const p = state.puck.pos, nx = state.attackDir[s.side] * RINK.goalLineX;
-  return hypot2(nx - p.x, RINK.netHalfWidth - Math.abs(p.y)) <= TUNING.shot.types.wrapPost;
-}
 
 const lookScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0, since: 0 };
 /** The situation as a key: its mode (the rule that narrows his options) and the zone. */
@@ -100,7 +95,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   const d = decideCarrier(state, me, defs, rng, sit);
   const plan: CarrierPlan = state.carrierPlan!;
   // A shot off the wrap he was carrying out, at a post, is a wraparound (actions.ts shotTypeFor reads the plan's lane).
-  const wrap = d.kind === 'shoot' && plan.lane === 'wrap' && nearPost(state, s);
+  const wrap = d.kind === 'shoot' && plan.lane === 'wrap' && atWrapPost(state, s);
   plan.id = s.id;
   plan.kind = d.kind;
   plan.lane = d.kind === 'carry' ? d.lane : null;

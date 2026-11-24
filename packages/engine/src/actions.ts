@@ -49,8 +49,8 @@ const MAX_SHOT_LIFT = 10;
 const PASS = TUNING.pass;
 const SHOT = TUNING.shot;
 const DUMP = TUNING.dump;
-/** A one-timer pass crosses the slot (y = 0) between this rx and the goal line. */
-const ONE_TIMER_RX = 18;
+/** TUNING.shot.types.oneTimerRx: a one-timer pass crosses the slot (y = 0) between this rx and the goal line. */
+const ONE_TIMER_RX = SHOT.types.oneTimerRx;
 /** Scratch: the pass being made, and an opponent's blade. */
 const passPlan = {} as PassPlan;
 const recvBlade: Vec2 = { x: 0, y: 0 };
@@ -190,18 +190,22 @@ const TYPE_SPREAD: Record<ShotType, number> = { wrist: 1, slap: SHOT.types.slap.
 const netScratch: Vec2 = { x: 0, y: 0 };
 
 /**
- * The type of a shot `s` lets go now, when none is given: `wraparound` (within TUNING.shot.types.wrapPost of a post off a
- * wrap: his carrierPlan's lane is `wrap`), `oneTimer` (he took a one-timer pass at most oneTimerTicks ago), `slap` (slapFrom
+ * Whether the puck is within TUNING.shot.types.wrapPost (m) of a post of the net `s` attacks (a shot off a wrap there is a
+ * wraparound: brain.ts decides it and passes the type).
+ */
+export function atWrapPost(state: GameState, s: SkaterState): boolean {
+  const p = state.puck.pos, nx = state.attackDir[s.side] * RINK.goalLineX;
+  return hypot2(nx - p.x, RINK.netHalfWidth - Math.abs(p.y)) <= SHOT.types.wrapPost;
+}
+
+/**
+ * The type of a shot `s` lets go now, when none is given (a wraparound is given by brain.ts: atWrapPost): `oneTimer` (he took a one-timer pass at most oneTimerTicks ago), `slap` (slapFrom
  * m or more out, pressure under slapPressure), `backhand` (the net centre is not on his forehand even once
  * he has turned TUNING.shot.types.setTurn per metre out toward it: blade.ts forehandWithin), else `wrist`.
  */
 export function shotTypeFor(state: GameState, s: SkaterState, shoots: 'L' | 'R', d: number, pressure: number): ShotType {
   const T = SHOT.types;
   const dir = state.attackDir[s.side];
-  const p = state.puck.pos;
-  const plan = state.carrierPlan;
-  if (plan !== null && plan.id === s.id && plan.lane === 'wrap'
-    && hypot2(dir * RINK.goalLineX - p.x, RINK.netHalfWidth - Math.abs(p.y)) <= T.wrapPost) return 'wraparound';
   const ot = state.oneTimerTaken;
   if (ot !== null && ot.id === s.id && state.tick - ot.tick <= T.oneTimerTicks) return 'oneTimer';
   if (d >= T.slapFrom && pressure < T.slapPressure) return 'slap';
@@ -235,7 +239,7 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
   if (type === 'wraparound') {
     // Along the ice at the near post, just inside it.
     const py = p.y >= 0 ? 1 : -1;
-    const ty = py * (RINK.netHalfWidth - 0.15) + rng.gauss() * 0.1;
+    const ty = py * (RINK.netHalfWidth - SHOT.types.wrapInside) + rng.gauss() * SHOT.types.wrapSpread;
     const dx = netX - p.x, dy = ty - p.y, l = hypot2(dx, dy) || 1;
     const v = SHOT.types.wraparound.speed;
     release(state, s, (dx / l) * v, (dy / l) * v, 0, out, 'shot', null, type);

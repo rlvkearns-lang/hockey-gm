@@ -128,13 +128,13 @@ const OFFICE_WALL = 4;
 /** Holding behind the net: at HOLD_RX, within HOLD_LY of the middle (the frame between him and the nearest opponent). */
 const HOLD_RX = 28.7;
 const HOLD_LY = 1.4;
-/** A shot from this far (m) or more is a point shot: traffic raises it, it needs a lane (Task 7). */
-const FAR_SHOT = 11;
+/** TUNING.options.farShot: a shot from this far (m) or more is a point shot (Task 7; moved to tuning.ts, review Minor 5). */
+const FAR_SHOT = O.farShot;
 /** A rebound lands about REBOUND_OUT m out; each metre nearer it than the other side's nearest man is worth REBOUND_EDGE of the chance of getting it (shotAfter). */
 const REBOUND_OUT = 2.5;
 const REBOUND_EDGE = 0.15;
-/** Traffic: a teammate with job netFront within this far (m) of the net centre. */
-const TRAFFIC_NEAR = 3;
+/** TUNING.options.trafficNear: traffic is a teammate with job netFront within this far (m) of the net centre. */
+const TRAFFIC_NEAR = O.trafficNear;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */
 const CARRY_IN_ZONE = 5;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
