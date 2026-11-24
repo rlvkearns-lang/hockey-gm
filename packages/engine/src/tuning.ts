@@ -34,7 +34,7 @@ export const TUNING = deepFreeze({
      * (hysteresis); his arrival is a decision point once, and no other arrival is one for pressCooldown s after it; a
      * change of his situation is not a decision point within readGap s of his last decision.
      */
-    decide: { holdZone: 1.5, hold: 1.0, holdPressure: 0.3, pressed: 0.5, arrive: 1.5, margin: 0.06, marginHeld: 0.015, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 2, readGap: 0.8 },
+    decide: { holdZone: 1.5, hold: 1.0, holdPressure: 0.3, pressed: 0.5, arrive: 1.5, margin: 0.08, marginHeld: 0.035, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 3, readGap: 0.8 },
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
     shotDistanceScale: 9,
     maxShotDistance: 25,
@@ -59,14 +59,14 @@ export const TUNING = deepFreeze({
     /** How far ahead (m) a carrier aims each carry decision outside the offensive zone. */
     carryAhead: 8,
     /** Outside the offensive zone with a teammate wholly in it, he carries no closer than this (m) to the blue line. */
-    holdUpGap: 1,
+    holdUpGap: 2,
     /** A teammate counts as in the zone if he will be wholly in it this many seconds from now at his speed. */
     offsideLookahead: 0.5,
     /**
      * The longer he has had the puck the more he wants to move it on: each second (TUNING.value.hold, at most holdCap)
      * adds hold * holdBoost.shoot to a shot's value and hold * holdBoost.pass to a pass's (options.ts).
      */
-    holdBoost: { shoot: 0, pass: 4 },
+    holdBoost: { shoot: 0, pass: 6 },
     /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
     protectStep: 2,
     protectSpeedCap: 0.4,
@@ -155,7 +155,7 @@ export const TUNING = deepFreeze({
     deke: 0.6,
     /** A pass's chance falls by skill.pass per point of passing under 100, a carry's by skill.carry per point of puckHandling under 100, pressured or not. */
     skill: { pass: 0.001, carry: 0.001 },
-    pick: { base: 0.015, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
+    pick: { base: 0.016, perPoint: 0.0001, pressure: 0.003, perPoise: 0.000067, min: 0.003 },
     /**
      * The shot's value (Task 7; Task 7 review, Important 2): P(goal) * (1 - here) plus, for each thing that can follow a
      * shot that does not score (blocked, wide, held, steered to a corner, a rebound: Task 8's outcome model), its chance
@@ -164,7 +164,7 @@ export const TUNING = deepFreeze({
      * centre). A pass across the slot to a man whose threat is over oneTimerThreat is a one-timer pass; his first decision
      * values the shot oneTimerBonus higher.
      */
-    traffic: 0.04, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
+    traffic: 0.1, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
     /**
      * What follows in the zone he attacks (Task 8 fix round), measured in play at 43d6dcf, seeds 1-16
      * (task-8-report.md, "Fix round 1"): `keep`, the share of cases in which his team (or nobody) has the puck in the zone
@@ -180,7 +180,7 @@ export const TUNING = deepFreeze({
       blocked: { keep: 0.24, rush: 0.34 },
       wide: { keep: 0.28, rush: 0.15 },
     },
-    stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.003, holdCap: 10,
+    stick: 0.036, shadowed: 0.5, turnoverCost: 0.6, hold: 0.003, holdCap: 10,
     goal: 0.2, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
 
@@ -221,6 +221,12 @@ export const TUNING = deepFreeze({
        * open, a cost of 0.3); it was 0.9.
        */
       contest: 0.3,
+      /**
+       * Task 8b, set from play (seeds 1-6, passes thrown, by the chance the terms above gave them): valued 0.14 completed
+       * 0.40 to 0.55, 0.39 completed 0.59, 0.63 completed 0.73 to 0.81, 0.78 completed 0.85, 0.89 completed 0.87. The
+       * chance used is fit.base + fit.slope * that product.
+       */
+      fit: { base: 0.25, slope: 0.72 },
     },
     /**
      * Task 8b, set from play (seeds 1-6, decisions in the zone he attacks; the other side has the puck within 2 s): after
@@ -256,7 +262,7 @@ export const TUNING = deepFreeze({
    *   rush least).
    * Set once so Task 8b's guards pass; Task 14 tunes it to NHL attempt numbers (see task-8b-report.md).
    */
-  patience: { base: 1.2, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, tacticFactor: 1, max: 2 },
+  patience: { base: 1.35, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, tacticFactor: 1, max: 2 },
 
   /**
    * Score effects (team-play.ts scoreMargin, brain, poke checks), kept to real-hockey size. A margin is comfortable from
@@ -467,11 +473,11 @@ export const TUNING = deepFreeze({
      */
     rebound: {
       heldFrom: 25, heldPerSpeed: 0.004, heldScreened: 0.08, heldTipped: 0.12,
-      steered: { base: 0.35, perPoint: 0.005, tipped: 0.1 },
+      steered: { base: 0.28, perPoint: 0.005, tipped: 0.1 },
       steeredSpeed: [6, 9] as [number, number],
       steeredAngle: [(55 * Math.PI) / 180, (80 * Math.PI) / 180] as [number, number],
       speed: [2.5, 6] as [number, number],
-      speedShare: { base: 0.22, perPoint: 0.0012, min: 0.06, max: 0.3 },
+      speedShare: { base: 0.18, perPoint: 0.0012, min: 0.06, max: 0.3 },
       poseSpeed: { glove: 0.5, blocker: 1, pad: 1, butterfly: 0.7 } as Record<SavePose, number>,
       reflect: 0.5, blockerTurn: 0.5, padTurn: 0.3,
       spread: { base: 0.15, perPoint: 0.006 },

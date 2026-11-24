@@ -268,7 +268,8 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
       const held = state.plans[i]!.job;
       // The man at the net stays there: another job costs him keepNet more (the defenders' dNet, and since Task 8's fix
       // round the attackers' netFront).
-      const cost = hyp(s.pos.x - a.x, s.pos.y - a.y) - (held === job ? TUNING.jobs.keep : 0) + ((held === 'dNet' || held === 'netFront') && job !== held ? TUNING.jobs.keepNet : 0);
+      // (Task 8b: the attackers' net-front man also keeps his own job by keepNet, not keep: another forward takes it only from keepNet nearer the net.)
+      const cost = hyp(s.pos.x - a.x, s.pos.y - a.y) - (held === job ? (job === 'netFront' ? TUNING.jobs.keepNet : TUNING.jobs.keep) : 0) + ((held === 'dNet' || held === 'netFront') && job !== held ? TUNING.jobs.keepNet : 0);
       if (cost < bestCost) { bestCost = cost; best = i; }
     }
     if (best >= 0) { out[best] = job; used[k] = true; }

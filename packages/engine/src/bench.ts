@@ -162,6 +162,9 @@ export function finishChanges(state: GameState, setup: GameSetup): void {
   }
 }
 
+/** A loose puck outside a team's zone going up ice at more than this (m/s) has been cleared: the team may change. */
+const CLEARED_SPEED = 3;
+
 /** `b` should change now (its on-ice energy is in this tick's energySum and headCount). */
 function isDue(state: GameState, setup: GameSetup, side: Side, unit: Unit, b: BenchUnit, now: number, otherChanging: boolean, carrierSide: Side | null): boolean {
   const shift = now - b.shiftStart;
@@ -176,11 +179,17 @@ function isDue(state: GameState, setup: GameSetup, side: Side, unit: Unit, b: Be
   return n > 0 && energySum[u]! / n < F.tired;
 }
 
-/** The team has the puck in the neutral or offensive zone, or the puck is deep in its far end. */
+/**
+ * The team has the puck in the neutral or offensive zone, or the puck is deep in its far end, or (Task 8b) it has been
+ * cleared: loose outside the team's own zone and going up ice. (With shots at a realistic number there are half as many
+ * whistles, and a line hemmed in its zone that cleared the puck without carrying it out never got off: a skater ran out
+ * of energy 185 s after the last whistle.)
+ */
 function mayChangeOnTheFly(state: GameState, side: Side, carrierSide: Side | null): boolean {
   const dir = state.attackDir[side];
   const px = state.puck.pos.x;
-  return px * dir > DEEP_X || (carrierSide === side && zoneOf(px, dir) !== 'D');
+  if (px * dir > DEEP_X || (carrierSide === side && zoneOf(px, dir) !== 'D')) return true;
+  return carrierSide === null && zoneOf(px, dir) !== 'D' && state.puck.vel.x * dir > CLEARED_SPEED;
 }
 
 function startChange(state: GameState, setup: GameSetup, side: Side, unit: Unit, b: BenchUnit, now: number, out: GameEvent[]): void {

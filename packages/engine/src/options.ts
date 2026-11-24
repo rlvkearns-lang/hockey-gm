@@ -245,6 +245,28 @@ function lookLeft(space: number, poise: number): number {
   return dpow(calm, B.shootPressure) * (1 - RU.stick.base * r) * (1 - RU.value * r);
 }
 
+/** Whether a teammate of `s` is wholly in the zone he attacks, or will be within TUNING.brain.offsideLookahead s at his speed. */
+function mateInZone(state: GameState, s: SkaterState, defs: Map<string, PlayerDef>): boolean {
+  const dir = state.attackDir[s.side];
+  for (const m of state.skaters) {
+    if (!m.onIce || m.side !== s.side || m === s) continue;
+    const mx = (m.pos.x + Math.max(0, m.vel.x * dir) * dir * B.offsideLookahead) * dir;
+    const def = defs.get(m.id);
+    if (mx > BLUE + (def ? bodyRadius(def.weightKg) : 0.4)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the carry he is on (to `to`) would put his team offside now: the puck still outside the zone he attacks, his
+ * target in it, and a teammate in it already (Task 8b: his plan has become impossible, a decision point; with decisions
+ * no longer on a clock he carried it in on a plan made before his winger crossed the line).
+ */
+export function carryOffside(state: GameState, s: SkaterState, defs: Map<string, PlayerDef>, to: Vec2): boolean {
+  const dir = state.attackDir[s.side];
+  return state.puck.pos.x * dir <= BLUE && to.x * dir > BLUE - B.holdUpGap && mateInZone(state, s, defs);
+}
+
 /** The carrier's situation now, written into `out`. */
 export function readSituationInto(state: GameState, s: SkaterState, out: Situation): Situation { return readInto(state, s, out); }
 
@@ -327,13 +349,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
 
   // Offside: with the puck outside the zone, any teammate wholly in it (or about to be) puts his team offside if the
   // puck goes in now.
-  let mateOffside = false;
-  for (const m of state.skaters) {
-    if (!outside || !m.onIce || m.side !== side || m === s) continue;
-    const mx = (m.pos.x + Math.max(0, m.vel.x * dir) * dir * B.offsideLookahead) * dir;
-    const def = defs.get(m.id);
-    if (mx > BLUE + (def ? bodyRadius(def.weightKg) : 0.4)) mateOffside = true;
-  }
+  const mateOffside = outside && mateInZone(state, s, defs);
 
   // ---- shoot ----
   const shootSkill = B.shootSkill.base + composite(a, SHOOTING) * B.shootSkill.perPoint;
@@ -443,7 +459,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (w < O.pass.narrow) chance *= O.pass.narrowFactor; else if (w < L.open) chance *= V.shadowed;
     const space = spaceAt(state, side, m.pos);
     if (space < L.space) chance *= O.pass.crowded + space / O.pass.crowdedPer;
-    chance = clamp(chance, 0.03, 0.97);
+    // Set from play (Task 8b, O.pass.fit): the product of the terms above understates how often a hard pass gets through.
+    chance = clamp(O.pass.fit.base + O.pass.fit.slope * clamp(chance, 0, 1), 0.03, 0.97);
     // A pass across the front of the net makes the goalie move: the receiver's shot is worth more (O.pass.across).
     const qm = shotQuality(mrx, mly), opn = openAt(space);
     let to = threat(mrx, mly) * opn;

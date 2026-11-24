@@ -1,6 +1,6 @@
 import { atWrapPost as atWrapPost_, executeClear as executeClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
 import { BRAIN_INTERVAL_TICKS as BRAIN_INTERVAL_TICKS_, DT as DT_ } from './constants';
-import { chooseOption as chooseOption_, listOptions as listOptions_, planBeaten as planBeaten_, readSituationInto as readSituationInto_, type Option, type Situation } from './options';
+import { carryOffside as carryOffside_, chooseOption as chooseOption_, listOptions as listOptions_, planBeaten as planBeaten_, readSituationInto as readSituationInto_, type Option, type Situation } from './options';
 import { RINK } from './rink';
 import { TUNING as TUNING_ } from './tuning';
 import { steeredByContest as steeredByContest_ } from './team-play';
@@ -19,6 +19,7 @@ const executeShot = executeShot_;
 const BRAIN_INTERVAL_TICKS = BRAIN_INTERVAL_TICKS_;
 const DT = DT_;
 const chooseOption = chooseOption_;
+const carryOffside = carryOffside_;
 const listOptions = listOptions_;
 const readSituationInto = readSituationInto_;
 const planBeaten = planBeaten_;
@@ -105,6 +106,8 @@ function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Ma
   const pressure = pressureArrives(state, s, plan);
   const sit = readSituationInto(state, s, decideScratch);
   if (plan.read === undefined || (readKey(sit) !== plan.read && state.tick - plan.tick >= READ_GAP_TICKS)) return 'read';
+  // His plan has become impossible: carrying on would put his team offside.
+  if ((plan.kind === 'carry' && plan.to !== null && carryOffside(state, s, defs, plan.to)) || (plan.kind === 'protect' && carryOffside(state, s, defs, s.target))) return 'read';
   if (plan.until === undefined) return 'hold';
   if (pressure) return 'pressure';
   if (plan.kind === 'carry' && plan.to !== null && hypot2(plan.to.x - s.pos.x, plan.to.y - s.pos.y) <= D.arrive) return 'arrive';
@@ -216,6 +219,9 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
         s.target.x = s.pos.x + ((s.pos.x - near.pos.x) / nearD) * T.protectStep;
         s.target.y = s.pos.y + ((s.pos.y - near.pos.y) / nearD) * T.protectStep;
       } else { s.target.x = s.pos.x; s.target.y = s.pos.y; }
+      // Shielding it he never backs over the blue line with a teammate still in the zone (Task 8b: 20 of 47 offsides in
+      // four games were a protecting carrier backing in).
+      if (carryOffside(state, s, defs, s.target)) s.target.x = (RINK.blueLineX - T.holdUpGap) * state.attackDir[s.side];
       s.faceTarget = null;
       s.speedCap = T.protectSpeedCap;
       return;
