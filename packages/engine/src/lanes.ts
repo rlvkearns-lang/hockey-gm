@@ -38,6 +38,47 @@ export function laneWidth(state: GameState, side: Side, from: Vec2, to: Vec2): n
   return best;
 }
 
+/** A goalie's body (m): a pass line this close to his centre goes through him. */
+const GOALIE_BODY = TUNING.goalieBody.radius;
+
+/**
+ * Whether the segment from `a` to `b` crosses, at either end of the rink, the box from `xFrom` to `xTo` (in x * end) and
+ * within `halfY` of the middle (Liang-Barsky clipping).
+ */
+export function crossesEndBox(a: Vec2, b: Vec2, xFrom: number, xTo: number, halfY: number): boolean {
+  for (let end = -1; end <= 1; end += 2) {
+    const x0 = a.x * end, dx = b.x * end - x0, dy = b.y - a.y;
+    let t0 = 0, t1 = 1, ok = true;
+    for (let k = 0; k < 4 && ok; k++) {
+      const p = k === 0 ? -dx : k === 1 ? dx : k === 2 ? -dy : dy;
+      const q = k === 0 ? x0 - xFrom : k === 1 ? xTo - x0 : k === 2 ? a.y + halfY : halfY - a.y;
+      if (p === 0) { if (q < 0) ok = false; continue; }
+      const r = q / p;
+      if (p < 0) { if (r > t1) ok = false; else if (r > t0) t0 = r; } else if (r < t0) ok = false; else if (r < t1) t1 = r;
+    }
+    if (ok && t0 <= t1) return true;
+  }
+  return false;
+}
+
+/** Whether the segment from `a` to `b` crosses either net frame (goal line to the back of the net, post to post). */
+export function crossesNet(a: Vec2, b: Vec2): boolean {
+  return crossesEndBox(a, b, RINK.goalLineX, RINK.goalLineX + RINK.netDepth, RINK.netHalfWidth);
+}
+
+/**
+ * laneWidth for a pass: the goalies count as bodies too (his distance to the lane less TUNING.goalieBody.radius), and a
+ * lane through a net frame has no width (0).
+ */
+export function passLaneWidth(state: GameState, side: Side, from: Vec2, to: Vec2): number {
+  if (crossesNet(from, to)) return 0;
+  let w = laneWidth(state, side, from, to);
+  const g = state.goalies[side === 'home' ? 'away' : 'home'].pos;
+  const gd = segD(g.x, g.y, from.x, from.y, to.x, to.y) - GOALIE_BODY;
+  if (gd < w) w = gd < 0 ? 0 : gd;
+  return w;
+}
+
 /** Distance (m) from `p` to the nearest on-ice, standing opponent of `side`; Infinity if none. */
 export function spaceAt(state: GameState, side: Side, p: Vec2): number {
   let best = Infinity;
@@ -49,9 +90,12 @@ export function spaceAt(state: GameState, side: Side, p: Vec2): number {
   return best;
 }
 
-/** A lane is open at TUNING.lanes.open (1.0 m) or more, with no opponent within TUNING.lanes.space (1.5 m) of `to`. */
+/**
+ * A lane is open at TUNING.lanes.open (1.0 m) or more (passLaneWidth: the goalie counts, a net frame closes it), with no
+ * opponent within TUNING.lanes.space (1.5 m) of `to`.
+ */
 export function laneOpen(state: GameState, side: Side, from: Vec2, to: Vec2): boolean {
-  return laneWidth(state, side, from, to) >= L.open && spaceAt(state, side, to) >= L.space;
+  return passLaneWidth(state, side, from, to) >= L.open && spaceAt(state, side, to) >= L.space;
 }
 
 /** No standing opponent ahead of `s` within TUNING.lanes.clearPath (2.5 m) of his line to the centre of the net he attacks. */

@@ -99,7 +99,7 @@ const NET_FRONT_MAN = 2;
 const NET_FRONT_INSIDE = 1.6;
 /** A goalie's body radius (TUNING.goalieBody.radius). */
 const GOALIE_RADIUS = 0.55;
-/** A race win moves the puck at most the pickup reach plus the carry reach, with this slack (m). */
+/** A race win moves the puck at most the pickup reach plus the carry reach, with this slack (m), beyond the puck's own travel that tick. */
 const RACE_JUMP_MAX = 0.9 + 0.6 + 0.2;
 const BEHIND_Y = 4;
 /** A carrier in the zone he attacks is pressed with a standing defender within this far (m) of him. */
@@ -233,7 +233,7 @@ export function createObserver(setup: GameSetup): Observer {
           break;
         case 'contestEnd': {
           if (e.detail.kind === 'looseRace' && e.detail.result === 'won' && prevPuck !== null
-            && Math.hypot(st.puck.pos.x - prevPuck.x, st.puck.pos.y - prevPuck.y) > RACE_JUMP_MAX) c.raceJumpTicks++;
+            && Math.hypot(st.puck.pos.x - prevPuck.x, st.puck.pos.y - prevPuck.y) - prevPuck.speed * DT > RACE_JUMP_MAX) c.raceJumpTicks++;
           if (e.detail.kind !== 'boardBattle') break;
           if (NO_WINNER.has(e.detail.result)) c.battlesNoWinner++;
           if (e.detail.puck === 'toWinner') {

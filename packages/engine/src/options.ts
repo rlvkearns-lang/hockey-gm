@@ -21,8 +21,8 @@ import { goalieShade as goalieShade_, pressureOn as pressureOn_ } from './action
 import { composite as composite_ } from './attributes';
 import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { planOf as planOf_ } from './commit';
-import { clearPathToNet as clearPathToNet_, laneWidth as laneWidth_, spaceAt as spaceAt_ } from './lanes';
-import { RINK as RINK_ } from './rink';
+import { clearPathToNet as clearPathToNet_, laneWidth as laneWidth_, passLaneWidth as passLaneWidth_, spaceAt as spaceAt_ } from './lanes';
+import { distToBoards as distToBoards_, RINK as RINK_ } from './rink';
 import { bodyRadius as bodyRadius_ } from './skating';
 import { isTiedUp as isTiedUp_, scoreMargin as scoreMargin_, steeredByContest as steeredByContest_ } from './team-play';
 import { TUNING } from './tuning';
@@ -41,8 +41,10 @@ const PERIODS = PERIODS_;
 const planOf = planOf_;
 const clearPathToNet = clearPathToNet_;
 const laneWidth = laneWidth_;
+const passLaneWidth = passLaneWidth_;
 const spaceAt = spaceAt_;
 const RINK = RINK_;
+const distToBoards = distToBoards_;
 const bodyRadius = bodyRadius_;
 const isTiedUp = isTiedUp_;
 const scoreMargin = scoreMargin_;
@@ -99,6 +101,8 @@ const LOW_PASS_MIN_RX = 15;
 const OUT_FRONT_MIN_RX = 15;
 /** A pass in his first PASS_SETTLE (s) with the puck has less chance of working (SETTLE_MIN of it at once). */
 const PASS_SETTLE = 1;
+/** A rim is offered only within this far (m) of the boards, or from behind the goal line. */
+const RIM_BOARDS = 3;
 /** A rim to nobody gets this share of its race chance. */
 const BLIND_RIM = 0.6;
 const SETTLE_MIN = 0.9;
@@ -334,7 +338,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // Behind his back: seen only with good vision.
     if ((dx * fc + dy * fs) / (l || 1) < BEHIND_COS && a.vision < BEHIND_VISION) continue;
     let chance = clamp(0.97 - 0.006 * Math.max(0, l - 12) - pressure * (0.3 - 0.002 * passSkill), 0.03, 0.97) * settled;
-    const w = laneWidth(state, side, p, m.pos);
+    // The goalie and the net frames are in the way of a pass as much as a skater is.
+    const w = passLaneWidth(state, side, p, m.pos);
     if (w < 0.5) chance *= 0.2; else if (w < L.open) chance *= V.shadowed;
     const space = spaceAt(state, side, m.pos);
     if (space < L.space) chance *= 0.5 + space / 3;
@@ -427,7 +432,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   }
 
   // ---- rim (the cycle) ----
-  if (mode === 'low' || mode === 'behind') {
+  // Only along the boards (within RIM_BOARDS m of them) or from behind the goal line: from the slot a rim goes at the net.
+  if ((mode === 'low' || mode === 'behind') && (distToBoards(p) <= RIM_BOARDS || rx > GOAL)) {
     let to: SkaterState | null = null;
     for (let k = 0; k < state.skaters.length; k++) {
       const m = state.skaters[k]!;

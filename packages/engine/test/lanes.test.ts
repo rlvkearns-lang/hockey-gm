@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clearPathToNet, dangerMan, laneOpen, laneWidth } from '../src/lanes';
+import { clearPathToNet, crossesNet, dangerMan, laneOpen, laneWidth, passLaneWidth } from '../src/lanes';
 import { place, skater, stateWith } from './helpers';
 
 describe('passing lanes', () => {
@@ -37,5 +37,17 @@ describe('passing lanes', () => {
     expect(dangerMan(st, skater(st, 'home', 'RW'))!.id).toBe('home-C');
     for (const s of st.skaters) if (s.side === 'home' && s.slot !== 'RW') place(st, `home:${s.slot}` as never, 0, 0);
     expect(dangerMan(st, skater(st, 'home', 'RW'))).toBeNull();
+  });
+  it('a pass lane sees the goalie and the net: through a net frame it has no width, past the goalie it is narrow (Task 5 review)', () => {
+    const st = stateWith({ carrier: 'home', puckX: 22, puckY: -3 });
+    for (const s of st.skaters) if (s.side === 'away') place(st, `away:${s.slot}` as never, -25, s.pos.y > 0 ? 11 : -11);
+    st.goalies.away.pos = { x: 26.5, y: 0 };
+    expect(crossesNet({ x: 26, y: -3 }, { x: 29, y: 2 })).toBe(true); expect(crossesNet({ x: 26, y: -3 }, { x: 26, y: 3 })).toBe(false);
+    expect(crossesNet({ x: -26, y: -3 }, { x: -29, y: 2 })).toBe(true);
+    expect(passLaneWidth(st, 'home', { x: 26, y: -3 }, { x: 29, y: 2 })).toBe(0);                // behind the net, through the frame
+    expect(passLaneWidth(st, 'home', { x: 25.5, y: -3 }, { x: 25.5, y: 3 })).toBeLessThan(0.5);   // across the top of the crease, a metre from the goalie
+    expect(laneWidth(st, 'home', { x: 25.5, y: -3 }, { x: 25.5, y: 3 })).toBeGreaterThan(5);      // skaters alone: wide open
+    expect(laneOpen(st, 'home', { x: 25.5, y: -3 }, { x: 25.5, y: 3 })).toBe(false);
+    expect(passLaneWidth(st, 'home', { x: 15, y: -3 }, { x: 15, y: 5 })).toBeGreaterThan(5);     // up at the dots: the goalie is far off it
   });
 });

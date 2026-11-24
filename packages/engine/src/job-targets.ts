@@ -8,7 +8,7 @@
  */
 import { composite as composite_ } from './attributes';
 import { DT } from './constants';
-import { dangerMan as dangerMan_, laneOpen as laneOpen_, laneWidth as laneWidth_, spaceAt as spaceAt_ } from './lanes';
+import { dangerMan as dangerMan_, laneOpen as laneOpen_, passLaneWidth as passLaneWidth_, spaceAt as spaceAt_ } from './lanes';
 import { clipToNets as clipToNets_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_ } from './rink';
 import { TUNING } from './tuning';
 import type { GameState, Job, PlayerDef, Side, SkaterState, Tactics } from './types';
@@ -31,7 +31,7 @@ const resolveNets = resolveNets_;
 // Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
 const dangerMan = dangerMan_;
 const laneOpen = laneOpen_;
-const laneWidth = laneWidth_;
+const passLaneWidth = passLaneWidth_;
 const spaceAt = spaceAt_;
 
 // Local copies of vec.ts helpers (hot loops: a call across modules costs more under the test runner's module wrapper).
@@ -428,7 +428,7 @@ function legalSpot(state: GameState, side: Side, p: Vec2): void {
 
 /** How good a spot is for a pass from `from`: the lane's width (worth nothing past LANE_CAP), then the room round it. */
 function spotScore(state: GameState, side: Side, from: Vec2, p: Vec2): number {
-  const w = Math.min(LANE_CAP, laneWidth(state, side, from, p));
+  const w = Math.min(LANE_CAP, passLaneWidth(state, side, from, p));
   const sp = spaceAt(state, side, p);
   return w + (sp >= LN.space ? LN.space : sp - LN.space * 2) * 0.5;
 }

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { chooseOption, listOptions, readSituation, threat, type Option } from '../src/options';
 import { decideCarrier, type Decision } from '../src/brain';
 import { contestTick } from '../src/contests/core';
+import { executeRim } from '../src/actions';
+import { crossesEndBox } from '../src/lanes';
 import { DT } from '../src/constants';
 import { createRng } from '../src/rng';
 import type { GameState, PlayerDef, SkaterState } from '../src/types';
@@ -105,6 +107,25 @@ describe('the carrier values his options', () => {
     let kept = 0;
     for (let seed = 1; seed <= 2000; seed++) if (chooseOption(close, me, sit, { id: 'home-RW', kind: 'protect', lane: null, toId: null, to: null, tick: 0 }, createRng(seed)).kind === 'protect') kept++;
     expect(kept / 2000).toBeGreaterThan(0.55);
+  });
+});
+
+describe('rims (Task 5 review)', () => {
+  it('a rim is offered along the boards or from behind the goal line, never from the slot', () => {
+    const rims = (x: number, y: number): number => {
+      const st = stateWith({ carrier: 'home', puckX: x, puckY: y, carrierSlot: 'LW' }); place(st, 'away:LD', x + 0.4, y - 0.8);
+      expect(readSituation(st, skater(st, 'home', 'LW')).pressuredLow).toBe(true);
+      const opts: Option[] = []; listOptions(st, { ...def({}), id: 'home-LW', position: 'LW' }, defs, tactics.home, opts);
+      return opts.filter((o) => o.kind === 'rim').length;
+    };
+    expect(rims(24, 2)).toBe(0); expect(rims(23, -4)).toBe(0); expect(rims(24, 10.5)).toBe(1);
+  });
+  it('a rim is never aimed through the crease: from beside the net it goes round the other way', () => {
+    const st = stateWith({ carrier: 'home', puckX: 25, puckY: 2.6, carrierSlot: 'LW' });
+    place(st, 'home:C', 20, -9);
+    executeRim(st, 'home-LW', 'home-C', defs, createRng(1));
+    const p = st.puck.pos, v = st.puck.vel, l = Math.hypot(v.x, v.y);
+    expect(crossesEndBox(p, { x: p.x + (v.x / l) * 6, y: p.y + (v.y / l) * 6 }, 27.13 - 1.83, 28.13, 1.83)).toBe(false);
   });
 });
 
