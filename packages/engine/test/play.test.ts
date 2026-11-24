@@ -69,4 +69,6 @@ describe('A2: every player has a job (Task 4)', () => {
   // Task 10 (engagements, box-outs) tightens this to over 85%.
   it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 50% of the time he has one (Task 10 tightens this to 85%)', () => { const c = counters(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.5); }, 60_000);
   it('A2: the side with the puck skates forward: under 3% of its time backward', () => { expect(m().backwardShareWithPuck).toBeLessThan(0.03); }, 60_000);
+  // Task 4 review, Important 1 (0.564 before the fix). Task 5 (the carrier's decisions) tightens this to 0.75.
+  it('A2: someone has the carrier: a defender within 3 m of a carrier in the zone he attacks on over 62% of its ticks', () => { expect(m().carrierPressedShare).toBeGreaterThan(0.62); }, 60_000);
 });

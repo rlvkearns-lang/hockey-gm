@@ -9,7 +9,7 @@ import { carrierOf as carrierOf_ } from './util';
 import type { Drive } from './skating';
 import { commitTo as commitTo_, effortToReach as effortToReach_, holding as holding_, holdJob as holdJob_, rawPhase as rawPhase_, setFace as setFace_, shapePhase, speedFor as speedFor_, triggerFor as triggerFor_, updateTeamPhase as updateTeamPhase_, type ShapePhase, type Want } from './commit';
 import { assignTeamJobs as assignTeamJobs_, boardBattle as boardBattle_, supportTarget as supportTarget_ } from './jobs';
-import { beginMarks as beginMarks_, endMarks as endMarks_, isCoverJob as isCoverJob_, jobWant as jobWant_ } from './job-targets';
+import { beginMarks as beginMarks_, endMarks as endMarks_, isCoverJob as isCoverJob_, jobWant as jobWant_, setPassJobs as setPassJobs_ } from './job-targets';
 
 export { supportTarget } from './jobs';
 // Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
@@ -19,6 +19,7 @@ const beginMarks = beginMarks_;
 const endMarks = endMarks_;
 const isCoverJob = isCoverJob_;
 const jobWant = jobWant_;
+const setPassJobs = setPassJobs_;
 // Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
 const assignTeamJobs = assignTeamJobs_;
 const boardBattle = boardBattle_;
@@ -186,6 +187,8 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
 function assignAll(state: GameState, defs: Map<string, PlayerDef>, tactics: Record<Side, Tactics>, carrier: SkaterState | null): void {
   const homeJobs = assignTeamJobs(state, 'home', defs, tactics.home);
   const awayJobs = assignTeamJobs(state, 'away', defs, tactics.away);
+  setPassJobs('home', homeJobs);
+  setPassJobs('away', awayJobs);
   const battle = carrier ? null : boardBattle(state);
   // A defenceman reads play as it is now: with the other side on the puck he faces it (Task 3's rule, kept).
   const homeRaw = rawPhase(state, 'home', carrier), awayRaw = rawPhase(state, 'away', carrier);
@@ -246,8 +249,9 @@ function assignAll(state: GameState, defs: Map<string, PlayerDef>, tactics: Reco
         const dx = s.target.x - s.pos.x, dy = s.target.y - s.pos.y;
         const d = Math.sqrt(dx * dx + dy * dy);
         const e = effortToReach(d);
-        // A man to cover is not covered from far off: he closes on him flat out.
-        plan.effort = isCoverJob(plan.job) && d > COVER_SPRINT_FROM ? 'sprint' : e === 'glide' ? 'skate' : e;
+        // A man to cover is not covered from far off: he closes on him flat out. The man on the carrier stays with
+        // him flat out.
+        plan.effort = (isCoverJob(plan.job) && d > COVER_SPRINT_FROM) || (carrier !== null && plan.markId === carrier.id) ? 'sprint' : e === 'glide' ? 'skate' : e;
       }
       if (held === 'atLine' && plan.effort === 'sprint') plan.effort = 'skate';
       if (held === 'beyond') plan.effort = 'sprint';

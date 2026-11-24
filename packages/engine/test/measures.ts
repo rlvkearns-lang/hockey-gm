@@ -31,7 +31,8 @@ export type PlayCounterKey =
   | 'behindNetPossessions' | 'passesOutFront' | 'wrapAttempts'
   | 'contactOver03' | 'puckJumpTicks'
   | 'goalieOverlapTicks' | 'raceJumpTicks'
-  | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside';
+  | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside'
+  | 'ozoneCarrierTicks' | 'ozoneCarrierPressed';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -45,6 +46,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'contactOver03', 'puckJumpTicks',
   'goalieOverlapTicks', 'raceJumpTicks',
   'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderInside',
+  'ozoneCarrierTicks', 'ozoneCarrierPressed',
 ];
 
 export type PlayMeasures = {
@@ -55,6 +57,8 @@ export type PlayMeasures = {
   ozoneSecondsPerPossession: number; attemptsPerOzonePossession: number; twoOpenShare: number; dangerShadowedShare: number;
   behindNetPossessionsPerGame: number; passesOutFrontPerGame: number; wrapAttemptsPerGame: number;
   contactsOver03PerGame: number; puckJumpsPerGame: number; maxPuckJump: number;
+  /** Live ticks a carrier has the puck in the zone he attacks: share with a standing defender within 3 m of him. */
+  carrierPressedShare: number;
 };
 
 export type Observer = { tick(state: GameState, events: readonly GameEvent[]): void; counters(): PlayCounters; maxPuckJump(): number };
@@ -95,6 +99,8 @@ const GOALIE_RADIUS = 0.55;
 /** A race win moves the puck at most the pickup reach plus the carry reach, with this slack (m). */
 const RACE_JUMP_MAX = 0.9 + 0.6 + 0.2;
 const BEHIND_Y = 4;
+/** A carrier in the zone he attacks is pressed with a standing defender within this far (m) of him. */
+const CARRIER_PRESSED = 3;
 const BEHIND_TICKS = ticksOf(0.5);
 const OUT_FRONT = { rxMin: 15.13, rxMax: 26.13, y: 6 };
 const WRAP_TICKS = ticksOf(1.5);
@@ -335,6 +341,12 @@ export function createObserver(setup: GameSetup): Observer {
     else if (ozone === null || ozone.side !== S) { ozone = { side: S, k: 0 }; c.ozonePossessions++; }
     else ozone.k++;
     const cs = skaterById(st, st.carrierId);
+    if (live && cs !== undefined && rxOf(st, cs.side, cs.pos.x) > RINK.blueLineX) {
+      c.ozoneCarrierTicks++;
+      for (const o of st.skaters) {
+        if (o.onIce && o.side !== cs.side && o.downT === 0 && Math.hypot(o.pos.x - cs.pos.x, o.pos.y - cs.pos.y) <= CARRIER_PRESSED) { c.ozoneCarrierPressed++; break; }
+      }
+    }
     if (ozone !== null) {
       c.ozoneTicks++;
       if (ozone.k % OZONE_SAMPLE_EVERY === 0 && cs !== undefined && cs.side === ozone.side) ozoneSample(st, ozone.side, cs);
@@ -431,6 +443,7 @@ export function measuresOf(games: { counters: PlayCounters; maxPuckJump: number 
     contactsOver03PerGame: perGame(c.contactOver03),
     puckJumpsPerGame: perGame(c.puckJumpTicks),
     maxPuckJump: games.reduce((a, g) => Math.max(a, g.maxPuckJump), 0),
+    carrierPressedShare: ratio(c.ozoneCarrierPressed, c.ozoneCarrierTicks),
   };
 }
 

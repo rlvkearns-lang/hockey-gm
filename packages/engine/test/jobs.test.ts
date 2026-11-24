@@ -90,4 +90,18 @@ describe('every player has a job', () => {
     st.puck.pos.y = -2; let ticks = 0; while (gl.pos.y > -0.6 && ticks < 90) { goalieTick(st, goalieDefs, DT); ticks++; }
     expect(ticks).toBeGreaterThan(6); expect(ticks).toBeLessThan(45);                                     // 0.2 to 1.5 s: he has to move
   });
+
+  it.each([
+    ['a forward high in the zone', 'C', 14, 9],
+    ['a point man', 'LD', 9.5, 8],
+    ['a forward low on the wall', 'LW', 24.5, 9],
+    ['a forward in the slot', 'RW', 18, -1],
+  ] as const)('in his own zone exactly one defender has the carrier (%s): his target within 3 m and goal-side of him', (_, slot, x, y) => {
+    const st = stateWith({ carrier: 'home', puckX: x, puckY: y, carrierSlot: slot }); setTeamPhase(st); assignJobs(st, defs, tactics);
+    const c = skater(st, 'home', slot);
+    const on = st.skaters.filter((s, i) => s.side === 'away' && st.plans[i]!.follow === 'man' && st.plans[i]!.markId === c.id && Math.hypot(s.target.x - c.pos.x, s.target.y - c.pos.y) <= 3);
+    expect(on.length).toBe(1);
+    const t = on[0]!.target;
+    expect(Math.hypot(t.x - 27.13, t.y)).toBeLessThan(Math.hypot(c.pos.x - 27.13, c.pos.y));
+  });
 });

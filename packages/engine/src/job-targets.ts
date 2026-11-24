@@ -56,6 +56,14 @@ const JB = TUNING.jobs;
 const ONSIDE_MARGIN = 1;
 /** The nearest defender plays this far (m) goal-side of the carrier he pressures. */
 const PRESS_GAP = 1.2;
+/** Containing a carrier above the faceoff dots of his own zone: this far (m) goal-side of him. */
+const CONTAIN_GAP = 2.5;
+/** In his own zone, a carrier below this rx (defender's frame: deeper than the dots) is pressured, above it contained. */
+const CONTAIN_ABOVE = -19;
+/** A containing defender leans this much (PRESS_LANE's scale) toward the carrier's lane to his most dangerous teammate: goal-side first. */
+const CONTAIN_LANE = 0.5;
+/** A containing defender leads the carrier by this long (s). */
+const CONTAIN_LEAD = 0.3;
 /** Drivers go to the net once the puck is this far (m) inside the blue line; the trailer follows it in from TRAIL_IN. */
 const DRIVE_IN = 3;
 /** Until then they wait this far (m) outside the line. */
@@ -113,6 +121,10 @@ const LANE_TAKE_TO = 0.85;
  * The defending jobs whose man may take the danger lane (laneTaker): all but those that go at the puck or its carrier
  * (f1, dCorner) and the net-front defender, who keeps inside position.
  */
+/** Own-zone jobs whose man may be the one who has the carrier (carrierTaker): all but dNet. */
+const CARRIER_TAKERS: ReadonlySet<Job> = new Set<Job>(['dCorner', 'dzCentre', 'wingStrong', 'wingWeak']);
+/** The man who has the carrier keeps him unless another is this much (m) nearer. */
+const TAKE_KEEP = 2;
 const LANE_TAKERS: ReadonlySet<Job> = new Set<Job>(['f2', 'f3', 'dLineStrong', 'dLineWeak', 'backcheckA', 'backcheckB', 'dGapStrong', 'dGapWeak', 'dzCentre', 'wingStrong', 'wingWeak']);
 /** Jobs that cover a man. */
 const COVER_JOBS: ReadonlySet<Job> = new Set<Job>(['backcheckA', 'backcheckB', 'wingStrong', 'wingWeak', 'dzCentre']);
@@ -147,9 +159,9 @@ const standing = (s: SkaterState): boolean => s.onIce && s.downT === 0;
  * While team play hands out jobs (between beginMarks and endMarks) each side's marks are worked out once: a derived
  * cache, rebuilt on every assignJobs call and never read outside it.
  */
-type Marks = { lt: SkaterState | null; ltOk: boolean; dm: SkaterState | null; dmOk: boolean; ok: boolean; nf: SkaterState | null; nfOk: boolean; pm: (SkaterState | null)[]; pmOk: boolean; low: SkaterState | null; lowOk: boolean;
+type Marks = { ct: SkaterState | null; ctOk: boolean; lt: SkaterState | null; ltOk: boolean; dm: SkaterState | null; dmOk: boolean; ok: boolean; nf: SkaterState | null; nfOk: boolean; pm: (SkaterState | null)[]; pmOk: boolean; low: SkaterState | null; lowOk: boolean;
   ww: SkaterState | null; wwOk: boolean; back: (SkaterState | null)[]; backOk: boolean };
-const blankMarks = (): Marks => ({ lt: null, ltOk: false, dm: null, dmOk: false, ok: false, nf: null, nfOk: false, pm: [null, null], pmOk: false, low: null, lowOk: false, ww: null, wwOk: false, back: [null, null], backOk: false });
+const blankMarks = (): Marks => ({ ct: null, ctOk: false, lt: null, ltOk: false, dm: null, dmOk: false, ok: false, nf: null, nfOk: false, pm: [null, null], pmOk: false, low: null, lowOk: false, ww: null, wwOk: false, back: [null, null], backOk: false });
 const marks: Record<Side, Marks> = { home: blankMarks(), away: blankMarks() };
 let caching = false;
 let passCarrier: SkaterState | null = null;
@@ -160,11 +172,24 @@ const curCarrier = (state: GameState): SkaterState | null => (caching ? passCarr
 export function beginMarks(carrier: SkaterState | null): void {
   caching = true;
   passCarrier = carrier;
-  for (const m of [marks.home, marks.away]) { m.nfOk = m.pmOk = m.lowOk = m.wwOk = m.backOk = m.dmOk = m.ltOk = false; }
+  for (const m of [marks.home, marks.away]) { m.nfOk = m.pmOk = m.lowOk = m.wwOk = m.backOk = m.dmOk = m.ltOk = m.ctOk = false; }
 }
 export function endMarks(): void {
   caching = false;
+  passJobs.home = passJobs.away = null;
 }
+
+/** The jobs team play is handing out in this pass, per side and skater index (null outside a pass: plans are read). */
+const passJobs: Record<Side, readonly (Job | null)[] | null> = { home: null, away: null };
+/** Tells the pass which jobs `side`'s skaters are being given (jobs.ts assignTeamJobs' result). */
+export function setPassJobs(side: Side, jobs: readonly (Job | null)[]): void {
+  passJobs[side] = jobs;
+}
+/** Skater k's job in this pass (or his plan's job outside one). */
+const jobNow = (state: GameState, side: Side, k: number): Job | null => {
+  const pj = caching ? passJobs[side] : null;
+  return pj !== null ? pj[k] ?? null : state.plans[k]!.job;
+};
 
 /** The opponent of `side` nearest the front of `side`'s own net, within NET_FRONT_RANGE of it and in front of the goal line; null if none. */
 export function netFrontMark(state: GameState, side: Side): SkaterState | null {
@@ -525,7 +550,7 @@ export function shadowSpot(state: GameState, s: SkaterState, out: Vec2, from: Ve
 }
 
 /** Goal-side pressure: PRESS_GAP m from `man` toward the net `s` defends. Writes the spot into `out`. */
-function pressSpot(state: GameState, s: SkaterState, man: SkaterState, gap: number, out: Vec2): Vec2 {
+function pressSpot(state: GameState, s: SkaterState, man: SkaterState, gap: number, out: Vec2, lean = PRESS_LANE): Vec2 {
   const netX = -state.attackDir[s.side] * GOAL;
   let dx = netX - man.pos.x, dy = -man.pos.y;
   let l = hyp(dx, dy) || 1;
@@ -538,7 +563,7 @@ function pressSpot(state: GameState, s: SkaterState, man: SkaterState, gap: numb
     else { m = dangerMan(state, man); if (caching) { mk.dm = m; mk.dmOk = true; } }
     if (m !== null) {
       const ex = m.pos.x - man.pos.x, ey = m.pos.y - man.pos.y, el = hyp(ex, ey) || 1;
-      dx += (ex / el) * PRESS_LANE; dy += (ey / el) * PRESS_LANE;
+      dx += (ex / el) * lean; dy += (ey / el) * lean;
       l = hyp(dx, dy) || 1;
       dx /= l; dy /= l;
     }
@@ -638,12 +663,79 @@ function laneTaker(state: GameState, side: Side): SkaterState | null {
     for (let k = 0; k < state.skaters.length; k++) {
       const t = state.skaters[k]!;
       if (!standing(t) || t.side !== side || t.leaving || t.contestId !== null || !LANE_TAKERS.has(state.plans[k]!.job)) continue;
+      // The man who has the carrier stays on him.
+      if (t === carrierTaker(state, side)) continue;
       const d = segD(t.pos.x, t.pos.y, c.pos.x, c.pos.y, m.pos.x, m.pos.y);
       if (d < bestD) { bestD = d; best = t; }
     }
   }
   if (caching) { mk.lt = best; mk.ltOk = true; }
   return best;
+}
+
+/**
+ * The man of `side` who has the opposing carrier in its own zone: of its defenders in a CARRIER_TAKERS job (every
+ * own-zone job but dNet, who keeps the net front), the one nearest the carrier; the man who has him now keeps him
+ * unless another is TAKE_KEEP (m) nearer. Exactly one, so someone always has the carrier. Null with no opposing
+ * carrier or nobody in such a job. Cached per pass.
+ */
+export function carrierTaker(state: GameState, side: Side): SkaterState | null {
+  const mk = marks[side];
+  if (caching && mk.ctOk) return mk.ct;
+  let best: SkaterState | null = null;
+  const c = curCarrier(state);
+  if (c !== null && c.side !== side) {
+    let bestD = Infinity, cur: SkaterState | null = null, curD = Infinity;
+    for (let k = 0; k < state.skaters.length; k++) {
+      const t = state.skaters[k]!;
+      const tp = state.plans[k]!;
+      const j = jobNow(state, side, k);
+      if (!standing(t) || t.side !== side || t.leaving || t.contestId !== null || j === null || !CARRIER_TAKERS.has(j)) continue;
+      const d = hyp(t.pos.x - c.pos.x, t.pos.y - c.pos.y);
+      if (d < bestD) { bestD = d; best = t; }
+      if (tp.follow === 'man' && tp.markId === c.id && d < curD) { curD = d; cur = t; }
+    }
+    if (cur !== null && curD <= bestD + TAKE_KEEP) best = cur;
+  }
+  if (caching) { mk.ct = best; mk.ctOk = true; }
+  return best;
+}
+
+/**
+ * Has the carrier (`s` is carrierTaker): below the dots he pressures him (PRESS_GAP goal-side, skating through him),
+ * above them he contains him (CONTAIN_GAP goal-side). Behind the net he waits at the near post until he is within
+ * BEHIND_CHASE_RANGE of the carrier or has waited BEHIND_CHASE_SECONDS. Returns false when `s` is not the taker.
+ */
+function takeCarrier(state: GameState, s: SkaterState, out: Want): boolean {
+  if (carrierTaker(state, s.side) !== s) return false;
+  const c = curCarrier(state)!;
+  const dir = state.attackDir[s.side];
+  const crx = c.pos.x * dir;
+  const p = out.pos;
+  out.face = null;
+  out.slow = 'coast';
+  if (crx < -BEHIND_RX) {
+    const plan = state.plans[indexOf(state, s.id)]!;
+    // He has waited once his post spot (a held spot, no man) is BEHIND_TICKS old.
+    const waited = plan.follow === 'spot' && plan.markId === null && state.tick - plan.targetTick > BEHIND_TICKS;
+    if (distV(s.pos, c.pos) > BEHIND_CHASE_RANGE && !waited) {
+      setRel(p, -26.6, (c.pos.y * dir >= 0 ? 1 : -1) * 1.3, dir);
+      out.follow = 'spot';
+      out.markId = null;
+      out.through = false;
+      out.effort = 'sprint';
+      return true;
+    }
+  }
+  const deep = crx < CONTAIN_ABOVE;
+  pressSpot(state, s, c, deep ? PRESS_GAP : CONTAIN_GAP, p, deep ? PRESS_LANE : CONTAIN_LANE);
+  // Containing, he plays where the carrier is going (CONTAIN_LEAD s ahead), not where he was.
+  if (!deep) { p.x += c.vel.x * CONTAIN_LEAD; p.y += c.vel.y * CONTAIN_LEAD; }
+  out.follow = 'man';
+  out.markId = c.id;
+  out.through = deep;
+  out.effort = 'sprint';
+  return true;
 }
 
 /** Takes the lane: the point of the carrier's lane to his danger man nearest `s`, kept between LANE_TAKE_FROM and LANE_TAKE_TO of the way along it. */
@@ -681,6 +773,8 @@ function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: 
  */
 export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<string, PlayerDef>, tactics: Tactics, out: Want): Want {
   jobWantOwn(state, s, job, defs, tactics, out);
+  // In his own zone the defender nearest the carrier has him, whatever his job (someone always has the carrier).
+  if (CARRIER_TAKERS.has(job) && takeCarrier(state, s, out)) return out;
   // The defender nearest the most dangerous pass takes that lane first, whatever his job; the others play theirs.
   if (LANE_TAKERS.has(job) && takeLane(state, s, out.pos)) {
     if (out.follow === 'spot') out.follow = 'puck';
@@ -754,16 +848,12 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
       else { p.x = a.x; p.y = a.y; out.through = true; }
       return out;
     }
-    case 'f1': case 'dCorner': {
-      if (job === 'dCorner') {
-        const behind = opp !== null && opp.pos.x * dir < -BEHIND_RX;
-        if (opp === null || opp.pos.x * dir >= -19) { p.x = a.x; p.y = a.y; return out; }
-        if (behind) {
-          const plan = state.plans[indexOf(state, s.id)]!;
-          const waited = plan.job === 'dCorner' && plan.follow === 'spot' && state.tick - plan.targetTick > BEHIND_TICKS;
-          if (distV(s.pos, opp.pos) > BEHIND_CHASE_RANGE && !waited) { setRel(p, -26.6, ps * 1.3, dir); return out; }
-        }
-      }
+    case 'dCorner':
+      // The man who has the carrier is chosen by carrierTaker (jobWant); a corner defenceman who is not him holds the
+      // strong-side corner.
+      setRel(p, -23.5, ps * 5, dir);
+      return out;
+    case 'f1': {
       if (opp === null) { p.x = state.puck.pos.x; p.y = state.puck.pos.y; out.follow = 'puck'; out.effort = 'sprint'; return out; }
       pressSpot(state, s, opp, PRESS_GAP, p);
       out.follow = 'man';
@@ -800,7 +890,8 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
       const ball = opp;
       const gap = gapOf(state, defs.get(s.id), dir);
       const crx = ball ? ball.pos.x * dir : pr;
-      const rx = Math.max(-24, crx - gap);
+      // Once the carrier is inside the blue line the gap closes to a contain (CONTAIN_GAP goal-side).
+      const rx = Math.max(-24, crx - (crx < -BLUE ? Math.min(gap, CONTAIN_GAP) : gap));
       if (job === 'dGapStrong') {
         setRel(p, rx, (ball ? ball.pos.y * dir : f.pl) * 0.85, dir);
         if (ball) { out.follow = 'man'; out.markId = ball.id; } else out.follow = 'puck';
