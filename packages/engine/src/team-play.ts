@@ -9,7 +9,7 @@ import { carrierOf } from './util';
 import type { Drive } from './skating';
 import { commitTo, effortToReach, holding, holdJob, rawPhase, setFace, shapePhase, speedFor, triggerFor, updateTeamPhase, type ShapePhase, type Want } from './commit';
 import { assignTeamJobs, boardBattle, supportTarget } from './jobs';
-import { beginMarks, endMarks, jobWant } from './job-targets';
+import { beginMarks, endMarks, isCoverJob, jobWant } from './job-targets';
 
 export { supportTarget } from './jobs';
 
@@ -135,6 +135,8 @@ const near = (s: SkaterState): boolean => { const dx = s.target.x - s.pos.x, dy 
 const FACE_SPOT_JOBS: ReadonlySet<Job> = new Set<Job>(['dGapStrong', 'dGapWeak', 'dLineStrong', 'dLineWeak', 'dNet', 'pointStrong', 'pointWeak', 'netFront', 'battleSupport']);
 /** Jobs that follow the puck or a man every tick (the rest that follow one do so every other tick). */
 const TRACK_EVERY_TICK: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'f1', 'dCorner', 'dNet']);
+/** A defender covering a man sprints to him from this far (m) from his cover spot. */
+const COVER_SPRINT_FROM = 3;
 /** Jobs that skate flat out after the puck or its carrier whatever the distance. */
 const SPRINT_JOBS: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'battleSupport', 'f1', 'tagUp']);
 
@@ -217,8 +219,10 @@ function assignAll(state: GameState, defs: Map<string, PlayerDef>, tactics: Reco
       if (plan.follow !== 'spot' && !SPRINT_JOBS.has(plan.job) && plan.effort !== 'sprint') {
         // Following a man or the puck: as hard as the distance needs, never a glide behind a moving man.
         const dx = s.target.x - s.pos.x, dy = s.target.y - s.pos.y;
-        const e = effortToReach(Math.sqrt(dx * dx + dy * dy));
-        plan.effort = e === 'glide' ? 'skate' : e;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const e = effortToReach(d);
+        // A man to cover is not covered from far off: he closes on him flat out.
+        plan.effort = isCoverJob(plan.job) && d > COVER_SPRINT_FROM ? 'sprint' : e === 'glide' ? 'skate' : e;
       }
       if (held === 'atLine' && plan.effort === 'sprint') plan.effort = 'skate';
       if (held === 'beyond') plan.effort = 'sprint';

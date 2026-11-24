@@ -31,7 +31,7 @@ export type PlayCounterKey =
   | 'behindNetPossessions' | 'passesOutFront' | 'wrapAttempts'
   | 'contactOver03' | 'puckJumpTicks'
   | 'goalieOverlapTicks' | 'raceJumpTicks'
-  | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderBetween';
+  | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -44,7 +44,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'behindNetPossessions', 'passesOutFront', 'wrapAttempts',
   'contactOver03', 'puckJumpTicks',
   'goalieOverlapTicks', 'raceJumpTicks',
-  'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderBetween',
+  'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderInside',
 ];
 
 export type PlayMeasures = {
@@ -84,9 +84,12 @@ const DANGER_SCALE = 9;
 const BEHIND_RX = 27.43;
 /** Jobs any number of a team's skaters may hold at once. */
 const UTILITY = new Set(['change', 'lineUp', 'tagUp', 'contest', 'down']);
-/** A net-front defender "has" his man within this far (m); he is between him and the net within NET_FRONT_LANE of that line. */
+/**
+ * A net-front defender "has" his man within NET_FRONT_MAN (m); he has inside position when he is nearer the net centre
+ * than his man and within NET_FRONT_INSIDE (m) of him.
+ */
 const NET_FRONT_MAN = 2;
-const NET_FRONT_LANE = 0.8;
+const NET_FRONT_INSIDE = 1.6;
 /** A goalie's body radius (TUNING.goalieBody.radius). */
 const GOALIE_RADIUS = 0.55;
 /** A race win moves the puck at most the pickup reach plus the carry reach, with this slack (m). */
@@ -302,7 +305,7 @@ export function createObserver(setup: GameSetup): Observer {
     }
   }
 
-  /** Jobs: a team never has two men on the same job; the net-front defender stands between his man and the net. */
+  /** Jobs: a team never has two men on the same job; the net-front defender has inside position on his man. */
   function jobs(st: GameState): void {
     if (st.phase !== 'live') return;
     for (const side of ['home', 'away'] as const) {
@@ -319,7 +322,7 @@ export function createObserver(setup: GameSetup): Observer {
         c.netFrontDefenderTicks++;
         const nx = -st.attackDir[side] * RINK.goalLineX;
         const nearer = Math.hypot(s.pos.x - nx, s.pos.y) < Math.hypot(m.pos.x - nx, m.pos.y);
-        if (nearer && segDist(s.pos.x, s.pos.y, m.pos.x, m.pos.y, nx, 0) <= NET_FRONT_LANE) c.netFrontDefenderBetween++;
+        if (nearer && Math.hypot(m.pos.x - s.pos.x, m.pos.y - s.pos.y) <= NET_FRONT_INSIDE) c.netFrontDefenderInside++;
       });
       if (dup) c.duplicateJobTicks++;
     }

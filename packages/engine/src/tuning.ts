@@ -115,20 +115,23 @@ export const TUNING = deepFreeze({
    */
   effort: { glide: 0.55, skate: 0.8, sprint: 1, sprintFrom: 8, glideWithin: 3, sprintMinEnergy: 0.2 },
   /**
-   * Jobs (jobs.ts): a man holding a job is keep (m) nearer its anchor than anyone else when the jobs are handed out.
+   * Jobs (jobs.ts): a man holding a job is keep (m) nearer its anchor than anyone else when the jobs are handed out
+   * (keepNet for the net-front defender: the man at the net stays there rather than swapping with his partner).
    * openRadius (m): a skater getting open looks at 8 spots this far round his job's anchor (officeRadius behind the net).
    */
-  jobs: { keep: 3, openRadius: 3, officeRadius: 1.2 },
+  jobs: { keep: 3, keepNet: 6, openRadius: 3, officeRadius: 1.2 },
   /**
    * Passing lanes (lanes.ts): a lane is open with `open` (m) of clear ice round it and no opponent within `space` (m) of
    * its end; a skater has a clear path to the net with no opponent ahead within clearPath (m) of his line to it.
    */
   lanes: { open: 1.0, space: 1.5, clearPath: 2.5 },
   /**
-   * Covering a man (job-targets.ts coverSpot): `gap` (m) goal-side of him, moved laneWeight of the way toward the lane
-   * from the carrier to him; a lane is shadowed from a cover spot within shadowReach (m) of it.
+   * Covering a man (job-targets.ts coverSpot, "man, you, puck"): off him toward the carrier, shaded goal-side by
+   * goalShade, gapNear (m) off a man near the net, looser by gapPerMetre for each metre he is beyond gapFrom (m) from it,
+   * at most gapFar. A defender keeps the man he covers unless the rule's man is keepMan (m) nearer him. A lane is
+   * shadowed from a cover spot within shadowReach (m) of it. `gap` (m): the net-front defender's goal-side gap.
    */
-  cover: { gap: 1.2, laneWeight: 0.5, shadowReach: 3 },
+  cover: { gap: 1.2, goalShade: 0.35, gapNear: 1.5, gapFar: 3.5, gapFrom: 10, gapPerMetre: 0.1, keepMan: 4, shadowReach: 3 },
   /** A goalie's body (bodies.ts resolveGoalies): skaters are kept this far (m) plus their own radius from his centre. */
   goalieBody: { radius: 0.55 },
 

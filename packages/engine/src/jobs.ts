@@ -231,7 +231,9 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
       const s = sk[i]!;
       if (isDefenceman(s) !== DEFENCE.has(job)) continue;
       if (job === 'dJoin' && (defs.get(s.id)?.tendencies.joinRush ?? 0) < JOIN_RUSH_MIN) continue;
-      const cost = hyp(s.pos.x - a.x, s.pos.y - a.y) - (state.plans[i]!.job === job ? TUNING.jobs.keep : 0);
+      const held = state.plans[i]!.job;
+      // The man at the net stays there: another job costs him keepNet more.
+      const cost = hyp(s.pos.x - a.x, s.pos.y - a.y) - (held === job ? TUNING.jobs.keep : 0) + (held === 'dNet' && job !== 'dNet' ? TUNING.jobs.keepNet : 0);
       if (cost < bestCost) { bestCost = cost; best = i; }
     }
     if (best >= 0) { out[best] = job; used[k] = true; }
