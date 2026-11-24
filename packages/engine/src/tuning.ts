@@ -186,8 +186,12 @@ export const TUNING = deepFreeze({
       hand: { forehand: 1, backhand: 0.85, behind: 0.65 },
       /** A covered lane (passing.ts PassPlan.cover, 0 to 1) takes sqrt(cover) * (cover - coverPerPoint * passing) off the chance. */
       cover: 1.0, coverPerPoint: 0.005,
-      /** A contested catch (PassPlan.contest, 0 to 1) takes contest * `contest` off the chance (beyond its receive chance). */
-      contest: 0.9,
+      /**
+       * A contested catch (PassPlan.contest, 0 to 1) takes contest * `contest` off the chance (beyond its receive chance).
+       * Task 7 review: set from play (seeds 1-4 after the slow-pass fix: a fully contested pass completes 0.56 against 0.79
+       * open, a cost of 0.3); it was 0.9.
+       */
+      contest: 0.3,
     },
     carry: { base: 0.95, pressure: 0.35, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
     hold: { base: 0.97, pressure: 0.1, keep: 0.9 },

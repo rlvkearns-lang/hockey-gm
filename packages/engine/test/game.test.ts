@@ -78,7 +78,8 @@ describe('game loop', () => {
     }
     expect(violations).toEqual([]);
   }, GAME_TIMEOUT * 3);
-  it('a continuously carried puck never jumps (no passing through the net frame)', () => {
+  // Task 7 review, Minor 2: the bound is the carry step (0.4 m), a frame push included (it was 0.48 m once at a post).
+  it('a continuously carried puck never moves more than its 0.4 m step (no passing through the net frame)', () => {
     const violations: string[] = [];
     for (const seed of [1, 2, 3]) {
       const g = createGame(setup(seed)); let prev: { id: string; x: number; y: number } | null = null;
@@ -86,7 +87,7 @@ describe('game loop', () => {
         g.step(); const st = g.state;
         if (st.phase === 'live' && st.carrierId !== null) {
           const p = st.puck.pos;
-          if (prev && prev.id === st.carrierId && Math.hypot(p.x - prev.x, p.y - prev.y) > 0.5) violations.push(`seed ${seed} tick ${st.tick}: (${prev.x},${prev.y})->(${p.x},${p.y})`);
+          if (prev && prev.id === st.carrierId && Math.hypot(p.x - prev.x, p.y - prev.y) > 0.4 + 1e-9) violations.push(`seed ${seed} tick ${st.tick}: (${prev.x},${prev.y})->(${p.x},${p.y})`);
           prev = { id: st.carrierId, x: p.x, y: p.y };
         } else prev = null;
       }

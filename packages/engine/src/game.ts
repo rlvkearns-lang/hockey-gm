@@ -361,6 +361,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     // and never more than CARRY_STEP (where the blade swings past a post, it slides round it).
     const dx = t.x - p.pos.x, dy = t.y - p.pos.y, l = hypot2(dx, dy);
     const step = Math.min(CARRY_STEP, hypot2(carrier.vel.x, carrier.vel.y) * DT + CARRY_TURN);
+    const sx0 = p.pos.x, sy0 = p.pos.y;
     if (l > step) { t.x = p.pos.x + (dx / l) * step; t.y = p.pos.y + (dy / l) * step; }
     // A step that would end inside a frame goes to the frame (the furthest point of it outside) and slides along the face
     // it met for the rest of the step, so it goes round the net toward the blade and never moves further than the step.
@@ -385,6 +386,10 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     // Never inside a frame: out through its back or a side, the nearest (never into the goal mouth). It slides round a
     // frame, a step at a time, toward a blade on his side of it.
     outOfFrame(p.pos);
+    // ...but never further than the step in all (Task 7 review, Minor 2): a puck pushed out of a frame further than that
+    // comes the rest of the way next tick.
+    const ox = p.pos.x - sx0, oy = p.pos.y - sy0, ol = hypot2(ox, oy);
+    if (ol > step) { p.pos.x = sx0 + (ox / ol) * step; p.pos.y = sy0 + (oy / ol) * step; }
     noVel.x = 0;
     noVel.y = 0;
     resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);
