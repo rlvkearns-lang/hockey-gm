@@ -1,4 +1,4 @@
-import { cameraPivot, cameraTarget, easePoint, FOLLOW_TURN_SPEED, OVERHEAD_ZONES, overheadZoneX, type CameraInput, type CameraName, type CameraPose } from './cameras';
+import { BROADCAST_PLACE, broadcastBaseFov, cameraPivot, cameraTarget, easePoint, FOLLOW_TURN_SPEED, OVERHEAD_ZONES, overheadZoneX, type CameraInput, type CameraName, type CameraPose } from './cameras';
 import type { CutKind } from './cuts';
 import type { Vec3 } from './pose-mix';
 
@@ -37,11 +37,12 @@ export type Limit = { v: number; a: number; tau: number };
 /**
  * `dead`: the dead zone along and across the ice (m), for an angle that does not turn from a pivot; `turn` and `range`:
  * the dead zone for one that does (cameras.ts cameraPivot), in its turn (as a share of the picture's half width, at
- * 16:9) and as a share of the distance from it.
+ * 16:9) and as a share of the distance from it; `tilt` (broadcast, from its platform up in the stands): the dead zone
+ * in its tilt instead of the distance, as a share of the picture's half height.
  */
-export type Calm = { dead: { x: number; z: number }; turn?: number; range?: number; look: Limit; pos: Limit; fovRate: number };
+export type Calm = { dead: { x: number; z: number }; turn?: number; range?: number; tilt?: number; look: Limit; pos: Limit; fovRate: number };
 export const CALM: Record<CameraName, Calm> = {
-  broadcast: { dead: { x: 6, z: 2.5 }, turn: 0.4, range: 0.25, look: { v: 30, a: 30, tau: 0.5 }, pos: { v: 6, a: 4, tau: 0.8 }, fovRate: 8 },
+  broadcast: { dead: { x: 6, z: 2.5 }, turn: 0.2, tilt: 0.2, look: { v: 45, a: 120, tau: 0.35 }, pos: { v: 1, a: 1, tau: 1 }, fovRate: 10 },
   overhead: { dead: { x: 0, z: 0 }, look: { v: 8, a: 7, tau: 0.9 }, pos: { v: 8, a: 7, tau: 0.9 }, fovRate: 4 },
   overheadWide: { dead: { x: 0, z: 0 }, look: { v: 7, a: 4, tau: 0.9 }, pos: { v: 7, a: 4, tau: 0.9 }, fovRate: 4 },
   netHome: { dead: { x: 3, z: 1.5 }, turn: 0.35, range: 0.15, look: { v: 28, a: 20, tau: 0.4 }, pos: { v: 2, a: 2, tau: 1 }, fovRate: 8 },
@@ -55,6 +56,26 @@ export const ZONE_MARGIN = 2, ZONE_DWELL = 1;
 export const FOLLOW_TURN_RATE = 1.2;
 /** On a goal's hold the camera's limits are this many times higher (at full hold): a real event, it is on the net at once. */
 export const HOLD_QUICK = 10;
+/**
+ * However quick the hold, the look point moves at most HOLD_MAX.v m/s and accelerates at most HOLD_MAX.a m/s^2: a fast
+ * pan onto the net that arrives in about 0.6 to 0.8 s, not a whip.
+ */
+export const HOLD_MAX = { v: 30, a: 70 };
+/** The broadcast camera's distance zoom changes only once it is this share off (hysteresis), at CALM.broadcast.fovRate. */
+export const ZOOM_STEP = 0.15;
+/**
+ * The broadcast camera leads the play, as a television operator does: it watches where the puck will be `base` s on
+ * (to `base + rush` s at `rushFrom + rushSpan` m/s and over), `across` as much across the ice as along it, at most
+ * `max` m ahead, from the puck's velocity smoothed over `tau` s (a quick pass back and forth averages out); so on a zone entry the end and its net come into the picture before the puck does (with END_BIAS).
+ */
+export const LEAD = { base: 0.55, rush: 0.25, rushFrom: 8, rushSpan: 10, across: 0.5, max: 14, tau: 0.25 };
+/**
+ * And it looks toward the end the play is in or coming to: up to END_BIAS.m metres further toward that end, growing from
+ * END_BIAS.from m from centre ice over END_BIAS.span m, so at a blue line the zone and its net are already in the picture.
+ */
+export const END_BIAS = { m: 6, from: 2, span: 6 };
+/** How fast a zoom slows as it arrives (degrees a second squared). */
+export const FOV_BRAKE = 20;
 
 /**
  * The jump rule. A camera place that moves more than CUT_JUMP metres within CUT_WINDOW seconds of game time (one
@@ -90,6 +111,10 @@ export type CameraOperator = {
    * whether that cut has been made (the rest of the hold is then not shown).
    */
   holdK: number; restartHeld: boolean; holdCut: boolean;
+  /** The puck's velocity, smoothed, that the broadcast camera leads by. */
+  leadV: Vec3;
+  /** The broadcast camera's distance zoom (its field of view before event zoom), or 0 before the first step. */
+  zoomBase: number;
 };
 
 /**
@@ -114,13 +139,13 @@ export function holdPoint(net: Vec3, scorer: Vec3 | null | undefined): Vec3 {
 }
 
 /** Seconds the camera takes to ease onto a board battle (and off it when it ends), and to follow its spot. */
-export const BATTLE_EASE = 1.2, BATTLE_SPOT_TAU = 0.8;
+export const BATTLE_EASE = 1, BATTLE_SPOT_TAU = 0.8;
 
 const zero = (): Vec3 => ({ x: 0, y: 0, z: 0 });
 export function initialOperator(camera: CameraName): CameraOperator {
   return {
     camera, cam: { pos: { x: 0, y: 15, z: 29 }, look: zero(), fov: 30 }, lookV: zero(), posV: zero(), aim: zero(), lastTarget: null,
-    followOn: false, heading: null, zone: 0, zoneNext: 0, zoneFor: 0, pending: true, clock: 0, trail: [], battleK: 0, battleSpot: zero(), holdK: 0, restartHeld: false, holdCut: false,
+    followOn: false, heading: null, zone: 0, zoneNext: 0, zoneFor: 0, pending: true, clock: 0, trail: [], battleK: 0, battleSpot: zero(), holdK: 0, restartHeld: false, holdCut: false, zoomBase: 0, leadV: zero(),
   };
 }
 
@@ -182,8 +207,16 @@ const clampNear = (a: number, w: number, d: number): number => (a < w - d ? w - 
  * for an angle that turns from `pivot`, within `calm.turn` of its turn and `calm.range` of its distance from there (so
  * the zone is as wide in the picture near the camera as far from it). `open` (0..1) scales the zone.
  */
-function deadZone(aim: Vec3, watch: Vec3, calm: Calm, pivot: { x: number; z: number } | null, open: number, fov: number): Vec3 {
+function deadZone(aim: Vec3, watch: Vec3, calm: Calm, pivot: { x: number; z: number } | null, open: number, fov: number, height = 0): Vec3 {
   const halfWidth = Math.atan(Math.tan((fov * Math.PI) / 360) * (16 / 9));
+  if (pivot && calm.tilt !== undefined && height > 0) {
+    // Turn and tilt from a camera `height` m above the pivot.
+    const wa = Math.atan2(watch.z - pivot.z, watch.x - pivot.x), aa = Math.atan2(aim.z - pivot.z, aim.x - pivot.x);
+    const wp = Math.atan2(height, Math.hypot(watch.x - pivot.x, watch.z - pivot.z)), ap = Math.atan2(height, Math.hypot(aim.x - pivot.x, aim.z - pivot.z));
+    const t = wa + clampNear(wrap(aa - wa), 0, (calm.turn ?? 0) * halfWidth * open);
+    const pt = clampNear(ap, wp, calm.tilt * ((fov * Math.PI) / 360) * open), r = height / Math.tan(Math.max(0.02, pt));
+    return { x: pivot.x + r * Math.cos(t), y: watch.y, z: pivot.z + r * Math.sin(t) };
+  }
   if (!pivot || calm.turn === undefined) return { x: clampNear(aim.x, watch.x, calm.dead.x * open), y: watch.y, z: clampNear(aim.z, watch.z, calm.dead.z * open) };
   const wa = Math.atan2(watch.z - pivot.z, watch.x - pivot.x), wr = Math.hypot(watch.x - pivot.x, watch.z - pivot.z);
   const aa = Math.atan2(aim.z - pivot.z, aim.x - pivot.x), ar = Math.hypot(aim.x - pivot.x, aim.z - pivot.z);
@@ -196,7 +229,9 @@ const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 /** Point the camera for one frame; `dt` is the game time just played (0 when paused). */
 export function stepOperator(op: CameraOperator, input: OperatorInput, dt: number): { state: CameraOperator; pose: CameraPose; cut: boolean } {
   const h = Number.isFinite(dt) && dt > 0 ? dt : 0;
-  const calm = CALM[op.camera];
+  // (The follow camera with nobody to follow shows the broadcast view, and moves as the broadcast camera does.)
+  const as: CameraName = op.camera === 'follow' && input.followed === undefined ? 'broadcast' : op.camera;
+  const calm = CALM[as];
   // A goal's hold: the camera watches the net (and the scorer) and does not cut to the engine's restart; once the hold
   // lets go after one, it cuts to it.
   const gl = input.goal, given = gl && gl.k > 0 ? Math.min(1, gl.k) : 0;
@@ -212,8 +247,21 @@ export function stepOperator(op: CameraOperator, input: OperatorInput, dt: numbe
     const p = holdPoint(gl.net, gl.scorer);
     watch = { x: input.puck.x + (p.x - input.puck.x) * holdK, y: input.puck.y * (1 - holdK), z: input.puck.z + (p.z - input.puck.z) * holdK };
   }
+  // The broadcast camera leads the play (LEAD), not on a goal's hold.
+  const pv = input.puckVel ?? { x: 0, y: 0, z: 0 };
+  const leadV = snap ? { x: pv.x, y: 0, z: pv.z } : easePoint(op.leadV, { x: pv.x, y: 0, z: pv.z }, h, LEAD.tau);
+  if (as === 'broadcast' && input.puckVel && holdK < 1) {
+    const v = leadV, sp = Math.hypot(v.x, v.z), u = Math.min(1, Math.max(0, (sp - LEAD.rushFrom) / LEAD.rushSpan));
+    const lt = LEAD.base + LEAD.rush * u * u * (3 - 2 * u);
+    let lx = v.x * lt, lz = v.z * lt * LEAD.across;
+    const ll = Math.hypot(lx, lz);
+    if (ll > LEAD.max) { lx *= LEAD.max / ll; lz *= LEAD.max / ll; }
+    const ax = Math.abs(input.puck.x), e = Math.min(1, Math.max(0, (ax - END_BIAS.from) / END_BIAS.span));
+    const bias = Math.sign(input.puck.x) * END_BIAS.m * e * e * (3 - 2 * e);
+    watch = { x: watch.x + (lx + bias) * (1 - holdK), y: watch.y, z: watch.z + lz * (1 - holdK) };
+  }
   // The calm point: it moves only as the play leaves the dead zone round it (which closes on a goal's hold).
-  const aim = snap ? { ...watch } : deadZone(op.aim, watch, calm, cameraPivot(op.camera, input.attackingRight, op.lastTarget ?? undefined), 1 - holdK, op.cam.fov);
+  const aim = snap ? { ...watch } : deadZone(op.aim, watch, calm, cameraPivot(as, input.attackingRight, op.lastTarget ?? undefined), 1 - holdK, op.cam.fov, as === 'broadcast' ? BROADCAST_PLACE.y : 0);
   // A board battle: eased on and off (never a cut), its spot followed smoothly.
   const bt = input.battle ?? null, want = bt ? 1 : 0;
   const battleK = snap ? want : Math.min(1, Math.max(0, op.battleK + Math.max(-h / BATTLE_EASE, Math.min(h / BATTLE_EASE, want - op.battleK))));
@@ -247,6 +295,11 @@ export function stepOperator(op: CameraOperator, input: OperatorInput, dt: numbe
   if (input.puckVel) camInput.puckVel = input.puckVel;
   if (input.zoom !== undefined) camInput.zoom = input.zoom;
   if (fl) camInput.followed = { ...fl, heading: heading ?? fl.facing };
+  // The broadcast camera's distance zoom: steady until the play is ZOOM_STEP further or nearer than it was set for.
+  let zoomBase = op.zoomBase;
+  const wantBase = broadcastBaseFov({ x: aim.x, y: 0, z: aim.z });
+  if (snap || zoomBase <= 0 || Math.abs(wantBase - zoomBase) > ZOOM_STEP * zoomBase) zoomBase = wantBase;
+  if (as === 'broadcast') camInput.baseFov = zoomBase;
   const followOn = fl !== undefined;
   if (op.camera === 'follow' && followOn !== op.followOn) snap = true;
   const target = cameraTarget(op.camera, camInput);
@@ -277,14 +330,18 @@ export function stepOperator(op: CameraOperator, input: OperatorInput, dt: numbe
     const anchor = op.camera === 'follow' ? fl?.pos : undefined;
     const ax = anchor ? anchor.x : 0, az = anchor ? anchor.z : 0;
     const rel = (p: Vec3, sgn: number): Vec3 => ({ x: p.x + sgn * ax, y: p.y, z: p.z + sgn * az });
-    const lk = limitedMove(rel(op.cam.look, -1), op.lookV, rel(target.look, -1), h, calm.look, quick);
+    const holdLook: Limit = { v: Math.max(calm.look.v, Math.min(calm.look.v * quick, HOLD_MAX.v)) / quick, a: Math.max(calm.look.a, Math.min(calm.look.a * quick, HOLD_MAX.a)) / quick, tau: calm.look.tau };
+    const lk = limitedMove(rel(op.cam.look, -1), op.lookV, rel(target.look, -1), h, holdLook, quick);
     const ps = limitedMove(rel(op.cam.pos, -1), op.posV, rel(target.pos, -1), h, calm.pos, quick);
-    const df = target.fov - op.cam.fov, step = Math.min(Math.abs(df), calm.fovRate * quick * h, Math.abs(df) * Math.min(1, h / 0.5));
+    // (The zoom moves toward its target at most fovRate degrees a second, slowing as it arrives (FOV_BRAKE degrees a
+    // second squared) and stopping on it.)
+    const df = target.fov - op.cam.fov, ad = Math.abs(df);
+    const step = Math.min(ad, Math.max(Math.min(calm.fovRate * quick, Math.sqrt(2 * FOV_BRAKE * quick * ad)) * h, 0.01));
     cam = { pos: rel(ps.p, 1), look: rel(lk.p, 1), fov: op.cam.fov + Math.sign(df) * step };
     lookV = lk.v; posV = ps.v;
   }
   return {
-    state: { camera: op.camera, cam, lookV, posV, aim, lastTarget: target, followOn, heading, zone, zoneNext, zoneFor, pending: false, clock, trail, battleK, battleSpot, holdK, restartHeld, holdCut },
+    state: { camera: op.camera, cam, lookV, posV, aim, lastTarget: target, followOn, heading, zone, zoneNext, zoneFor, pending: false, clock, trail, battleK, battleSpot, holdK, restartHeld, holdCut, zoomBase, leadV },
     pose: cam, cut: snap,
   };
 }

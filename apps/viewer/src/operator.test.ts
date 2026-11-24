@@ -137,7 +137,8 @@ describe('camera operator', () => {
     it('on any boards it frames the battle tighter, and eases back when it ends', () => {
       for (const z of [NEAR * (RINK.halfWidth - 0.4), -NEAR * (RINK.halfWidth - 0.4)]) {
         const plain = settle(5, z, false), close = settle(5, z, true);
-        expect(close.fov).toBeLessThan(plain.fov * 0.7);
+        // (Since the camera follow-up a battle tightens the picture only modestly, 1.25 times: was 0.7 of the plain field of view.)
+        expect(close.fov).toBeLessThan(plain.fov * 0.85);
         expect(inFrame(close, { x: 5, y: 0.5, z })).toBe(true);
       }
       // After the battle: back to the plain framing without a cut.
@@ -183,7 +184,9 @@ describe('camera operator', () => {
   }
   const CAMS: CameraName[] = ['broadcast', 'overhead', 'netHome', 'netAway', 'iceLevel'];
 
-  it('after a goal holds on the net scored on (from 0.4 s after it to 3 s), with no cut to the restart, then eases to the restart with at most one cut', () => {
+  // (Relaxed with the camera follow-up: the swing onto the net is capped to a readable pan, HOLD_MAX, which arrives in
+  // 0.6 to 0.8 s; it was "from 0.4 s".)
+  it('after a goal holds on the net scored on (from 0.8 s after it to 3 s), with no cut to the restart, then eases to the restart with at most one cut', () => {
     let checked = 0, worstAtGoal = 0, worstHold = 0;
     for (const seed of [5, 42]) {
       const rec = recorded(seed), tl = buildTimeline(rec.events);
@@ -195,7 +198,7 @@ describe('camera operator', () => {
           // (The overhead camera shows the zone, not a point: the net in its picture counts as on the net.)
           const d = CAMS[k] === 'overhead' ? (inPicture(pose, { x: net.x, y: 0, z: net.z }) ? 0 : 99) : Math.hypot(pose.look.x - net.x, pose.look.z - net.z);
           if (t === g.tick) worstAtGoal = Math.max(worstAtGoal, d);
-          if (t >= g.tick + 12 && t <= hold) worst[k] = Math.max(worst[k]!, d);
+          if (t >= g.tick + 24 && t <= hold) worst[k] = Math.max(worst[k]!, d);
           if (t > g.tick && t <= hold && cut) cutsDuring[k]!++;
           else if (t > hold && cut) cutsAfter[k]!++;
           lastLook[k] = { x: pose.look.x, z: pose.look.z };
@@ -240,8 +243,12 @@ describe('camera operator', () => {
       let st = initialOperator('broadcast');
       for (let i = 0; i < 120; i++) st = stepOperator(st, at(0), i === 0 ? 0 : 1 / 60).state;
       const still = st.cam;
-      // Passes back and forth across 8 m, twice a second, for 3 s: the frame does not move.
-      for (let i = 0; i < 180; i++) { const r = stepOperator(st, at(4 * Math.sin((2 * Math.PI * i) / 30)), 1 / 60); st = r.state; expect(r.pose).toEqual(still); }
+      // (Since the camera follow-up it leads the play by the puck's velocity, smoothed: what it swallows is small
+      // movement.) Stickhandling back and forth across 1 m, twice a second, for 3 s: the frame does not move.
+      for (let i = 0; i < 180; i++) {
+        const x = 0.5 * Math.sin((2 * Math.PI * i) / 30), vx = 0.5 * (2 * Math.PI * 2) * Math.cos((2 * Math.PI * i) / 30);
+        const r = stepOperator(st, { ...at(x), puckVel: { x: vx, y: 0, z: 0 } }, 1 / 60); st = r.state; expect(r.pose).toEqual(still);
+      }
       // The play moves 15 m up the ice: it pans, smoothly and without overshoot, and stops.
       let last = st.cam.look.x, moved = 0;
       for (let i = 0; i < 300; i++) { const r = stepOperator(st, at(15), 1 / 60); st = r.state; expect(r.pose.look.x).toBeGreaterThanOrEqual(last - 1e-9); moved = r.pose.look.x; last = r.pose.look.x; }
@@ -283,13 +290,16 @@ describe('camera operator', () => {
       //   follow 5.0/11.2/15.4, 34/120, 57.6, 140.
       // After, with a margin: the limits below. (The whole-rink overhead never moves; its cuts are the restarts'.)
       const lim: Record<string, { sp: [number, number, number]; ac: [number, number]; rev: number; cuts: number }> = {
-        broadcast: { sp: [2.5, 12, 17], ac: [22, 32], rev: 15, cuts: 25 },
+        // (The broadcast limits were raised with the camera follow-up: it now also tilts with the play and keeps end-zone
+        // play in the middle of the picture, which costs some movement; the platform no longer moves at all.)
+        broadcast: { sp: [4.5, 22, 32], ac: [65, 125], rev: 42, cuts: 25 },
         overhead: { sp: [0.5, 6, 8], ac: [7.5, 7.5], rev: 6, cuts: 25 },
         overheadWide: { sp: [1e-9, 1e-9, 1e-9], ac: [1e-9, 1e-9], rev: 0, cuts: 25 },
         netHome: { sp: [4.5, 16, 20], ac: [21, 21], rev: 30, cuts: 25 },
         netAway: { sp: [4.5, 16, 20], ac: [21, 21], rev: 32, cuts: 25 },
         iceLevel: { sp: [4.5, 16, 20], ac: [21, 21], rev: 33, cuts: 185 },
-        follow: { sp: [5, 11, 11.5], ac: [12.5, 12.5], rev: 35, cuts: 50 },
+        // (Follow with its player on the bench shows and moves as the broadcast camera, so its limits rose with broadcast's.)
+        follow: { sp: [6, 17, 28], ac: [65, 125], rev: 42, cuts: 50 },
       };
       const r = runCameras(Object.keys(lim) as CameraName[]);
       console.log(JSON.stringify(r));
@@ -304,6 +314,30 @@ describe('camera operator', () => {
         expect(m.cuts, `${cam} cuts`).toBeLessThanOrEqual(l.cuts);
       }
       expect(r.broadcast!.inFrame).toBeGreaterThanOrEqual(0.99);
+    });
+    it('the broadcast camera itself: one fixed platform all period (board battles and goals included), its zoom changing in few frames, end-zone play in the middle of the picture and drawn about as large as at centre ice, and a readable swing onto a goal', () => {
+      // Before the camera follow-up (19ccaf2), seed 5's first period: the platform travelled up to 20.4 m, the zoom changed
+      // in 26.9% of frames, end-zone play was in the middle 60% of the picture in 77.1% of live frames, a skater at the puck
+      // was drawn 0.087 of the picture's height in the end zones against 0.098 at centre ice (0.90), and the look point
+      // reached 62 m/s in a goal's swing.
+      const b = runCameras(['broadcast']).broadcast!;
+      console.log(JSON.stringify({ posTravel: b.posTravel, zoomChanging: b.zoomChanging, inFrame: b.inFrame, endCentred: b.endCentred, sizeRatio: b.sizeEnd / b.sizeCentre, holdSpeed: b.holdSpeed, entries: b.entries, entriesNetSeen: b.entriesNetSeen, entriesNetSeenInZone: b.entriesNetSeenInZone, trailingRun: b.trailingRun, flights: b.flights, flightsSeen: b.flightsSeen }));
+      expect(b.posTravel).toBe(0);
+      expect(b.zoomChanging).toBeLessThan(0.2);
+      expect(b.inFrame).toBeGreaterThanOrEqual(0.995);
+      expect(b.endCentred).toBeGreaterThanOrEqual(0.95);
+      expect(b.sizeEnd / b.sizeCentre).toBeGreaterThanOrEqual(0.7);
+      expect(b.holdSpeed).toBeLessThanOrEqual(45);
+      // The owner on 19ccaf2: "slow to follow the action ... on some entries I can't see the far end". It leads the play:
+      // on a zone entry the net of that end is in the picture from the crossing for 3 s while the play is in that zone
+      // (in every frame of the 3 s, whatever the play does, in the share entriesNetSeen, logged); the puck is never
+      // in the trailing 20% of the picture for more than 0.5 s; and long moves of the puck stay in the picture.
+      expect(b.entries).toBeGreaterThan(50);
+      expect(b.entriesNetSeenInZone).toBeGreaterThanOrEqual(0.95);
+      expect(b.entriesNetSeen).toBeGreaterThanOrEqual(0.9);
+      expect(b.trailingRun).toBeLessThanOrEqual(0.5);
+      expect(b.flights).toBeGreaterThan(30);
+      expect(b.flightsSeen).toBeGreaterThanOrEqual(0.95);
     });
   });
 });

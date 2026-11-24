@@ -28,6 +28,8 @@ export type CameraInput = {
   followed?: { pos: Vec3; facing: number; vel: Vec3; heading?: number };
   /** The overhead camera's zone: the x of the middle of the zone it shows (the operator picks it); default from the puck. */
   zoneX?: number;
+  /** The broadcast camera's field of view before event zoom (the operator holds it steady between real changes); default broadcastBaseFov. */
+  baseFov?: number;
   /** The home team attacks toward +x (periods 1 and 3); it defends the net at -x. */
   attackingRight: boolean;
   /** How much tighter the broadcast camera frames the play (1 normally; more on a small picture, such as a phone). */
@@ -82,23 +84,25 @@ function insideBoards(x: number, z: number, inset: number): { x: number; z: numb
 // ---- The angles. Distances in metres, fields of view in degrees (vertical).
 
 /**
- * Broadcast: a television camera on a fixed platform high in the stands opposite the benches, at centre ice. It pans
- * (turns) to follow the play and never chases the puck: it looks along the rink at the operator's calm point (no
- * further than `maxLook` toward an end), at a steady height and tilt (`nearBias` m toward its own side of centre, so the
- * near boards are at the bottom of the picture and the far ones well inside it). Only a tight picture (`zoom`, a
- * phone) also tilts to follow the play across the ice.
+ * Broadcast: a television camera on one fixed platform for the whole game, high in the stands at centre ice opposite the
+ * benches. It never moves: it pans and tilts to the operator's calm point (anywhere on the ice, up to `maxLook` along
+ * it and `maxAcross` across), and zooms gently with that point's distance along the rink (broadcastBaseFov: `sizeKeep`
+ * of the change of distance made up, so players at the far end are drawn about as large as at centre ice). The platform is
+ * high and close enough (`height`, `back`) that the line of sight to a skater on the near boards passes over them. Its
+ * normal picture is wide, as the centre-ice camera of a real broadcast: about a zone and a half round the play (41 m
+ * across at centre ice), and a whole end zone with its net when play is settled there.
  */
-const BROADCAST = { height: 15.5, back: 29, fov: 29, maxLook: 21, nearBias: 4.5 };
+const BROADCAST = { height: 18, back: 24, fov: 44, maxLook: 29, maxAcross: 13, acrossShare: 0.6, sizeKeep: 0.9, maxFov: 46, minFov: 20 };
 /**
- * On a board battle the broadcast camera frames it `zoom` times tighter and looks at its spot. On the near boards
- * (within `nearFrom` m of them) it climbs `rise` m higher and comes `closer` m in from its rail, so its line of sight
- * clears the boards' top (BOARD_TOP) down to a skater's thigh a step off them.
+ * On a board battle or a goal the broadcast camera eases its zoom in, at most `zoom` times its normal field of view
+ * (the operator eases it on over BATTLE_EASE, holds it and eases it back), and looks at the battle's spot or the net. It
+ * never moves.
  */
-const BATTLE_VIEW = { zoom: 2.3, rise: 3, closer: 6.5, nearFrom: 4 };
+const EVENT_ZOOM = 1.25;
 /** Height (m) of the boards' top edge (arena.ts BOARD_H). */
 export const BOARD_TOP = 1.07;
 /** On a goal's hold the broadcast and overhead cameras may look this much further toward the end (m), and the broadcast one frames this many times tighter. */
-const GOAL_VIEW = { reach: 4.5, overheadReach: 7, zoom: 1.35 };
+const GOAL_VIEW = { overheadReach: 7, zoom: 1.2 };
 /**
  * Overhead: under the roof lights, straight down on one zone at a time: the defensive, neutral or offensive third, with
  * overlap (a 16:9 picture shows the whole width of the ice and about 48 m of its length). The zones' middles are at
@@ -125,26 +129,36 @@ const FOLLOW = { back: 6, height: 3.1, ahead: 2.5, lookY: 0.8, fov: 50, turnSpee
 /** Below this speed (m/s) a skater's travel has no direction: the follow camera keeps the heading it had. */
 export const FOLLOW_TURN_SPEED = FOLLOW.turnSpeed;
 
+/** Where the broadcast platform stands (world): the same for the whole game. */
+export const BROADCAST_PLACE: Vec3 = v3(0, BROADCAST.height, NEAR * BROADCAST.back);
+/** The distance from the platform to centre ice. */
+const BROADCAST_D0 = Math.hypot(BROADCAST.height, BROADCAST.back);
+
+/**
+ * The broadcast camera's field of view (degrees) for looking at `look`, before any event zoom or a small picture's: it
+ * zooms in as the play goes away from it, making up `sizeKeep` of the change of distance from centre ice.
+ */
+export function broadcastBaseFov(look: Vec3): number {
+  // (Along the rink only: the play crossing the ice does not zoom it.)
+  const d = Math.hypot(look.x - BROADCAST_PLACE.x, BROADCAST_PLACE.y, BROADCAST_PLACE.z);
+  const k = Math.pow(BROADCAST_D0 / Math.max(d, 1), BROADCAST.sizeKeep);
+  return clamp((2 * Math.atan(Math.tan((BROADCAST.fov * Math.PI) / 360) * k) * 180) / Math.PI, BROADCAST.minFov, BROADCAST.maxFov);
+}
+
 function broadcast(input: CameraInput): CameraPose {
   const { puck } = input;
-  const gk = clamp(input.goal?.k ?? 0, 0, 1), maxLook = BROADCAST.maxLook + GOAL_VIEW.reach * gk;
-  const lx = clamp(puck.x, -maxLook, maxLook);
-  const zoom = Math.max(1, input.zoom ?? 1) * (1 + (GOAL_VIEW.zoom - 1) * gk);
-  // A steady tilt in the wide view; a tight view (zoom) follows the play across the ice, or a puck on the near boards
-  // would drop out of the bottom of the picture.
-  const lz = zoom > 1 ? clamp(puck.z * 0.8, -10, 11) : NEAR * BROADCAST.nearBias;
-  // On a goal's hold it looks at the net itself.
-  const pose = { pos: v3(0, BROADCAST.height, NEAR * BROADCAST.back), look: v3(lx, 0, toward(lz, puck.z, gk)), fov: BROADCAST.fov / zoom };
+  const gk = clamp(input.goal?.k ?? 0, 0, 1), bk = clamp(input.battle?.k ?? 0, 0, 1);
+  // (Across the ice it looks part way from the middle to the play, so the nets and the far side stay in the picture.)
+  // (A tight picture, on a phone, follows the play all the way across, or a puck on the near boards would drop out.)
+  const share = (input.zoom ?? 1) > 1 ? 1 : BROADCAST.acrossShare;
+  let look = v3(clamp(puck.x, -BROADCAST.maxLook, BROADCAST.maxLook), 0, clamp(puck.z * share, -BROADCAST.maxAcross, BROADCAST.maxAcross));
+  // A board battle: it looks at the spot (the operator eases it on).
   const b = input.battle;
-  if (!b || !(b.k > 0)) return pose;
-  // A board battle: closer in on its spot; on the near boards, higher and steeper over them.
-  const k = clamp(b.k, 0, 1), sx = clamp(b.spot.x, -BROADCAST.maxLook - 4, BROADCAST.maxLook + 4);
-  const near = k * clamp((NEAR * b.spot.z - (halfWidthAt(b.spot.x) - BATTLE_VIEW.nearFrom)) / 2, 0, 1);
-  pose.look = v3(toward(pose.look.x, sx, k), toward(0, 0.9, k), toward(pose.look.z, b.spot.z, k));
-  // (Square on to it along the rail, so the boards run across the picture.)
-  pose.pos = v3(toward(pose.pos.x, sx, k), pose.pos.y + BATTLE_VIEW.rise * near, pose.pos.z - NEAR * BATTLE_VIEW.closer * near);
-  pose.fov = pose.fov / (1 + (BATTLE_VIEW.zoom - 1) * k);
-  return pose;
+  if (b && bk > 0) look = v3(toward(look.x, clamp(b.spot.x, -BROADCAST.maxLook, BROADCAST.maxLook), bk), toward(0, 0.5, bk), toward(look.z, clamp(b.spot.z * BROADCAST.acrossShare, -BROADCAST.maxAcross, BROADCAST.maxAcross), bk));
+  // A real event zooms in a little: a board battle or a goal (the larger of the two, never both).
+  const event = Math.max(1 + (EVENT_ZOOM - 1) * bk, 1 + (GOAL_VIEW.zoom - 1) * gk);
+  const base = input.baseFov ?? broadcastBaseFov(look);
+  return { pos: { ...BROADCAST_PLACE }, look, fov: base / Math.max(1, input.zoom ?? 1) / event };
 }
 
 /** The middle (x) of the overhead camera's zone for a point at x: the defensive, neutral or offensive third. */
@@ -218,7 +232,7 @@ function follow(input: CameraInput): CameraPose {
  */
 export function cameraPivot(name: CameraName, attackingRight: boolean, current?: CameraPose): { x: number; z: number } | null {
   switch (name) {
-    case 'broadcast': return { x: 0, z: NEAR * BROADCAST.back };
+    case 'broadcast': return { x: BROADCAST_PLACE.x, z: BROADCAST_PLACE.z };
     case 'netHome': case 'netAway': {
       const end = (name === 'netHome') === attackingRight ? -1 : 1;
       return { x: end * (RINK.goalLineX + NET.fromGoalLine), z: 0 };
