@@ -331,7 +331,8 @@ export const TUNING = deepFreeze({
    *   waits at the post (job-targets.ts BEHIND_CHASE_SECONDS) and the others hold in front of the goal line.
    * - pinch (m): a point man goes down the wall for a loose or contested puck on his side within this far of him (and
    *   more than pinchDepth m deeper than him: one nearer the line is his to keep in, as before tactics), and
-   *   only while a teammate with job highForward is above him (nearer the blue line than he is). pinchEager (m): one
+   *   only while a teammate with job highForward is above the puck (nearer the blue line than it; the brief said above
+   *   the point man: jobs.ts heldAtPoint says why not). pinchEager (m): one
    *   who may goes as if that much nearer the puck than he is (negative: further), against the other men for it.
    * - natural: generateTeam's rules (naturalTactics), from the roster alone (the brief's numbers).
    */

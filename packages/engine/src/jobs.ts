@@ -6,6 +6,7 @@
 import { committedPhase as committedPhase_, indexOf as indexOf_, inHold as inHold_, triggerFor as triggerFor_ } from './commit';
 import { jobAnchor as jobAnchor_ } from './job-targets';
 import { RINK as RINK_, supportSpot as supportSpot_ } from './rink';
+import { DEFAULT_TACTICS } from './tactics';
 import { TUNING } from './tuning';
 import type { ContestStateOf, GameState, Job, PlayerDef, Side, SkaterState, Tactics } from './types';
 import { carrierOf as carrierOf_ } from './util';
@@ -52,7 +53,7 @@ const PUCK_JOBS: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'battleSup
  * A defenceman joins the rush (`dJoin`) only with this joinRush tendency or more (Task 11: TUNING.tactics.joinRush,
  * lower for a team whose offence is the rush).
  */
-const joinRushMin = (t: Tactics): number => ((t.offence ?? 'cycle') === 'rush' ? TUNING.tactics.joinRush.rush : TUNING.tactics.joinRush.other);
+const joinRushMin = (t: Tactics): number => ((t.offence ?? DEFAULT_TACTICS.offence) === 'rush' ? TUNING.tactics.joinRush.rush : TUNING.tactics.joinRush.other);
 const BLUE = RINK.blueLineX;
 
 /**
@@ -60,6 +61,9 @@ const BLUE = RINK.blueLineX;
  * than him, a defenceman at the point (inside the blue line, or within a metre of it) may go down the wall for it only when it is on his side of the ice, within his team's pinch
  * distance of him (TUNING.tactics.pinch by tactics.pinch) and a teammate with job highForward is above it (nearer the
  * blue line than the puck): otherwise he holds the line and someone else goes. True when `d` may not go.
+ * (The Task 11 brief said "above him", the point man. Tried in the review fixes: pinches by a team told to pinch often
+ * fell from 3.8 to 2.2 a game on seeds 1-16, and four guards that read one to three games went red, carrier pressed
+ * 0.771 against 0.78 among them; kept as it was, for a ruling.)
  */
 /** A defenceman of `side` at the point with the puck loose in the zone it attacks: inside the blue line or within 1 m of it. */
 function atPoint(state: GameState, side: Side, d: SkaterState): boolean {
@@ -73,7 +77,7 @@ function heldAtPoint(state: GameState, side: Side, d: SkaterState, tactics: Tact
   const prx = p.x * dir;
   // A puck no deeper than TUNING.tactics.pinchDepth below him is his to keep in at the line: no pinch.
   if (prx <= d.pos.x * dir + TUNING.tactics.pinchDepth) return false;
-  const reach = TUNING.tactics.pinch[tactics.pinch ?? 'sometimes'];
+  const reach = TUNING.tactics.pinch[tactics.pinch ?? DEFAULT_TACTICS.pinch];
   if (hyp(p.x - d.pos.x, p.y - d.pos.y) > reach || (p.y >= 0) !== (d.pos.y >= 0)) return true;
   for (let k = 0; k < state.skaters.length; k++) {
     const t = state.skaters[k]!;
@@ -126,8 +130,12 @@ export function supportTarget(state: GameState, side: Side): Vec2 | null {
   return supportSpot(c.spot, -state.attackDir[side] * RINK.goalLineX, BB.supportOff, BB.supportBoards, { x: 0, y: 0 });
 }
 
-/** The phase's job list, most important first (before the carrier's own job is taken out). */
-function phaseJobs(state: GameState, side: Side, carrier: SkaterState | null): Job[] {
+/**
+ * The phase's job list, most important first (before the carrier's own job is taken out). In the zone it attacks the
+ * team's offence orders it (Task 11 brief; review fix): a cycle team puts its low support (lowSupport, or the office
+ * when the carrier is on the wall) first, a point-shot or rush team the net-front man.
+ */
+function phaseJobs(state: GameState, side: Side, carrier: SkaterState | null, tactics: Tactics): Job[] {
   const dir = state.attackDir[side];
   const own = carrier !== null && carrier.side === side ? carrier : null;
   switch (committedPhase(state, side)) {
@@ -138,8 +146,11 @@ function phaseJobs(state: GameState, side: Side, carrier: SkaterState | null): J
         for (const o of state.skaters) if (o.onIce && o.side !== side && o.pos.x * dir > RINK.goalLineX) behind = true;
         if (!behind) second = 'office';
       }
-      if (own !== null && !isDefenceman(own) && own.pos.x * dir > 20) return ['highForward', 'netFront', second, 'pointStrong', 'pointWeak'];
-      return ['netFront', second, 'highForward', 'pointStrong', 'pointWeak'];
+      const cycle = (tactics.offence ?? DEFAULT_TACTICS.offence) === 'cycle';
+      if (own !== null && !isDefenceman(own) && own.pos.x * dir > 20) {
+        return cycle ? [second, 'highForward', 'netFront', 'pointStrong', 'pointWeak'] : ['highForward', 'netFront', second, 'pointStrong', 'pointWeak'];
+      }
+      return cycle ? [second, 'netFront', 'highForward', 'pointStrong', 'pointWeak'] : ['netFront', second, 'highForward', 'pointStrong', 'pointWeak'];
     }
     case 'rush': return ['driveWide', 'driveMiddle', 'trailer', 'dJoin', 'dHold', 'dHoldWeak'];
     case 'breakout': return ['outlet', 'centreLow', 'stretch', 'dPartner'];
@@ -168,7 +179,7 @@ export function jobsFor(state: GameState, side: Side, tactics: Tactics): Job[] {
 }
 
 function jobsWith(state: GameState, side: Side, tactics: Tactics, carrier: SkaterState | null, freeD: number, freeF: number): Job[] {
-  const jobs = phaseJobs(state, side, carrier);
+  const jobs = phaseJobs(state, side, carrier, tactics);
   if (carrier === null || carrier.side !== side) return jobs;
   const d = isDefenceman(carrier);
   const free = d ? freeD : freeF;
@@ -262,7 +273,7 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
       pinchBias[i] = 0;
       if (heldAtPoint(state, side, sk[i]!, tactics)) continue;
       // A point man who may pinch goes as if he were TUNING.tactics.pinchEager m nearer (further for a negative one).
-      if (atPoint(state, side, sk[i]!)) { pinchBias[i] = -TUNING.tactics.pinchEager[tactics.pinch ?? 'sometimes']; eager = true; }
+      if (atPoint(state, side, sk[i]!)) { pinchBias[i] = -TUNING.tactics.pinchEager[tactics.pinch ?? DEFAULT_TACTICS.pinch]; eager = true; }
       heldPool.push(i);
       if (stay === null || state.plans[i]!.job !== stay) chasePool.push(i);
     }
@@ -284,7 +295,7 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
   for (const i of pool) if (isDefenceman(sk[i]!)) freeD++;
   const jobs = jobsWith(state, side, tactics, carrier, freeD, pool.length - freeD);
   // Between hand-outs (every ASSIGN_TICKS) everyone keeps a job that is still on the list, unless a trigger says otherwise.
-  if (state.tick % ASSIGN_TICKS !== 0 && keepAll(state, side, carrier, pool, jobs, out)) return out;
+  if (state.tick % ASSIGN_TICKS !== 0 && keepAll(state, side, carrier, pool, jobs, out, tactics)) return out;
   const used = new Array<boolean>(jobs.length).fill(false);
   // Inside his hold, with nothing to re-plan for, a man keeps the job he holds.
   for (const i of pool) {
@@ -298,6 +309,9 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
   // Each job in order to the cheapest man of its group; netFront first when it is on the list (Task 8b: handed out after
   // highForward, the man at the net was sent high whenever the other forward was further from there than he was, and
   // the two swapped: 115 net-front spells a game ended that way while a teammate carried the puck).
+  // (Task 11 review fix: a cycle team's list puts its low support first, but the net-front man is still handed out
+  // before it: handed out after low support, the man at the net was pulled off it and net-front holds, tips and second
+  // chances fell, 0.54 -> 0.42 holds over 2.5 s, 3.5 -> 1.9 tips a game on seeds 1-8. The order counts after him.)
   const nf = jobs.indexOf('netFront');
   for (let kk = nf >= 0 ? -1 : 0; kk < jobs.length; kk++) {
     const k = kk < 0 ? nf : kk;
@@ -324,7 +338,7 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
   let left = false;
   for (const i of pool) if (out[i] === null) left = true;
   if (!left) return out;
-  const all = phaseJobs(state, side, carrier);
+  const all = phaseJobs(state, side, carrier, tactics);
   for (const i of pool) {
     if (out[i] !== null) continue;
     const d = isDefenceman(sk[i]!);
@@ -342,7 +356,7 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
  * job of the phase or a spare one), the puck jobs'
  * men hold theirs already, and no trigger applies to anyone, writes their held jobs into `out` and returns true.
  */
-function keepAll(state: GameState, side: Side, carrier: SkaterState | null, pool: number[], jobs: Job[], out: (Job | null)[]): boolean {
+function keepAll(state: GameState, side: Side, carrier: SkaterState | null, pool: number[], jobs: Job[], out: (Job | null)[], tactics: Tactics): boolean {
   let all: Job[] | null = null;
   for (const i of pool) {
     const held = state.plans[i]!.job;
@@ -350,7 +364,7 @@ function keepAll(state: GameState, side: Side, carrier: SkaterState | null, pool
     else if (jobs.indexOf(held) < 0) {
       // A man left over holds a job off the list: the phase's or a spare one.
       if (pool.length <= jobs.length) return false;
-      all ??= phaseJobs(state, side, carrier);
+      all ??= phaseJobs(state, side, carrier, tactics);
       if (all.indexOf(held) < 0 && SPARE_D.indexOf(held) < 0 && SPARE_F.indexOf(held) < 0) return false;
     }
     if (triggerFor(state, i, held) !== null) return false;

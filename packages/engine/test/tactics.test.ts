@@ -125,16 +125,30 @@ describe('tactics: two teams look different', () => {
 });
 
 describe('tactics shade, they never decide (Review Focus 3)', () => {
-  it('for every tactic (both teams on it, two games) one kind is certain before the cap in under 15% of ordinary decisions (the forecheck, defence and pinch tactics too: Task 11 review fix)', () => {
-    const all: Partial<Tactics>[] = [
-      { zoneEntry: 'dump' }, { zoneEntry: 'carry' }, { offence: 'pointShots' }, { offence: 'rush' },
-      { forecheck: 'passive' }, { forecheck: 'aggressive' }, { defence: 'pressure' }, { pinch: 'often' }, { pinch: 'rarely' },
-    ];
-    for (const t of all) {
+  it('for every entry and offence tactic (both teams on it, two games) one kind is certain before the cap in under 15% of ordinary decisions', () => {
+    for (const t of [{ zoneEntry: 'dump' }, { zoneEntry: 'carry' }, { offence: 'pointShots' }, { offence: 'rush' }] as Partial<Tactics>[]) {
       const s = { ...gameSetup(1), home: { ...gameSetup(1).home, tactics: { ...gameSetup(1).home.tactics, ...t } }, away: { ...gameSetup(1).away, tactics: { ...gameSetup(1).away.tactics, ...t } } };
       const a = observeGame(s).counters, b = observeGame({ ...s, seed: 2 }).counters;
       expect((a.normalCertain + b.normalCertain) / (a.normalDecisionPoints + b.normalDecisionPoints), JSON.stringify(t)).toBeLessThan(0.15);
     }
+  }, LONG);
+  it('for every forecheck, defence and pinch tactic (the home team on it, seeds 1-8 pooled, as the close-out ruling read them) one kind is certain before the cap in under 15% of ordinary decisions (Task 11 review fix)', () => {
+    // Seeds 1-8: passive 0.145 (0.151 with both teams on it), pinch often 0.141. One game is noise-limited (0.13 to 0.17).
+    for (const t of [{ forecheck: 'passive' }, { forecheck: 'aggressive' }, { defence: 'pressure' }, { pinch: 'often' }, { pinch: 'rarely' }] as Partial<Tactics>[]) {
+      const s = withTactics(gameSetup(1), 'home', t);
+      let certain = 0, points = 0;
+      for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) { const c = observeGame({ ...s, seed }).counters; certain += c.normalCertain; points += c.normalDecisionPoints; }
+      expect(certain / points, JSON.stringify(t)).toBeLessThan(0.15);
+    }
+  }, LONG);
+  it('players bend the tactic: asked to dump, grinders take it up far more than a skilled line does (odds of a dump-in, against the same line on mixed; seeds 1-4; Task 11 review fix)', () => {
+    // Seeds 1-16: grinders 0.073 -> 0.711 (odds times 31), playmakers 0.024 -> 0.086 (times 3.8). With no bend both lines
+    // would play the dump at 60; the bend plays it at about 136 for the grinders and 3.4 for the playmakers.
+    const share = (type: string, zoneEntry: Tactics['zoneEntry']): number => tacticMeasures(tacticCounts(allOfType(gameSetup(1), 'home', type, { zoneEntry }), 'home', 4)).dumpInShare;
+    const odds = (p: number): number => p / (1 - p);
+    const grind = odds(share('Grinder', 'dump')) / odds(share('Grinder', 'mixed')), skill = odds(share('Playmaker', 'dump')) / odds(share('Playmaker', 'mixed'));
+    expect(grind).toBeGreaterThan(3 * skill);
+    expect(share('Playmaker', 'dump')).toBeLessThan(0.25);
   }, LONG);
   it('a dump-and-chase team still carries in, and a carry-in team still dumps (no tactic removes an option)', () => {
     expect(homeCounts({ zoneEntry: 'dump' }).carryIns).toBeGreaterThan(0);

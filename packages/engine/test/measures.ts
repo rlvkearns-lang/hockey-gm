@@ -789,12 +789,12 @@ export type TacticCounterKey =
   | 'games' | 'carryIns' | 'dumpIns' | 'ozonePossessions' | 'ozoneTicks' | 'ozoneLowTicks' | 'lowPasses'
   | 'attempts' | 'shotsOnGoal' | 'goals' | 'pointAttempts' | 'defenceAttempts' | 'forecheckTicks' | 'forecheckTwoDeep' | 'forecheckDeep'
   | 'dzoneCarrierTicks' | 'dzoneCarrierPressed' | 'dzoneCarrierTwo' | 'allowedSlot' | 'allowedPoint' | 'behindSpells' | 'behindChased'
-  | 'pinches' | 'pinchesWithoutCover';
+  | 'pinches' | 'pinchesWithoutCover' | 'ozoneLowSupportTicks' | 'pointShotSaves' | 'pointShotSavesNear';
 const TACTIC_KEYS: readonly TacticCounterKey[] = [
   'games', 'carryIns', 'dumpIns', 'ozonePossessions', 'ozoneTicks', 'ozoneLowTicks', 'lowPasses',
   'attempts', 'shotsOnGoal', 'goals', 'pointAttempts', 'defenceAttempts', 'forecheckTicks', 'forecheckTwoDeep', 'forecheckDeep',
   'dzoneCarrierTicks', 'dzoneCarrierPressed', 'dzoneCarrierTwo', 'allowedSlot', 'allowedPoint', 'behindSpells', 'behindChased',
-  'pinches', 'pinchesWithoutCover',
+  'pinches', 'pinchesWithoutCover', 'ozoneLowSupportTicks', 'pointShotSaves', 'pointShotSavesNear',
 ];
 const DOTS_RX = 21.03;
 const HASH_RX = 21;
@@ -818,9 +818,15 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
   let prev: { carrier: string | null; puckRx: number; puckLy: number; live: boolean; jobs: string[]; rx: number[]; ly: number[]; down: boolean[]; onIce: boolean[] } | null = null;
   let inZone = false;
   let behind: { id: string; ticks: number; chased: boolean; front: Set<string> } | null = null;
+  let lastShotDist = 0, nearBefore = false;
   return {
     tick(st, events) {
       const dir = st.attackDir[side], live = st.phase === 'live';
+      for (const e of events) {
+        if (e.type === 'shot') lastShotDist = e.detail.distance;
+        if (e.type === 'save' && e.side === opp && lastShotDist >= POINT_SHOT) { c.pointShotSaves++; if (nearBefore) c.pointShotSavesNear++; }
+      }
+      nearBefore = st.skaters.some((k) => k.onIce && k.side === side && Math.hypot(k.pos.x - dir * GOAL, k.pos.y) < NET_NEAR);
       const prx = st.puck.pos.x * dir;
       const cs = live && st.carrierId !== null ? st.skaters.find((k) => k.id === st.carrierId) : undefined;
       for (const e of events) {
@@ -851,7 +857,10 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
       if (live && prev !== null && prev.live && cs !== undefined && cs.side === side && prev.carrier === cs.id && prev.puckRx <= BLUE && prx > BLUE) c.carryIns++;
       // offensive-zone possessions
       const mine = live && st.possession === side && prx > BLUE;
-      if (mine) { if (!inZone) c.ozonePossessions++; c.ozoneTicks++; if (prx > DOTS_RX) c.ozoneLowTicks++; }
+      if (mine) {
+        if (!inZone) c.ozonePossessions++; c.ozoneTicks++; if (prx > DOTS_RX) c.ozoneLowTicks++;
+        if (st.skaters.some((k, i) => k.onIce && k.side === side && (st.plans[i]!.job === 'lowSupport' || st.plans[i]!.job === 'office'))) c.ozoneLowSupportTicks++;
+      }
       inZone = mine;
       if (live && cs !== undefined && cs.side === opp) {
         const crx = cs.pos.x * dir;
@@ -933,7 +942,7 @@ export function tacticMeasures(c: TacticCounters): {
   dumpInShare: number; ozoneSecondsPerPossession: number; lowSecondsPerPossession: number; lowPassesPerPossession: number;
   pointAttemptShare: number; defenceAttemptsPerGame: number; attemptsPerGame: number; twoDeepShare: number; meanDeep: number;
   dzonePressedShare: number; dzoneTwoShare: number; slotToPoint: number; allowedSlotPerGame: number; allowedPointPerGame: number;
-  chaseShare: number; pinchesPerGame: number;
+  chaseShare: number; pinchesPerGame: number; lowSupportShare: number; pointShotNearShare: number;
 } {
   return {
     dumpInShare: ratio(c.dumpIns, c.dumpIns + c.carryIns),
@@ -952,5 +961,7 @@ export function tacticMeasures(c: TacticCounters): {
     allowedPointPerGame: ratio(c.allowedPoint, c.games),
     chaseShare: ratio(c.behindChased, c.behindSpells),
     pinchesPerGame: ratio(c.pinches, c.games),
+    lowSupportShare: ratio(c.ozoneLowSupportTicks, c.ozoneTicks),
+    pointShotNearShare: ratio(c.pointShotSavesNear, c.pointShotSaves),
   };
 }

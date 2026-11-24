@@ -3,7 +3,8 @@ import { setTeamPhase } from '../src/commit';
 import { DT } from '../src/constants';
 import { goalieTick } from '../src/goalie';
 import { coverSpot, openSpot } from '../src/job-targets';
-import { assignTeamJobs } from '../src/jobs';
+import { assignTeamJobs, jobsFor } from '../src/jobs';
+import { jobAnchor } from '../src/job-targets';
 import { laneOpen } from '../src/lanes';
 import { assignJobs as assignAll } from '../src/team-play';
 import type { GameState, Job, PlayerDef, Side } from '../src/types';
@@ -25,6 +26,15 @@ describe('every player has a job', () => {
   it('in the offensive zone: net front, low support, high forward and two points', () => {
     const st = stateWith({ carrier: 'home', puckX: 22, puckY: 9, carrierSlot: 'LD' }); setTeamPhase(st); assignJobs(st, defs, tactics);
     expect(jobsOf(st, 'home').sort()).toEqual(['carrier', 'highForward', 'lowSupport', 'netFront', 'pointWeak'].sort());
+  });
+  it('the offence orders the offensive-zone jobs: a cycle team puts its low support first, a point-shot or rush team the net-front man (Task 11 brief, review fix; the net-front man is still handed out first, Task 8b)', () => {
+    const st = stateWith({ carrier: 'home', puckX: 22, puckY: 9, carrierSlot: 'LD' }); setTeamPhase(st);
+    const t = (offence: 'cycle' | 'pointShots' | 'rush') => ({ ...tactics.home, offence });
+    expect(jobsFor(st, 'home', t('cycle'))[0]).toBe('lowSupport'); expect(jobsFor(st, 'home', tactics.home)[0]).toBe('lowSupport');
+    expect(jobsFor(st, 'home', t('pointShots'))[0]).toBe('netFront'); expect(jobsFor(st, 'home', t('rush'))[0]).toBe('netFront');
+    // A forward carrying it deep (who takes one forward's job himself): a cycle team still puts low support first.
+    const deep = stateWith({ carrier: 'home', puckX: 25, puckY: 2, carrierSlot: 'LW' }); setTeamPhase(deep);
+    expect(jobsFor(deep, 'home', t('cycle'))[0]).toBe('lowSupport'); expect(jobsFor(deep, 'home', t('pointShots'))[0]).not.toBe('lowSupport');
   });
   it('in his own zone each man covers a man or a lane: wingers on the points, a defenceman at the net', () => {
     const st = stateWith({ carrier: 'home', puckX: 22, puckY: 9 }); setTeamPhase(st); assignJobs(st, defs, tactics);
