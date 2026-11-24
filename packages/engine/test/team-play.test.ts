@@ -40,6 +40,11 @@ describe('team play', () => {
     expect(driveFor(rush, w, d2)).toEqual({ slow: 'stop', through: false });
     expect(driveFor(rush, skater(rush, 'away', 'C'), d2)).toEqual({ slow: 'coast', through: false });
   });
+  it('stopgap drives: a back-checker skating fast away from his blue line is not stopped hard', () => {
+    const rush = stateWith({ carrier: 'home', puckX: 0 }); const d2 = new Map<string, Drive>();
+    const b = skater(rush, 'away', 'LW'); b.pos = { x: -3, y: 6 }; b.vel = { x: 8, y: 0 }; assignJobs(rush, defs, tactics, d2);
+    expect(driveFor(rush, b, d2)).toEqual({ slow: 'coast', through: false });
+  });
   it('a winger flying up ice with the carrier eases up in time to stay onside', () => {
     expect(wingerAheadOnRush()).toBeLessThan(0);
   });

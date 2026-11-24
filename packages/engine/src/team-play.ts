@@ -310,7 +310,7 @@ function keepLegal(state: GameState, s: SkaterState, dir: 1 | -1, chasing: boole
     // Task 2 stopgap: Task 3's effort-by-need replaces this. Held at the line, caught beyond it, or going too fast to
     // stop short of it by easing off, he stops hard.
     const toward = s.vel.x * dir;
-    if (atLine || room < 0 || toward * toward > 2 * TUNING.skating.easeDecel * room) drives?.set(s.id, HARD_LIMIT);
+    if (atLine || room < 0 || (toward > 0 && toward * toward > 2 * TUNING.skating.easeDecel * room)) drives?.set(s.id, HARD_LIMIT);
   }
   scratchVel.x = 0;
   scratchVel.y = 0;
