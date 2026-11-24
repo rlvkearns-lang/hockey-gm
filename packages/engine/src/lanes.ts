@@ -27,11 +27,16 @@ function segD(px: number, py: number, ax: number, ay: number, bx: number, by: nu
 
 const L = TUNING.lanes;
 
-/** Metres of clear ice round the segment from `from` to `to`: the smallest distance from any on-ice, standing opponent of `side` to it. */
-export function laneWidth(state: GameState, side: Side, from: Vec2, to: Vec2): number {
+/**
+ * Metres of clear ice round the segment from `from` to `to`: the smallest distance from any on-ice, standing opponent of
+ * `side` to it. With `clearOf`, opponents within `clearR` m of that spot are left out (a shot's lane: the men within
+ * TUNING.block.clearOfShooter of the shooter cannot block it in flight, shots.ts tryBlock; Task 8b).
+ */
+export function laneWidth(state: GameState, side: Side, from: Vec2, to: Vec2, clearOf: Vec2 | null = null, clearR = 0): number {
   let best = Infinity;
   for (const o of state.skaters) {
     if (!o.onIce || o.side === side || o.downT > 0) continue;
+    if (clearOf !== null && hyp(o.pos.x - clearOf.x, o.pos.y - clearOf.y) <= clearR) continue;
     const d = segD(o.pos.x, o.pos.y, from.x, from.y, to.x, to.y);
     if (d < best) best = d;
   }

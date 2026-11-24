@@ -146,6 +146,8 @@ const REBOUND_EDGE = O.rebound.edge;
 const TRAFFIC_NEAR = O.trafficNear;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */
 const CARRY_IN_ZONE = 5;
+/** A carry lane is offered only when its end is at least this far (m) from him. */
+const CARRY_MIN = 2.5;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
 /** Patience (Task 8b, TUNING.patience). */
 const PT = TUNING.patience;
@@ -229,6 +231,18 @@ export function patienceOf(state: GameState, s: SkaterState, me: PlayerDef, oddM
     by = PT.situation.alone + (PT.situation.setUp - PT.situation.alone) * clamp(mates / PT.setUp, 0, 1);
   }
   return clamp((PT.base - PT.perShoot * (me.tendencies.shoot - 0.5)) * by * PT.tacticFactor, 0, PT.max);
+}
+
+/**
+ * What is left of a shot's chance to score for a man with his nearest opponent `space` m away (Task 8b): the calm and the
+ * rush factors of the shot option (listOptions), for an average checker and a shooter of poise `poise`. A pass or a
+ * carry that leads to a covered man's look is worth that look, not a free one.
+ */
+function lookLeft(space: number, poise: number): number {
+  const pressure = clamp((5 - space) / 4, 0, 1);
+  const calm = 1 - pressure * (B.calm.base - poise * B.calm.perPoise);
+  const r = clamp((RU.reach - space) / (RU.reach - RU.full), 0, 1);
+  return dpow(calm, B.shootPressure) * (1 - RU.stick.base * r) * (1 - RU.value * r);
 }
 
 /** The carrier's situation now, written into `out`. */
@@ -340,10 +354,16 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const scoreShoot = margin === 'ahead' ? se.leaderShoot : Math.min(se.maxShoot, (margin === 'behind' ? se.trailerShoot : 1) * (1 + se.latePush * late));
       g = V.goal * q * shootSkill * (B.openNetWeight[0] + B.openNetWeight[1] * open) * dpow(calm, B.shootPressure);
       // A rushed shot (Task 8b, actions.ts shotRush: a checker in stick reach): his stick gets on it with chance
-      // rush.stick, and what gets by him is slower and wilder (RU.value of its chance at full rush).
-      g *= (1 - rushStick) * (1 - RU.value * rushed);
+      // rush.stick, and what gets by him is slower and wilder (RU.value of its chance at full rush from RU.valueFull m
+      // or more; in tight the goalie has no time either way, so less in proportion).
+      g *= (1 - rushStick) * (1 - RU.value * rushed * clamp(dNet / RU.valueFull, 0, 1));
+      // A goalie still in his last save's pose is easier to beat (goalie.ts saveChance `recovering`; Task 8b: the
+      // valuation did not see it, so a rebound in front was valued as any shot).
+      const gs = state.goalies[side === 'home' ? 'away' : 'home'];
+      if (gs.pose !== 'stance' && gs.pose !== 'cover') g *= 1 + O.recovering * clamp(gs.poseT / TUNING.goalie.poseSeconds, 0, 1);
       tw.x = GOAL * dir; tw.y = 0;
-      const sw = laneWidth(state, side, p, tw);
+      // (The men within TUNING.block.clearOfShooter of him cannot block it in flight: the checker on him is in `rush`.)
+      const sw = laneWidth(state, side, p, tw, s.pos, TUNING.block.clearOfShooter);
       traffic = netFrontMate(state, s);
       if (dNet >= FAR_SHOT) {
         // From the point (11 m or more, Task 7): a teammate in front of the net screens the goalie (V.traffic), and
@@ -430,7 +450,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (qm > 0 && rx > BLUE) {
       const rd = defs.get(m.id);
       const gm = V.goal * qm * (rd ? B.shootSkill.base + composite(rd.attrs, SHOOTING) * B.shootSkill.perPoint : 1);
-      to = worthAt(to, gm * B.openNetWeight[0] * opn, mrx);
+      to = worthAt(to, gm * B.openNetWeight[0] * lookLeft(space, rd ? rd.attrs.poise : 70), mrx);
       to += gm * O.pass.across * clamp(Math.abs(mly - ly) / O.pass.acrossFull, 0, 1);
     } else to = keepAt(to, mrx);
     let v = valueOf(chance, to);
@@ -456,6 +476,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const carry = (lane: CarryLane, trx: number, tly: number): void => {
     trx = clamp(trx, -GOAL, GOAL + 2.2);
     tly = clamp(tly, -RINK.halfWidth + 1.5, RINK.halfWidth - 1.5);
+    // A lane that ends where he already is (in a corner, against the boards) is no carry: he would arrive at once and
+    // choose again (Task 8b: 1,100 such arrivals a game with the carry wide down low).
+    if (hyp(trx - srx, tly - sly) < CARRY_MIN) return;
     // Never carry the puck in while a teammate is still in the zone.
     if (outside && mateOffside && trx > BLUE - B.holdUpGap) trx = BLUE - B.holdUpGap;
     tw.x = trx * dir; tw.y = tly * dir;
@@ -471,7 +494,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // (Task 8b: what the shot at its end keeps is a share of the possession he has now, `here`, as for the shot option;
     // the worth of the spot at its end counted that shot a second time.)
     if (mode === 'break') to = gEnd + (1 - gEnd) * endKeep(a.shootingAccuracy, hyp(GOAL - trx, tly)) * here;
-    else { const opn = openAt(spaceAt(state, side, tw)); to = worthAt(threat(trx, tly) * opn, gEnd * opn, trx); }
+    else { const sp = spaceAt(state, side, tw); to = worthAt(threat(trx, tly) * openAt(sp), gEnd * lookLeft(sp, a.poise), trx); }
     let v = valueOf(chance, to);
     v = habit(v, tend.carry) - moveOn;
     out.push({ kind: 'carry', lane, to: { x: tw.x + 0, y: tw.y + 0 }, value: v });

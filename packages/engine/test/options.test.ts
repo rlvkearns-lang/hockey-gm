@@ -231,13 +231,13 @@ describe('patience and pressured shots (Task 8b)', () => {
   /**
    * A set-up possession in the zone: all five home skaters in it, in their jobs, the away five in a box and one. `who` has
    * the puck: the left defenceman at the point, 14 m out, nobody within 5 m of him and a clear lane (the net-front man at
-   * the top of the crease with `screen`, in the far corner without), or the centre in the slot, 6.5 m out.
+   * the top of the crease with `screen`, in the far corner without), or the centre in the slot, 5.6 m out.
    */
   const setUp = (who: 'point' | 'slot', screen = false): GameState => {
-    const st = who === 'point' ? stateWith({ carrier: 'home', puckX: 13.5, puckY: 3, carrierSlot: 'LD' }) : stateWith({ carrier: 'home', puckX: 20.8, puckY: 1.5, carrierSlot: 'C' });
+    const st = who === 'point' ? stateWith({ carrier: 'home', puckX: 13.5, puckY: 3, carrierSlot: 'LD' }) : stateWith({ carrier: 'home', puckX: 21.6, puckY: 1, carrierSlot: 'C' });
     if (who === 'point') { place(st, 'home:C', screen ? 25.3 : 26, screen ? 0.3 : -10); setJob(st, 'home-C', screen ? 'netFront' : 'lowSupport'); } else place(st, 'home:LD', 10, 7);
     place(st, 'home:RD', 9.5, -8); place(st, 'home:LW', 24, 10); place(st, 'home:RW', 17, -10.5);
-    place(st, 'away:LD', 24.5, -3.5); place(st, 'away:RD', 24.5, 4.5); place(st, 'away:C', 19.5, -5.5); place(st, 'away:LW', 12, 9.5); place(st, 'away:RW', 12, -6);
+    place(st, 'away:LD', 24.5, -3.5); place(st, 'away:RD', 25, 5.5); place(st, 'away:C', 19.5, -5.5); place(st, 'away:LW', 12, 9.5); place(st, 'away:RW', 12, -6);
     return st;
   };
   const shoots = (st: GameState, d: PlayerDef = def({})): number => decisions(st, d, 2000).filter((x) => x.kind === 'shoot').length / 2000;
@@ -255,7 +255,7 @@ describe('patience and pressured shots (Task 8b)', () => {
   });
   it('a checker in stick reach: he shoots at most half as often, and the shot he does take is slower and on net less', () => {
     const free = setUp('slot'), pressed = setUp('slot');
-    place(pressed, 'away:C', 20.2, 2.6); // 1.1 m from him, beside him: not in his lane to the net
+    place(pressed, 'away:C', 21, 2.1); // 1.1 m from him, beside him: not in his lane to the net
     expect(shoots(free)).toBeGreaterThan(0.3); expect(shoots(pressed)).toBeLessThanOrEqual(shoots(free) * 0.5);
     const taken = (st0: GameState): { speed: number; onNet: number } => {
       let speed = 0, onNet = 0; const n = 600;

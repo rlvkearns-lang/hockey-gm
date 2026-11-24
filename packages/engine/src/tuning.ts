@@ -34,7 +34,7 @@ export const TUNING = deepFreeze({
      * (hysteresis); his arrival is a decision point once, and no other arrival is one for pressCooldown s after it; a
      * change of his situation is not a decision point within readGap s of his last decision.
      */
-    decide: { holdZone: 1.2, hold: 0.8, holdPressure: 0.3, pressed: 0.5, arrive: 1.5, margin: 0.03, marginHeld: 0, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 1.5, readGap: 0.5 },
+    decide: { holdZone: 1.5, hold: 1.0, holdPressure: 0.3, pressed: 0.5, arrive: 1.5, margin: 0.06, marginHeld: 0.015, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 2, readGap: 0.8 },
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
     shotDistanceScale: 9,
     maxShotDistance: 25,
@@ -48,7 +48,7 @@ export const TUNING = deepFreeze({
     openNetWeight: [0.85, 0.5] as [number, number],
     openNetShade: 0.6,
     /** A shot's chance is scaled by calm (1 at no pressure) to this power: a covered shooter looks for something else. */
-    shootPressure: 2.0,
+    shootPressure: 0.6,
     /**
      * Largest share any one kind of option (all passing lanes together count as one kind, all carry lanes another) may
      * have of the carrier's draw in an ordinary state when another kind is on his list (options.ts chooseOption).
@@ -66,7 +66,7 @@ export const TUNING = deepFreeze({
      * The longer he has had the puck the more he wants to move it on: each second (TUNING.value.hold, at most holdCap)
      * adds hold * holdBoost.shoot to a shot's value and hold * holdBoost.pass to a pass's (options.ts).
      */
-    holdBoost: { shoot: 0.3, pass: 2 },
+    holdBoost: { shoot: 0, pass: 4 },
     /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
     protectStep: 2,
     protectSpeedCap: 0.4,
@@ -164,7 +164,7 @@ export const TUNING = deepFreeze({
      * centre). A pass across the slot to a man whose threat is over oneTimerThreat is a one-timer pass; his first decision
      * values the shot oneTimerBonus higher.
      */
-    traffic: 0.02, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
+    traffic: 0.04, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
     /**
      * What follows in the zone he attacks (Task 8 fix round), measured in play at 43d6dcf, seeds 1-16
      * (task-8-report.md, "Fix round 1"): `keep`, the share of cases in which his team (or nobody) has the puck in the zone
@@ -180,7 +180,7 @@ export const TUNING = deepFreeze({
       blocked: { keep: 0.24, rush: 0.34 },
       wide: { keep: 0.28, rush: 0.15 },
     },
-    stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
+    stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.003, holdCap: 10,
     goal: 0.2, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
 
@@ -222,12 +222,19 @@ export const TUNING = deepFreeze({
        */
       contest: 0.3,
     },
-    carry: { base: 0.95, pressure: 0.35, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
+    /**
+     * Task 8b, set from play (seeds 1-6, decisions in the zone he attacks; the other side has the puck within 2 s): after
+     * a carry 0.11 with nobody within 5 m and 0.18 with a checker in stick reach (it was valued 0.08 and 0.29); after a
+     * protect 0.04 and 0.13 (valued 0.03 and 0.255). carry.pressure was 0.35, protect.loss 0.4.
+     */
+    carry: { base: 0.95, pressure: 0.24, pressurePerPoint: 0.002, laneFrom: 2.5, laneCost: 0.5 },
     hold: { base: 0.97, pressure: 0.1, keep: 0.9 },
     wrap: { base: 0.9, pressure: 0.2, laneFrom: 1.5, laneCost: 0.3, goal: 0.55, open: 1.2 },
-    protect: { base: 0.97, loss: 0.4, lossPerPoint: 0.0025, idle: 0.01 },
+    protect: { base: 0.97, loss: 0.275, lossPerPoint: 0.0025, idle: 0.01 },
     clearIdle: 0.04,
     blindRim: 0.6,
+    /** A shot at a goalie still in his last save's pose is worth 1 + recovering times as much at its start (Task 8b). */
+    recovering: 1,
     shotLane: [0.5, 1.0] as [number, number],
     shotBlocked: [0.3, 0.6] as [number, number],
     scoreSoft: 0.5,
@@ -342,7 +349,7 @@ export const TUNING = deepFreeze({
      * stick.keep of their speed. The valuation (options.ts) takes the same stick chance off the shot's chance to score,
      * and `value` * how rushed more for the lost speed and accuracy (set from play: see task-8b-report.md).
      */
-    rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.6, wild: 0.15, aim: 0.6, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.5 },
+    rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.2, wild: 0.15, aim: 0.8, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.5, valueFull: 6 },
     /** Shooters aim this far (m) from the centre of the net, either side, and this high. */
     aimY: [0.3, 0.65] as [number, number],
     aimZ: [0.1, 0.8] as [number, number],
@@ -398,6 +405,8 @@ export const TUNING = deepFreeze({
      * or a miss).
      */
     face: { postClear: 0.01, barClear: 0.05, reach: 1.6 },
+    /** How long (s) he shows a save pose; while in it his next save is harder (save.recovering, scaled by how much is left). */
+    poseSeconds: 0.6,
     /** An attacker screens him within `off` (m) of a shot's line, `near` to `far` (m) in front of him. */
     screen: { off: 0.6, near: 0.8, far: 4 },
     /** Top speed along his arc (m/s): base plus per point of lateral. */

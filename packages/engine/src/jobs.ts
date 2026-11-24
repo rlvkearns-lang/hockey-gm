@@ -250,8 +250,12 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
     used[k] = true;
     out[i] = held;
   }
-  // Each job in order to the cheapest man of its group.
-  for (let k = 0; k < jobs.length; k++) {
+  // Each job in order to the cheapest man of its group; netFront first when it is on the list (Task 8b: handed out after
+  // highForward, the man at the net was sent high whenever the other forward was further from there than he was, and
+  // the two swapped: 115 net-front spells a game ended that way while a teammate carried the puck).
+  const nf = jobs.indexOf('netFront');
+  for (let kk = nf >= 0 ? -1 : 0; kk < jobs.length; kk++) {
+    const k = kk < 0 ? nf : kk;
     if (used[k]) continue;
     const job = jobs[k]!;
     const a = jobAnchor(state, side, job, tactics, anchorScratch);

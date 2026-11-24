@@ -43,7 +43,7 @@ const POST_Y = 0.75;
 /** His top speed is cut to this share while showing a save. */
 const POSE_SPEED_FACTOR = 0.4;
 /** How long a save pose and a cover are shown (s). */
-const POSE_SECONDS = 0.6;
+const POSE_SECONDS = TUNING.goalie.poseSeconds;
 const COVER_SECONDS = TUNING.goalie.rebound.coverSeconds;
 /** He faces only a shot on its way in clear of the posts (by POST_CLEAR m: the puck and the post's radius, plus TUNING.goalie.face.postClear) and under the bar (by BAR_CLEAR m). */
 const POST_CLEAR = PUCK_RADIUS_ + 0.03 + TUNING.goalie.face.postClear;
