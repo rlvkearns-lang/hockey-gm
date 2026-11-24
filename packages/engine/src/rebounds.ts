@@ -9,13 +9,14 @@ import type { Rng } from './rng';
 import { TUNING as TUNING_ } from './tuning';
 import type { Crossing, GameEvent, GameState, SaveKind, SavePose, Side } from './types';
 import type { Vec2 } from './vec';
-import { dcos as dcos_, dsin as dsin_ } from './dmath';
+import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, PUCK_RADIUS as PUCK_RADIUS_ } from './util';
 const gameEvent = gameEvent_;
 const stopPlay = stopPlay_;
 const FACEOFF_DOTS = FACEOFF_DOTS_;
 const resolveBoards = resolveBoards_;
 const TUNING = TUNING_;
+const datan2 = datan2_;
 const dcos = dcos_;
 const dsin = dsin_;
 const clamp = clamp_;
@@ -23,8 +24,8 @@ const PUCK_RADIUS = PUCK_RADIUS_;
 
 const G = TUNING.goalie;
 const R = TUNING.goalie.rebound;
-/** How long (s) he shows holding the puck. */
-const COVER_SECONDS = 1.2;
+/** How long (s) he shows holding the puck (TUNING.goalie.rebound.coverSeconds). */
+const COVER_SECONDS = R.coverSeconds;
 
 /** What decides a save's outcome: his pose, the shot's speed (m/s), a screen, a tip, and his reboundControl. */
 export type SaveFacts = { pose: SavePose; speed: number; screened: boolean; tipped: boolean; reboundControl: number };
@@ -59,9 +60,13 @@ function endDotNear(end: 1 | -1, p: Vec2): Vec2 {
 /**
  * Draws the outcome of a save by the goalie of `goalieSide` and moves the puck from the save point (the puck is there
  * now, `cross` says where on him). held: `freeze` (cause 'save') and a whistle, as before. steered: toward the corner on
- * the side it came to (the side of his centre it met him on), 55 to 80 degrees off straight out, 6 to 9 m/s. rebound:
- * within 35 degrees plus 0.3 per point of reboundControl under 100 of straight out (50 at 50), 2.5 to 6 m/s, so that it
- * is still in front half a second later. Sets state.lastSave (a held save's is cleared by the whistle). Returns the kind.
+ * the side it came to (the side of his centre it met him on), 55 to 80 degrees off straight out, 6 to 9 m/s. rebound
+ * (Task 8 review, Important 2): it comes off him at a share of the shot's speed set by his reboundControl and the pose
+ * (a pad or blocker livelier than the chest or glove), within 2.5 to 6 m/s; along R.reflect of the shot's reflected line
+ * (the puck's velocity as it met him, mirrored in his plane), turned further to the side it met him on by a blocker
+ * (R.blockerTurn) or a pad (R.padTurn), with a normal error that shrinks with reboundControl; never more than 35 degrees
+ * plus 0.3 per point of reboundControl under 100 off straight out (50 at 50), so that it is still in front half a second
+ * later. Sets state.lastSave (a held save's is cleared by the whistle). Returns the kind.
  */
 export function saveOutcome(state: GameState, goalieSide: Side, f: SaveFacts, cross: Crossing, rng: Rng, out: GameEvent[]): SaveKind {
   const c = saveOutcomeChances(f);
@@ -70,6 +75,8 @@ export function saveOutcome(state: GameState, goalieSide: Side, f: SaveFacts, cr
   const g = state.goalies[goalieSide];
   const end = (-state.attackDir[goalieSide]) as 1 | -1;
   const pk = state.puck;
+  // The shot's line as it met him (the puck still has the shot's velocity).
+  const inX = pk.vel.x, inY = pk.vel.y;
   state.lastSave = { side: goalieSide, tick: state.tick, kind };
   state.carrierId = null;
   state.lastTouch = { id: g.id, side: goalieSide };
@@ -96,8 +103,13 @@ export function saveOutcome(state: GameState, goalieSide: Side, f: SaveFacts, cr
     speed = rng.range(R.steeredSpeed[0], R.steeredSpeed[1]);
   } else {
     const max = R.maxAngle.base + R.maxAngle.perPoint * (100 - f.reboundControl);
-    rel = rng.range(-max, max);
-    speed = rng.range(R.speed[0], R.speed[1]);
+    // The reflected line off straight out: mirrored in his plane, a shot moving toward +y goes on toward +y.
+    const into = inX * end;
+    const refl = into > 0 ? datan2(inY, into) * -end : 0;
+    const sideTurn = cross.side === 0 ? 0 : (cross.side * -end >= 0 ? 1 : -1) * -end;
+    const turn = f.pose === 'blocker' ? R.blockerTurn : f.pose === 'pad' ? R.padTurn : 0;
+    rel = clamp(refl * R.reflect + sideTurn * turn + rng.gauss() * (R.spread.base + R.spread.perPoint * (100 - f.reboundControl)), -max, max);
+    speed = clamp(f.speed * clamp(R.speedShare.base - R.speedShare.perPoint * f.reboundControl, R.speedShare.min, R.speedShare.max) * R.poseSpeed[f.pose], R.speed[0], R.speed[1]);
   }
   const a = out0 + rel;
   pk.vel.x = dcos(a) * speed;

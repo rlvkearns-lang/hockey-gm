@@ -404,8 +404,13 @@ export const TUNING = deepFreeze({
      * What a save does with the puck (rebounds.ts, Task 8). Held: freeze[pose] less heldPerSpeed per m/s over heldFrom,
      * less heldScreened, less heldTipped. Of the rest, steered: steered.base + steered.perPoint * (reboundControl - 50),
      * less steered.tipped; the rest leave a rebound. A steered puck goes 6 to 9 m/s toward the corner on the side it came
-     * to, 55 to 80 degrees off straight out; a rebound 2.5 to 6 m/s within maxAngle.base + maxAngle.perPoint *
-     * (100 - reboundControl) rad of straight out.
+     * to, 55 to 80 degrees off straight out. A rebound (Task 8 review, Important 2: it depends on the save, the shot and
+     * the goalie) leaves at the shot's speed times speedShare (base less perPoint * reboundControl, within [min, max])
+     * times poseSpeed[pose] (a pad or a blocker gives it back livelier than the chest or the glove), kept within `speed`
+     * (2.5 to 6 m/s); its direction is `reflect` of the shot's reflected line off straight out, turned blockerTurn (a
+     * blocker save) or padTurn (a pad save) further toward the side it met him on, a chest or glove save dropping it in
+     * front, plus a normal error of spread.base + spread.perPoint * (100 - reboundControl) rad, all within maxAngle.base +
+     * maxAngle.perPoint * (100 - reboundControl) rad of straight out. He shows holding the puck for coverSeconds.
      */
     rebound: {
       heldFrom: 25, heldPerSpeed: 0.004, heldScreened: 0.08, heldTipped: 0.12,
@@ -413,7 +418,12 @@ export const TUNING = deepFreeze({
       steeredSpeed: [6, 9] as [number, number],
       steeredAngle: [(55 * Math.PI) / 180, (80 * Math.PI) / 180] as [number, number],
       speed: [2.5, 6] as [number, number],
+      speedShare: { base: 0.22, perPoint: 0.0012, min: 0.06, max: 0.3 },
+      poseSpeed: { glove: 0.5, blocker: 1, pad: 1, butterfly: 0.7 } as Record<SavePose, number>,
+      reflect: 0.5, blockerTurn: 0.5, padTurn: 0.3,
+      spread: { base: 0.15, perPoint: 0.006 },
       maxAngle: { base: (35 * Math.PI) / 180, perPoint: (0.3 * Math.PI) / 180 },
+      coverSeconds: 1.2,
     },
   },
 

@@ -99,6 +99,45 @@ describe('saves with an outcome (Task 8)', () => {
     expect(shareOf(front, (w) => Math.hypot(GOAL_X - w.at05.x, w.at05.y) < 4 && w.at05.x < GOAL_X)).toBeGreaterThan(0.9);
     expect(shareOf(corner, (w) => Math.abs(w.at1.y) > 5 && Math.hypot(GOAL_X - w.at1.x, w.at1.y) > 5)).toBeGreaterThan(0.85);
   });
+  // Task 8 review, Important 2: a rebound depends on the save, the shot and the goalie.
+  /** `n` rebounds (saveOutcome draws that leave one) off the away goalie at the middle of his net, the shot arriving with velocity (vx, vy): each one's speed and its angle off straight out (rad, positive toward +y). */
+  const reboundsOf = (n: number, o: Partial<SaveFacts> & { vx?: number; vy?: number; side?: number }): { speed: number; angle: number }[] => {
+    const out: { speed: number; angle: number }[] = [];
+    for (let i = 0; out.length < n && i < n * 40; i++) {
+      const st = empty(); const gl = st.goalies.away; gl.pos = { x: GOAL_X - 1, y: 0 };
+      const side = o.side ?? 0;
+      st.puck.pos = { x: gl.pos.x, y: -side }; st.puck.vel = { x: o.vx ?? 30, y: o.vy ?? 0 };
+      const f: SaveFacts = { pose: 'pad', speed: Math.hypot(o.vx ?? 30, o.vy ?? 0), screened: false, tipped: false, reboundControl: 60, ...o };
+      if (saveOutcome(st, 'away', f, { side, height: 0.2 }, createRng(70_000 + i), []) !== 'rebound') continue;
+      out.push({ speed: Math.hypot(st.puck.vel.x, st.puck.vel.y), angle: Math.atan2(st.puck.vel.y, -st.puck.vel.x) });
+    }
+    return out;
+  };
+  const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+  it('a harder shot leaves a livelier rebound, a pad a livelier one than the glove, and better rebound control a deader one; all within 2.5 to 6 m/s', () => {
+    const sp = (o: Partial<SaveFacts> & { vx?: number }): number => mean(reboundsOf(200, o).map((r) => r.speed));
+    expect(sp({ vx: 40 })).toBeGreaterThan(sp({ vx: 22 }) + 1.2);
+    expect(sp({ vx: 34, pose: 'pad' })).toBeGreaterThan(sp({ vx: 34, pose: 'glove' }) + 1);
+    expect(sp({ vx: 34, pose: 'pad' })).toBeGreaterThan(sp({ vx: 34, pose: 'butterfly' }) + 0.5);
+    expect(sp({ vx: 34, reboundControl: 30 })).toBeGreaterThan(sp({ vx: 34, reboundControl: 90 }) + 0.8);
+    for (const o of [{ vx: 45, reboundControl: 20 }, { vx: 10, pose: 'glove' as const, reboundControl: 95 }]) for (const r of reboundsOf(100, o)) { expect(r.speed).toBeGreaterThanOrEqual(2.5 - 1e-9); expect(r.speed).toBeLessThanOrEqual(6 + 1e-9); }
+  });
+  it('a rebound follows the shot\'s line and the saving part: a shot moving toward +y comes out toward +y, a pad or blocker kicks it to its own side, the chest drops it in front', () => {
+    const ang = (o: Partial<SaveFacts> & { vx?: number; vy?: number; side?: number }): number => mean(reboundsOf(300, o).map((r) => r.angle));
+    // From the -y wing (moving toward +y), 30 degrees off straight on: out toward +y; from the other wing, toward -y.
+    expect(ang({ pose: 'butterfly', vx: 26, vy: 15 })).toBeGreaterThan(0.15); expect(ang({ pose: 'butterfly', vx: 26, vy: -15 })).toBeLessThan(-0.15);
+    // Straight on: the away goalie's left is -y, so a save on his left (side > 0) goes toward -y off a pad or a blocker.
+    expect(ang({ pose: 'pad', side: 0.4 })).toBeLessThan(-0.2); expect(ang({ pose: 'pad', side: -0.4 })).toBeGreaterThan(0.2);
+    expect(ang({ pose: 'blocker', side: -0.4 })).toBeGreaterThan(ang({ pose: 'pad', side: -0.4 }) + 0.1);
+    expect(Math.abs(ang({ pose: 'butterfly', side: 0.4 }))).toBeLessThan(0.08);
+    // A goalie with poor rebound control sprays them wider.
+    const sd = (rc: number): number => { const a = reboundsOf(300, { pose: 'butterfly', reboundControl: rc }).map((r) => r.angle); const m0 = mean(a); return Math.sqrt(mean(a.map((x) => (x - m0) * (x - m0)))); };
+    expect(sd(30)).toBeGreaterThan(sd(90) * 1.5);
+  });
+  it('better rebound control: more saves held and fewer rebounds (a 90 holds at least 15 points more than a 30 with the glove)', () => {
+    const c = (rc: number): ReturnType<typeof saveOutcomeChances> => saveOutcomeChances({ pose: 'glove', speed: 30, screened: false, tipped: false, reboundControl: rc });
+    expect(c(90).held - c(30).held).toBeGreaterThan(0.15); expect(c(90).rebound).toBeLessThan(c(30).rebound);
+  });
   it('a save sets lastSave for that goalie; a held one stops play', () => {
     const rng = createRng(3);
     const kinds = new Set<SaveKind>();

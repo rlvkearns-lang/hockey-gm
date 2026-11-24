@@ -44,7 +44,7 @@ const POST_Y = 0.75;
 const POSE_SPEED_FACTOR = 0.4;
 /** How long a save pose and a cover are shown (s). */
 const POSE_SECONDS = 0.6;
-const COVER_SECONDS = 1.2;
+const COVER_SECONDS = TUNING.goalie.rebound.coverSeconds;
 /** He faces only a shot on its way in clear of the posts (by POST_CLEAR m: the puck and the post's radius) and under the bar (by BAR_CLEAR m). */
 const POST_CLEAR = PUCK_RADIUS_ + 0.03 + 0.01;
 const BAR_CLEAR = 0.05;
