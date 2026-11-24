@@ -26,6 +26,7 @@ import { refereeTick } from '../src/referee';
 import type { Movement } from '../src/skating';
 import { availableParallelism } from 'node:os';
 import { MessageChannel, receiveMessageOnPort, Worker, type MessagePort } from 'node:worker_threads';
+import { createObserver, measuresOf, type PlayCounters, type PlayMeasures } from './measures';
 
 /**
  * Test scaffolding: skater `fromId` (the carrier) lets the puck go at (vx, vy, vz) m/s, with the same effects on the
@@ -1290,6 +1291,9 @@ export type GameRecord = {
   counts: Record<string, number>;
   /** Contests started, by kind. */
   contests: Record<string, number>;
+  /** The play observer's counters for the game (test/measures.ts), and its largest puck jump (m). */
+  play: PlayCounters;
+  maxPuckJump: number;
 };
 
 export type CalibrationOpts = { homeOverall?: number; awayOverall?: number };
@@ -1325,10 +1329,12 @@ export function playRecord(i: number, o: CalibrationOpts = {}): GameRecord {
   };
   const t0 = performance.now();
   const game = createGame(s);
+  const obs = createObserver(s);
   const contests: Record<string, number> = {};
   const seen = new Set<number>();
   while (!game.done) {
     game.step();
+    obs.tick(game.state, game.drainEvents());
     for (const c of game.state.contests) if (!seen.has(c.id)) { seen.add(c.id); contests[c.kind] = (contests[c.kind] ?? 0) + 1; }
   }
   const r = game.result();
@@ -1343,7 +1349,7 @@ export function playRecord(i: number, o: CalibrationOpts = {}): GameRecord {
   }
   const types: Record<string, string> = {};
   for (const p of [...s.home.players, ...s.away.players]) types[p.id] = p.type;
-  return { index: i, ms, score: r.score, team: r.team, players: r.players, types, counts, contests };
+  return { index: i, ms, score: r.score, team: r.team, players: r.players, types, counts, contests, play: obs.counters(), maxPuckJump: obs.maxPuckJump() };
 }
 
 const recordCache = new Map<string, GameRecord[]>();
@@ -1408,6 +1414,10 @@ export type Summary = {
   savePct: number;
   homeWinShare: number; tieShare: number;
   msPerGame: number;
+  /** Shot attempts per team per game: `shot` + `miss` + `post` + `block` events. */
+  attempts: number;
+  /** The "looks like hockey" measures over all the records (test/measures.ts). */
+  play: PlayMeasures;
 };
 
 /** Per-team-per-game means (and per-game totals for the whistles) over the records. */
@@ -1435,6 +1445,8 @@ export function summarise(rs: GameRecord[]): Summary {
     homeWinShare: rs.filter((r) => r.score.home > r.score.away).length / g,
     tieShare: rs.filter((r) => r.score.home === r.score.away).length / g,
     msPerGame: total(rs, (r) => r.ms) / g,
+    attempts: perTeam(total(rs, (r) => countOf(r, 'shot') + countOf(r, 'miss') + countOf(r, 'post') + countOf(r, 'block'))),
+    play: measuresOf(rs.map((r) => ({ counters: r.play, maxPuckJump: r.maxPuckJump }))),
   };
 }
 

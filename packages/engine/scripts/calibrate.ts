@@ -38,6 +38,7 @@ row('faceoffs', f(m.faceoffs));
 row('offsides', f(m.offsides));
 row('icings', f(m.icings));
 row('battles', f(m.battles));
+row('shot attempts', f(m.attempts));
 console.log('\nper game (both teams)');
 row('faceoffs', f(m.faceoffsTotal));
 row('faceoff share outside 35-65%', `${f(m.faceoffShareOutside * 100, 1)}% of games`);
@@ -66,3 +67,6 @@ row('battle win share by type', Object.keys(bw).sort().map((t) => `${t} ${f(bw[t
 const goalsDist = new Map<number, number>();
 for (const r of rs as GameRecord[]) { const n = r.score.home + r.score.away; goalsDist.set(n, (goalsDist.get(n) ?? 0) + 1); }
 row('total goals: games', [...goalsDist.keys()].sort((a, b) => a - b).map((k) => `${k}:${goalsDist.get(k)}`).join(' '));
+
+console.log('\nhow it plays (test/measures.ts)');
+for (const [k, v] of Object.entries(m.play)) row(k, f(v, Math.abs(v) < 1 ? 3 : 2));

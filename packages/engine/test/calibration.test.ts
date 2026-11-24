@@ -41,5 +41,5 @@ describe('calibration', () => {
    }, GAMES_TIMEOUT);
   it('snipers outscore grinders per 60 minutes', () => { const g = goalsPer60ByType(runGames(300)); expect(g['Sniper']).toBeGreaterThan(g['Grinder']! * 1.5); }, GAMES_TIMEOUT);
   it('heavier, stronger players win more battles, under 75%', () => { const b = battleWinShareByType(runGames(300)); expect(b['Power Forward']).toBeGreaterThan(b['Speedster']! + 0.05); expect(b['Power Forward']).toBeLessThan(0.75); }, GAMES_TIMEOUT);
-  it('a game runs within budget', () => { const t0 = performance.now(); for (let i = 0; i < 5; i++) simulateGame(setup(i)); expect((performance.now() - t0) / 5).toBeLessThan(3000); }, 60_000);
+  it('a game runs within budget: 2.5 s', () => { const t0 = performance.now(); for (let i = 0; i < 5; i++) simulateGame(setup(i)); expect((performance.now() - t0) / 5).toBeLessThan(2500); }, 60_000);
 });
