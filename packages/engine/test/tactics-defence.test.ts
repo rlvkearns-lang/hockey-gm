@@ -33,9 +33,10 @@ describe('tactics: two teams look different (defence, pinching)', () => {
     // Task 11 close-out ruling 2: the brief's "over 0.7" is replaced by what matters, pressure at least twice collapse and
     // over 0.5 (0.576 against 0.234 on seeds 1-16 at the close-out: from where the pressing men are, getting behind the
     // goal line takes about a second). Collapse stays under 0.3.
-    const pr = home({ defence: 'pressure' }, 8).chaseShare, co = home({ defence: 'collapse' }, 8).chaseShare;
+    // (Pooled over seeds 1-16, as the ruling was measured: on 8 seeds collapse reads 0.275 and the ratio 1.97.)
+    const pr = home({ defence: 'pressure' }, 16).chaseShare, co = home({ defence: 'collapse' }, 16).chaseShare;
     expect(pr).toBeGreaterThan(0.5); expect(pr).toBeGreaterThanOrEqual(2 * co); expect(co).toBeLessThan(0.3);
-  }, LONG);
+  }, 1_200_000);
   it('point men pinch more when told to, and only with a forward above them', () => {
     const often = homeCounts({ pinch: 'often' }, 8), rarely = homeCounts({ pinch: 'rarely' }, 8), some = homeCounts({ pinch: 'sometimes' }, 8);
     expect(often.pinches).toBeGreaterThan(rarely.pinches * 2);

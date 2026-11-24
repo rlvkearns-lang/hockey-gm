@@ -47,7 +47,8 @@ describe('tactics: the input', () => {
       expect(f('pointShots')[k] / f('cycle')[k]).toBeCloseTo(O.pointShots[k] / O.cycle[k], 10);
     }
     expect(f('pointShots').pointShot).toBeGreaterThan(1); expect(f('rush').rushShot).toBeGreaterThan(1); expect(f('rush').lowCycle).toBeLessThan(1);
-    expect(patienceFactor('cycle')).toBeGreaterThan(patienceFactor('pointShots')); expect(patienceFactor('pointShots')).toBeGreaterThan(patienceFactor('rush'));
+    // (Close-out ruling 3b: a point-shot team is as patient as a cycle team, 1.0, to keep its attempts inside 40 to 70.)
+    expect(patienceFactor('cycle')).toBeGreaterThanOrEqual(patienceFactor('pointShots')); expect(patienceFactor('pointShots')).toBeGreaterThan(patienceFactor('rush'));
   });
   it('a factor k multiplies the option\'s weight in an average player\'s draw by k (a shift of temp * ln k on its value)', () => {
     const T = TUNING.tactics.temp;
