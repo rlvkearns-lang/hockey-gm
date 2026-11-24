@@ -53,6 +53,7 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.phase = 'stopped';
   state.phaseT = 0;
   state.carrierId = null;
+  state.carrierPlan = null;
   state.possession = null;
   state.pickupBlock = null;
   state.pendingPass = null;
@@ -77,6 +78,7 @@ export function setupFaceoff(state: GameState, spot: Vec2): void {
   state.faceoffSpot = { x: spot.x, y: spot.y };
   state.puck = { pos: { x: spot.x, y: spot.y }, z: 0, vel: { x: 0, y: 0 }, vz: 0 };
   state.carrierId = null;
+  state.carrierPlan = null;
   state.possession = null;
   state.pendingPass = null;
   state.shotInFlight = null;

@@ -238,7 +238,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
     },
-    plans: initialPlans(skaters.length), teamPhase: initialTeamPhase(),
+    plans: initialPlans(skaters.length), carrierPlan: null, teamPhase: initialTeamPhase(),
     seed: 1, rng: [1, 2, 3, 4],
   };
   // Everyone has been in his place a while: plans issued long ago for the side in possession, the phase committed. No

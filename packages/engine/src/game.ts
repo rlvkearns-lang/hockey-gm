@@ -155,6 +155,7 @@ function initialState(setup: GameSetup): GameState {
     lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null, turnoverWatch: null,
     bench: initialBench(setup),
     plans: initialPlans(skaters.length),
+    carrierPlan: null,
     teamPhase: initialTeamPhase(),
     seed: setup.seed,
     rng: [0, 0, 0, 1],
@@ -387,7 +388,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
     benchTick(state, setup, DT, events);
     assignJobs(state, defs, tactics);
-    brainTick(state, defs, rng, events);
+    brainTick(state, defs, rng, events, tactics);
     contestTick(state, defs, rng, DT, events, setup.chemistry);
 
     const skaters = onIceSkaters();
@@ -432,6 +433,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     if (liveTicks >= PERIOD_TICKS) {
       events.push(gameEvent(state, { type: 'periodEnd', side: null, playerId: null, otherId: null, pos: state.puck.pos, detail: { period: state.period } }));
       state.carrierId = null;
+      state.carrierPlan = null;
       state.possession = null;
       state.pickupBlock = null;
       state.pendingPass = null;

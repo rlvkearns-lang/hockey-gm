@@ -36,8 +36,8 @@ export const TUNING = deepFreeze({
     calm: { base: 0.555, perPoise: 0.0015 },
     /** Error (relative, one sd) in how he judges a passing lane: base + perPoint * (100 - iq). */
     laneNoise: { base: 0.09, perPoint: 0.001 },
-    /** Speed cap while carrying: base + perPoint * puckHandling. */
-    carrySpeed: { base: 0.86, perPoint: 0.001 },
+    /** Speed cap while carrying: base + perPoint * puckHandling; in the zone he attacks (no breakaway) times inZone. */
+    carrySpeed: { base: 0.86, perPoint: 0.001, inZone: 0.75 },
     /** Base weight of each kind of option, before situation, skill and tendency. */
     weight: { shoot: 0.55, pass: 1, carry: 3, dump: 0.15, protect: 0.25 },
     /** Shoot weight is scaled by openNetWeight[0] with the goalie square, up to the sum of both with him shaded openNetShade m off. */
@@ -134,6 +134,26 @@ export const TUNING = deepFreeze({
   cover: { gap: 1.2, goalShade: 0.35, gapNear: 1.5, gapFar: 5, gapFrom: 10, gapPerMetre: 0.25, keepMan: 4, shadowReach: 3 },
   /** A goalie's body (bodies.ts resolveGoalies): skaters are kept this far (m) plus their own radius from his centre. */
   goalieBody: { radius: 0.55 },
+  /**
+   * The carrier's option values (options.ts). An option's value is chance it works * (threat it leads to - threat here)
+   * - (1 - chance) * what losing the puck here costs (the threat here plus turnoverCost * the other side's threat from
+   * here). He sees each value with an error of sd noise.base + noise.perPoint * (100 - iq) + noise.pressure * pressure
+   * - noise.perPoise * poise (`persist` of that error stays with him while he has the puck, keyed by his plan's seed;
+   * builder's addition); the option he is committed to gets `stick` more. A pass lane under TUNING.lanes.open is
+   * worth `shadowed` of an open one. `hold`: each second he has had the puck adds this much to shooting and passing and
+   * takes it off carrying and protecting (at most holdCap seconds).
+   * Builder's additions: `goal` scales a shot's chance to score (shotQuality * skill * goal), and a shot that does not
+   * score leaves his team the puck `shotKeep` of the time (a rebound or a puck kept in); a habit also leans a value by
+   * habitShift * (tendency - 0.5); a pass or carry that puts
+   * his team offside costs `offside`; a dump from his own half (icing) costs `icing`; a rim or dump goes to his team
+   * with a chance of raceBase + racePerMetre * (how much nearer his nearest teammate is than their nearest man), at
+   * most raceMax.
+   */
+  value: {
+    noise: { base: 0.004, perPoint: 0.0002, pressure: 0.006, perPoise: 0.00004, persist: 0.85 },
+    stick: 0.004, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
+    goal: 0.15, shotKeep: 0.05, habitShift: 0.03, offside: 0.03, icing: 0.03, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
+  },
 
   /**
    * Score effects (team-play.ts scoreMargin, brain, poke checks), kept to real-hockey size. A margin is comfortable from
@@ -186,6 +206,13 @@ export const TUNING = deepFreeze({
     openSideMax: 0.8,
   },
 
+  /**
+   * Rims and clears (actions.ts executeRim, executeClear). A rim goes at speed.base + perPoint * passing (16 to 20 m/s),
+   * aimed at the boards `ahead` m along his line to its target (a man, or with nobody named the far low corner, `back`
+   * m out from the goal line and `y` m across); a rim to a man is his pass for `path` times the straight-line time. A
+   * clear goes at clearSpeed toward the boards at rx `clear.x` (out past his own blue line) on his side.
+   */
+  rim: { speed: { base: 16, perPoint: 0.04 }, ahead: 3, corner: { back: 1, y: 8 }, path: 1.8, clearSpeed: { base: 14, perPoint: 0.04 }, clear: { x: -3 } },
   /** Dumps (actions.ts): to a spot this deep and wide (attack-relative m), chipped up at vz m/s; speed base + perPoint * passing. */
   dump: { spot: { x: 25.5, y: 8 }, vz: 2, speed: { base: 16, perPoint: 0.05 }, errorFactor: 1.5 },
 

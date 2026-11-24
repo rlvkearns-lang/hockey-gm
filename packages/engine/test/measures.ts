@@ -14,6 +14,7 @@
 import { createGame } from '../src/game';
 import { movementOf, bodyRadius } from '../src/skating';
 import { RINK } from '../src/rink';
+import { readSituation } from '../src/options';
 import { DT } from '../src/constants';
 import type { GameEvent, GameSetup, GameState, PlayerDef, Side, SkaterState } from '../src/types';
 import { gameSetup } from './helpers';
@@ -32,7 +33,8 @@ export type PlayCounterKey =
   | 'contactOver03' | 'puckJumpTicks'
   | 'goalieOverlapTicks' | 'raceJumpTicks'
   | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderInside'
-  | 'ozoneCarrierTicks' | 'ozoneCarrierPressed';
+  | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
+  | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -47,6 +49,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'goalieOverlapTicks', 'raceJumpTicks',
   'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderInside',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
+  'breakawayBackPasses', 'carrierDecisions', 'carrierFlips',
 ];
 
 export type PlayMeasures = {
@@ -101,6 +104,8 @@ const RACE_JUMP_MAX = 0.9 + 0.6 + 0.2;
 const BEHIND_Y = 4;
 /** A carrier in the zone he attacks is pressed with a standing defender within this far (m) of him. */
 const CARRIER_PRESSED = 3;
+/** A breakaway pass is backward when its receiver is more than this (m) behind the passer (rx). */
+const BREAKAWAY_BEHIND = 1;
 const BEHIND_TICKS = ticksOf(0.5);
 const OUT_FRONT = { rxMin: 15.13, rxMax: 26.13, y: 6 };
 const WRAP_TICKS = ticksOf(1.5);
@@ -143,6 +148,10 @@ export function createObserver(setup: GameSetup): Observer {
   const lastBehind = new Map<string, number>();
   let contacts = new Map<string, number>();
   let prevPuck: { x: number; y: number; speed: number; live: boolean } | null = null;
+  /** The carrier at the end of the last tick, and whether he was on a breakaway then. */
+  let prevBreakaway: { id: string; rx: number; clear: boolean; mates: Map<string, number> } | null = null;
+  /** The carrier's plan at the end of the last tick. */
+  let prevPlan: { id: string; kind: string; lane: string | null } | null = null;
 
   const steered = (st: GameState, s: SkaterState): boolean => {
     if (s.contestId === null) return false;
@@ -196,6 +205,9 @@ export function createObserver(setup: GameSetup): Observer {
             if (point) { c.pointPasses++; openPoint = { from: from.id, side: from.side, tick }; }
             if ((lastBehind.get(from.id) ?? -Infinity) >= tick - 1 && toRx > OUT_FRONT.rxMin && toRx < OUT_FRONT.rxMax && Math.abs(to.pos.y) < OUT_FRONT.y) c.passesOutFront++;
           }
+          // Where the receiver was when the pass was decided (the end of the tick before), against the passer then.
+          if (prevBreakaway !== null && prevBreakaway.clear && prevBreakaway.id === e.playerId
+            && (prevBreakaway.mates.get(e.otherId) ?? Infinity) < prevBreakaway.rx - BREAKAWAY_BEHIND) c.breakawayBackPasses++;
           openPass = { from: e.playerId, to: e.otherId, side: from?.side ?? e.side ?? 'home', tick, point };
           break;
         }
@@ -360,6 +372,28 @@ export function createObserver(setup: GameSetup): Observer {
     } else behind = null;
   }
 
+  /**
+   * The carrier's decisions: a decision is a tick on which his plan was written (carrierPlan.tick is this tick); a flip
+   * is one whose kind or carry lane differs from his plan on the tick before. Also notes whether the carrier is on a
+   * breakaway (options.ts readSituation: a clear path to the net past his own blue line, nobody within 4 m of him)
+   * for the next tick's passes.
+   */
+  function carrierMind(st: GameState): void {
+    const plan = st.phase === 'live' ? st.carrierPlan ?? null : null;
+    if (plan !== null && plan.tick === st.tick) {
+      c.carrierDecisions++;
+      if (prevPlan !== null && prevPlan.id === plan.id && (prevPlan.kind !== plan.kind || prevPlan.lane !== plan.lane)) c.carrierFlips++;
+    }
+    prevPlan = plan === null ? null : { id: plan.id, kind: plan.kind, lane: plan.lane };
+    const cs = st.phase === 'live' ? skaterById(st, st.carrierId) : undefined;
+    if (cs === undefined) { prevBreakaway = null; return; }
+    const rx = rxOf(st, cs.side, cs.pos.x);
+    const clear = readSituation(st, cs).breakaway;
+    const mates = new Map<string, number>();
+    if (clear) for (const m of st.skaters) if (m.onIce && m.side === cs.side && m !== cs) mates.set(m.id, rxOf(st, m.side, m.pos.x));
+    prevBreakaway = { id: cs.id, rx, clear, mates };
+  }
+
   function bodies(st: GameState): void {
     const next = new Map<string, number>();
     if (st.phase === 'live') {
@@ -401,6 +435,7 @@ export function createObserver(setup: GameSetup): Observer {
       onEvents(st, events);
       ozone = nowOzone;
       afterEvents(st);
+      carrierMind(st);
       bodies(st);
       puck(st);
     },

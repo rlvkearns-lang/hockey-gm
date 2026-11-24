@@ -18,6 +18,10 @@ const T = TUNING.boardBattle;
 /** `protect` (a carried puck) lasts this long (s); an opponent farther than PROTECT_REACH (m) from the carrier at its end has lost him. */
 const PROTECT_SECONDS = 0.5;
 const PROTECT_REACH = 3;
+/** A carrier behind a net (|x| beyond BEHIND_X, |y| within BEHIND_Y) starts a battle only with an opponent within BEHIND_REACH (m) of him. */
+const BEHIND_X = 27.43;
+const BEHIND_Y = 4;
+const BEHIND_REACH = 1.2;
 /** A puck knocked into their feet slides on to the spot (where it would be in SLIDE_LEAD s) over SLIDE_TICKS ticks. */
 const SLIDE_LEAD = 0.12;
 const SLIDE_TICKS = 6;
@@ -92,7 +96,14 @@ export const boardBattleContest: Contest<'boardBattle'> = {
     if (carrier !== null) {
       // A carrier along the boards: the battle is between him and the opponent on him.
       if (!isFree(carrier) || onCooldown(state, carrier.id, KIND)) return null;
-      if (carrier === s) return nearestOpponent(state, s);
+      // Behind the net the frame shields him: only an opponent right on him (BEHIND_REACH) starts a battle.
+      const behind = Math.abs(carrier.pos.x) > BEHIND_X && Math.abs(carrier.pos.y) < BEHIND_Y;
+      if (carrier === s) {
+        const pair = nearestOpponent(state, s);
+        if (pair !== null && behind && dist(skaterById(state, pair[1]!).pos, s.pos) > BEHIND_REACH) return null;
+        return pair;
+      }
+      if (behind && dist(s.pos, carrier.pos) > BEHIND_REACH) return null;
       return carrier.side !== s.side ? [s.id, carrier.id] : null;
     }
     return nearestOpponent(state, s);

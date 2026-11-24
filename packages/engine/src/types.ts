@@ -104,6 +104,14 @@ export type SkaterPlan = {
   /** How hard he skates, how he slows when going faster than that, and whether he skates through his target. */
   effort: Effort; slow: SlowMode; through: boolean;
 };
+/** Where a carrier carries the puck (options.ts): at the net, wide down the boards, through the middle, to the office behind the net, round the net on a wraparound, or holding behind it. */
+export type CarryLane = 'net' | 'wide' | 'middle' | 'office' | 'wrap' | 'hold';
+/** What the carrier has committed to (the brain re-values every BRAIN_INTERVAL_TICKS; the committed option gets TUNING.value.stick). */
+export type CarrierPlan = {
+  id: string; kind: 'carry' | 'pass' | 'shoot' | 'dump' | 'protect' | 'rim' | 'clear'; lane: CarryLane | null; toId: string | null; to: Vec2 | null; tick: number;
+  /** Drawn when he gets the puck: keys the part of his error in judging each option that stays with him while he has it (builder's addition). */
+  seed?: number;
+};
 /** A team's committed phase (commit.ts): it follows the raw phase only once that has differed for TUNING.commit.phaseDelay (`pending` since `pendingTick`). */
 export type TeamPhaseState = { phase: TeamPhase; sinceTick: number; pending: TeamPhase | null; pendingTick: number };
 
@@ -328,6 +336,8 @@ export type GameState = {
   bench: Record<Side, BenchState>;
   /** What each skater has committed to: `plans[i]` belongs to `skaters[i]` (commit.ts). */
   plans: SkaterPlan[];
+  /** What the carrier has committed to and when he last decided (brain.ts); null while nobody carries. */
+  carrierPlan: CarrierPlan | null;
   /** Each team's committed phase, which lags the raw one by TUNING.commit.phaseDelay (commit.ts). */
   teamPhase: Record<Side, TeamPhaseState>;
   /** The game's seed (GameSetup.seed). */
@@ -368,8 +378,11 @@ export type EventDetails = {
   faceoff: { spot: Vec2 };
   /** playerId let the puck go (every pass, shot and dump): velocity (m/s, z up) as it left his stick. */
   release: { kind: 'pass' | 'shot' | 'dump'; toId: string | null; vel: { x: number; y: number; z: number } };
-  /** A pass (otherId: its intended receiver) or a dump-in (no receiver), at its release. */
-  pass: { kind: 'pass' | 'dump'; distance: number | null };
+  /**
+   * A pass (otherId: its intended receiver), a dump-in (no receiver), a rim (hard round the boards, to a man or an area;
+   * otherId the man or null) or a clear (out of his own zone, no receiver), at its release.
+   */
+  pass: { kind: 'pass' | 'dump' | 'rim' | 'clear'; distance: number | null };
   /** A shot on goal reached the net (otherId: the goalie); followed by `save` or `goal`. releaseTick null: not shot (a pass or loose puck that slid in). */
   shot: { distance: number; releaseTick: number | null; speed: number };
   save: { pose: SavePose };

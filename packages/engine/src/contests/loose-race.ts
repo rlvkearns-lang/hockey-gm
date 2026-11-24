@@ -162,7 +162,8 @@ export const looseRaceContest: Contest<'looseRace'> = {
     const p = state.puck;
     c.spot.x = p.pos.x;
     c.spot.y = p.pos.y;
-    if (state.carrierId !== null || state.pendingPass !== null) return end(c, ctx, null, 'off'); // someone else got there
+    // Someone else got there, or a board battle has the puck in its feet.
+    if (state.carrierId !== null || state.pendingPass !== null || puckHeldByContest(state)) return end(c, ctx, null, 'off');
     if (c.stage === 'race') {
       if (!raceable(state) || c.stageT >= RACE_MAX_SECONDS - STAGE_EPS) return end(c, ctx, null, 'off');
       const ta = etaOf(ctx, a), tb = etaOf(ctx, b);

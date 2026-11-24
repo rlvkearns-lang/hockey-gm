@@ -1,5 +1,5 @@
 import { DT as DT_ } from './constants';
-import { RINK as RINK_ } from './rink';
+import { boardsNormal as boardsNormal_, distToBoards as distToBoards_, RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
 import { nearestOpponentDist as nearestOpponentDist_, steeredByContest as steeredByContest_ } from './team-play';
 import { TUNING as TUNING_ } from './tuning';
@@ -12,6 +12,8 @@ import { clamp as clamp_, GRAVITY as GRAVITY_, skaterById as skaterById_ } from 
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const DT = DT_;
 const RINK = RINK_;
+const boardsNormal = boardsNormal_;
+const distToBoards = distToBoards_;
 const nearestOpponentDist = nearestOpponentDist_;
 const steeredByContest = steeredByContest_;
 const TUNING = TUNING_;
@@ -176,6 +178,65 @@ export function executeDump(state: GameState, fromId: string, defs: Map<string, 
   const angle = datan2(ty - p.y, tx - p.x) + rng.gauss() * sigma;
   out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'dump', distance: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, DUMP.vz, out, 'dump');
+}
+
+const RIM = TUNING.rim;
+const aimScratch: Vec2 = { x: 0, y: 0 };
+const normScratch: Vec2 = { x: 0, y: 0 };
+
+/** The point of the boards nearest the spot `ahead` m from `from` toward `to` (written into `out`). */
+function boardsAhead(from: Vec2, to: Vec2, ahead: number, out: Vec2): Vec2 {
+  const dx = to.x - from.x, dy = to.y - from.y, l = hypot2(dx, dy) || 1;
+  out.x = from.x + (dx / l) * ahead;
+  out.y = from.y + (dy / l) * ahead;
+  const n = boardsNormal(out, normScratch), d = distToBoards(out);
+  out.x += n.x * d;
+  out.y += n.y * d;
+  return out;
+}
+
+/**
+ * Rim it: hard along the boards (TUNING.rim.speed, 16 to 20 m/s by passing), aimed at the boards RIM.ahead m ahead
+ * toward the man named (`toId`, who then has it as a pass on its way to him) or, with nobody named, the far low
+ * corner, so it rings round the boards. Its `pass` event (kind `rim`) and `release` event (kind `dump`: the viewer's
+ * release kinds are pass, shot and dump) go into `out`.
+ */
+export function executeRim(state: GameState, fromId: string, toId: string | null, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
+  const s = skaterById(state, fromId);
+  const passing = defs.get(fromId)!.attrs.passing;
+  const dir = state.attackDir[s.side];
+  const p = state.puck.pos;
+  const to = toId !== null ? skaterById(state, toId).pos : { x: dir * (RINK.goalLineX - RIM.corner.back), y: -(p.y * dir >= 0 ? 1 : -1) * RIM.corner.y * dir };
+  // From behind the net the boards straight ahead are the end boards: aim at the corner on the target's side instead.
+  const behind = p.x * dir > RINK.goalLineX;
+  const aim = behind ? boardsAhead(p, { x: dir * RINK.goalLineX, y: (to.y >= 0 ? 1 : -1) * RINK.halfWidth }, RIM.ahead * 2, aimScratch) : boardsAhead(p, to, RIM.ahead, aimScratch);
+  const speed = RIM.speed.base + passing * RIM.speed.perPoint;
+  const pressure = pressureOn(state, s);
+  const sigma = PASS.error.base + (100 - passing) * PASS.error.perPoint + pressure * PASS.error.pressure;
+  const angle = datan2(aim.y - p.y, aim.x - p.x) + rng.gauss() * sigma;
+  const l = hypot2(to.x - p.x, to.y - p.y);
+  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'rim', distance: toId === null ? null : l } }));
+  release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump', toId);
+  if (toId !== null) state.pendingPass = { fromId, toId, untilTick: state.tick + Math.round((RIM.path * l / speed + PASS.graceSeconds) / DT), tried: [], pressure };
+}
+
+/**
+ * Clear it: off the boards and out past his own blue line, toward (TUNING.rim.clear) on his side of the ice, at
+ * TUNING.rim.clearSpeed. Its `pass` event (kind `clear`, no receiver) and `release` event (kind `dump`) go into `out`.
+ */
+export function executeClear(state: GameState, fromId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
+  const s = skaterById(state, fromId);
+  const passing = defs.get(fromId)!.attrs.passing;
+  const dir = state.attackDir[s.side];
+  const p = state.puck.pos;
+  const ps = p.y * dir >= 0 ? 1 : -1;
+  aimScratch.x = RIM.clear.x * dir;
+  aimScratch.y = ps * RINK.halfWidth * dir;
+  const speed = RIM.clearSpeed.base + passing * RIM.clearSpeed.perPoint;
+  const sigma = DUMP.errorFactor * (PASS.error.base + (100 - passing) * PASS.error.perPoint);
+  const angle = datan2(aimScratch.y - p.y, aimScratch.x - p.x) + rng.gauss() * sigma;
+  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'clear', distance: null } }));
+  release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump');
 }
 
 /**
