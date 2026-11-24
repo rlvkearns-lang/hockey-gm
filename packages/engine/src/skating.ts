@@ -1,3 +1,4 @@
+import { hasBadge } from './badges';
 import { resolveBoards as resolveBoards_ } from './rink';
 import { TUNING as TUNING_ } from './tuning';
 import { hypot2 as hypot2_ } from './vec';
@@ -64,14 +65,15 @@ export function movementOf(def: PlayerDef, energy: number): Movement {
   const a = def.attrs;
   const tired = energy >= 0.5 ? 1 : 0.85 + 0.15 * (Math.max(0, energy) / 0.5);
   return {
-    topSpeed: (S.topSpeed.base + a.speed * S.topSpeed.perPoint) * tired,
+    // Task 12: a Burner's top speed and an Elusive man's carve (TUNING.badges).
+    topSpeed: (S.topSpeed.base + a.speed * S.topSpeed.perPoint) * tired * (hasBadge(def, 'Burner') ? TUNING.badges.burnerSpeed : 1),
     accel: (S.accel.base + a.acceleration * S.accel.perPoint) * tired,
     turnRate: 2.2 + a.agility * 0.03,
     backwardFactor: S.backward.base + a.agility * S.backward.perPoint,
     mass: def.weightKg + 9,
     radius: bodyRadius(def.weightKg),
     brake: S.brake.base + a.agility * S.brake.perPoint,
-    carve: S.carve.base + a.agility * S.carve.perPoint,
+    carve: (S.carve.base + a.agility * S.carve.perPoint) * (hasBadge(def, 'Elusive') ? TUNING.badges.elusiveCarve : 1),
   };
 }
 

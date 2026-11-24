@@ -15,6 +15,7 @@ import { crossesNet as crossesNet_, passLaneWidth as passLaneWidth_ } from './la
 import { ICE_DECAY } from './puck';
 import { slideStopChance } from './slide';
 import { tiedChance } from './engage-state';
+import { hasBadge } from './badges';
 import { RINK as RINK_ } from './rink';
 import { isTiedUp as isTiedUp_, steeredByContest as steeredByContest_ } from './team-play';
 import { TUNING } from './tuning';
@@ -111,9 +112,9 @@ export function interceptChance(d: PlayerDef, speed: number): number {
   return clamp(base * slow * (1 - 0.5 * clamp((speed - lo) / (hi - lo), 0, 1)), 0.03, 0.97);
 }
 
-/** Interception chance for an opponent whose stick blade is within TUNING.pass.stickLane (0.75 m) of the path: interceptChance * TUNING.pass.stickFactor (1.5), clamped to [0.03, 0.97]. A body within interceptRange but no stick in the lane keeps interceptChance. */
+/** Interception chance for an opponent whose stick blade is within TUNING.pass.stickLane (0.75 m) of the path: interceptChance * TUNING.pass.stickFactor (1.5; a Stick Checker's TUNING.badges.stickCheckerLaneFactor, Task 12), clamped to [0.03, 0.97]. A body within interceptRange but no stick in the lane keeps interceptChance. */
 export function stickInterceptChance(d: PlayerDef, speed: number): number {
-  return clamp(interceptChance(d, speed) * PASS.stickFactor, 0.03, 0.97);
+  return clamp(interceptChance(d, speed) * (hasBadge(d, 'Stick Checker') ? TUNING.badges.stickCheckerLaneFactor : PASS.stickFactor), 0.03, 0.97);
 }
 
 /**
@@ -154,6 +155,20 @@ const HAND_RANGE: Record<PassHand, number> = { forehand: TUNING.brain.passRange[
 /** Direction error, as a multiple of a forehand's. */
 export const HAND_ERROR: Record<PassHand, number> = { forehand: 1, backhand: PASS.backhand.error, behind: PASS.behind.error };
 
+/**
+ * A pass's direction error (sigma, rad) by `from` under `pressure` played `hand`: TUNING.pass.error for his passing and
+ * the pressure, times the hand's; a Breakout Passer's from his own zone (`ownZone`) times TUNING.badges.breakoutError (Task 12).
+ */
+export function passErrorOf(from: PlayerDef, pressure: number, hand: PassHand, ownZone: boolean): number {
+  return (PASS.error.base + (100 - from.attrs.passing) * PASS.error.perPoint + pressure * PASS.error.pressure) * HAND_ERROR[hand]
+    * (ownZone && hasBadge(from, 'Breakout Passer') ? TUNING.badges.breakoutError : 1);
+}
+
+/** The longest pass (m) `from` plays `hand`: the hand's range; a Breakout Passer's from his own zone TUNING.badges.breakoutRange more (Task 12). */
+export function passRangeOf(from: PlayerDef | undefined, hand: PassHand, ownZone: boolean): number {
+  return HAND_RANGE[hand] + (ownZone && from !== undefined && hasBadge(from, 'Breakout Passer') ? TUNING.badges.breakoutRange : 0);
+}
+
 const futScratch: Vec2 = { x: 0, y: 0 };
 const bladeScratch2: Vec2 = { x: 0, y: 0 };
 /** Only a man within this far (m) of the puck, level with or behind it, can have his stick in the lane ahead of it. */
@@ -191,7 +206,7 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
   }
   const arriveSpeed = speed - K * d;
   if (check) {
-    if (d < TUNING.brain.passRange[0] || d > HAND_RANGE[hand] || arriveSpeed < MIN_ARRIVE || arriveSpeed > PASS.maxReceiveSpeed + 1e-9) return null;
+    if (d < TUNING.brain.passRange[0] || d > passRangeOf(fd, hand, p.x * dir < -BLUE) || arriveSpeed < MIN_ARRIVE || arriveSpeed > PASS.maxReceiveSpeed + 1e-9) return null;
     if (crossesNet(p, aim)) return null;
     // Task 8b close-out (no-shot goals traced on seeds 1-16). A pass is never aimed so that, missed, it slides on into his
     // own net: its line, carried on up to PASS.netBeyond m past the aim, does not reach his own goal line inside the posts

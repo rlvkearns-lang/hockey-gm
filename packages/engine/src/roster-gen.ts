@@ -1,10 +1,11 @@
 import { GOALIE_ATTRS, SKATER_ATTRS, type GoalieAttrs, type SkaterAttrs } from './attributes';
 import { earnedBadges } from './badges';
 import { PLAYER_TYPES } from './player-types';
-import { STYLES } from './styles';
+import { blendHabits, groupOf, STYLES, stylesFor, stylesOf } from './styles';
+import { TUNING } from './tuning';
 import { createRng, type Rng } from './rng';
 import { naturalTactics } from './tactics';
-import type { PlayerDef, Position, TeamDef, Tendencies } from './types';
+import type { PlayerDef, Position, Style, TeamDef, Tendencies } from './types';
 import { clamp } from './util';
 
 const FIRST = ['Alex', 'Ben', 'Cal', 'Dan', 'Eli', 'Finn', 'Gus', 'Hank', 'Ivan', 'Jon', 'Kai', 'Leo', 'Max', 'Nate', 'Owen', 'Pete', 'Quin', 'Ray', 'Sam', 'Theo'];
@@ -12,11 +13,14 @@ const LAST = ['Arden', 'Brandt', 'Carver', 'Dahl', 'Ekberg', 'Frost', 'Grey', 'H
 
 const rating = (v: number): number => clamp(Math.round(v), 1, 100);
 
-// Task 12 step 1: the Shutdown Forward is not drawn yet (rosters as before).
-const typesFor = (pos: Position): string[] =>
-  Object.keys(PLAYER_TYPES).filter((k) => k !== 'Shutdown Forward' && PLAYER_TYPES[k]!.positions.includes(pos));
-/** Task 12 step 1: a type's block habit, its style's (none for a goalie). */
-const blockOf = (typeName: string): number | undefined => Object.values(STYLES).find((st) => st.typeKey === typeName)?.habits.block;
+const ST = TUNING.styles;
+
+/** The primary's attribute bias plus TUNING.styles.secondaryBias of the secondary's (Task 12). */
+function biasOf(primary: Style, secondary: Style | null): Partial<SkaterAttrs> {
+  const out: Partial<SkaterAttrs> = { ...STYLES[primary].attrBias };
+  if (secondary !== null) for (const [k, v] of Object.entries(STYLES[secondary].attrBias) as [keyof SkaterAttrs, number][]) out[k] = (out[k] ?? 0) + ST.secondaryBias * v;
+  return out;
+}
 
 function makeSkaterAttrs(rng: Rng, overall: number, bias: Partial<SkaterAttrs>): SkaterAttrs {
   const attrs = {} as SkaterAttrs;
@@ -31,14 +35,24 @@ function makeGoalie(rng: Rng, overall: number): GoalieAttrs {
 }
 
 function makeTendencies(rng: Rng, base: Tendencies): Tendencies {
+  // (Every habit given, block included for a skater, gets the same noise.)
   const out = { ...base };
   for (const k of Object.keys(out) as (keyof Tendencies)[]) out[k] = clamp((base[k] ?? 0.5) + rng.gauss() * 0.08, 0, 1);
   return out;
 }
 
-function makePlayer(rng: Rng, team: string, n: number, position: Position, typeName: string, overall: number): PlayerDef {
+/**
+ * A player: a skater of `primary` style (Task 12) draws a secondary style of his group (another one) with chance
+ * TUNING.styles.secondaryChance; his build is his primary's type's, his attributes biased by the primary plus half the
+ * secondary (biasOf), his habits blendHabits plus noise; `type` is the primary's PLAYER_TYPES key, `subType` null (badges
+ * replace it), `style` unset (styleOf works it out), `badges` what he earns. A goalie (`primary` null) as before.
+ */
+function makePlayer(rng: Rng, team: string, n: number, position: Position, primary: Style | null, overall: number): PlayerDef {
+  const typeName = primary === null ? 'Goalie' : STYLES[primary].typeKey;
   const def = PLAYER_TYPES[typeName]!;
   const isGoalie = position === 'G';
+  const others = primary === null ? [] : stylesOf(groupOf(position)!).filter((k) => k !== primary);
+  const secondary = primary !== null && rng.chance(ST.secondaryChance) ? rng.pick(others) : null;
   const [h0, h1] = def.build.heightCm;
   const [w0, w1] = def.build.weightKg;
   const p: PlayerDef = {
@@ -50,17 +64,15 @@ function makePlayer(rng: Rng, team: string, n: number, position: Position, typeN
     heightCm: Math.round(rng.range(h0, h1)),
     weightKg: Math.round(rng.range(w0, w1)),
     type: typeName,
-    subType: rng.pick(def.subTypes),
+    subType: null,
     // Goalies keep a full, low, valid skater attribute set so every PlayerDef has one shape.
-    attrs: isGoalie ? makeSkaterAttrs(rng, 20, {}) : makeSkaterAttrs(rng, overall, def.attrBias),
+    attrs: isGoalie || primary === null ? makeSkaterAttrs(rng, 20, {}) : makeSkaterAttrs(rng, overall, biasOf(primary, secondary)),
     goalie: isGoalie ? makeGoalie(rng, overall) : null,
-    tendencies: makeTendencies(rng, def.tendencies),
+    tendencies: makeTendencies(rng, primary === null ? def.tendencies : blendHabits(primary, secondary)),
     form: 0,
     morale: 0,
     fatigue: 0,
   };
-  const block = blockOf(typeName);
-  if (block !== undefined) p.tendencies.block = block;
   p.badges = earnedBadges(p);
   return p;
 }
@@ -100,9 +112,9 @@ export function generateTeam(seed: number, name: string, abbr: string, overall =
   const rng = createRng(seed);
   const players: PlayerDef[] = [];
   let n = 0;
-  const add = (position: Position, typeName: string): string => {
+  const add = (position: Position, primary: Style | null): string => {
     n += 1;
-    const p = makePlayer(rng, abbr, n, position, typeName, overall);
+    const p = makePlayer(rng, abbr, n, position, primary, overall);
     players.push(p);
     return p.id;
   };
@@ -110,15 +122,15 @@ export function generateTeam(seed: number, name: string, abbr: string, overall =
   const forwards: [string, string, string][] = [];
   for (let line = 0; line < 4; line++) {
     forwards.push(
-      (['LW', 'C', 'RW'] as const).map((pos) => add(pos, rng.pick(typesFor(pos)))) as [string, string, string],
+      (['LW', 'C', 'RW'] as const).map((pos) => add(pos, rng.pick(stylesFor(pos)))) as [string, string, string],
     );
   }
   const defence: [string, string][] = [];
   for (let pair = 0; pair < 3; pair++) {
-    defence.push((['LD', 'RD'] as const).map((pos) => add(pos, rng.pick(typesFor(pos)))) as [string, string]);
+    defence.push((['LD', 'RD'] as const).map((pos) => add(pos, rng.pick(stylesFor(pos)))) as [string, string]);
   }
-  const goalie = add('G', 'Goalie');
-  add('G', 'Goalie');
+  const goalie = add('G', null);
+  add('G', null);
   assignNumbers(seed, players);
   assignCatches(seed, players);
   const lines = { forwards, defence, goalie };

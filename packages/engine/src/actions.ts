@@ -1,6 +1,6 @@
 import { DT as DT_ } from './constants';
 import { bladePos as bladePos_, forehandWithin as forehandWithin_ } from './blade';
-import { forcedPass as forcedPass_, HAND_ERROR as HAND_ERROR_, interceptChance as interceptChance_, laneReach as laneReach_, planPass as planPass_, stickInterceptChance as stickInterceptChance_, type PassPlan } from './passing';
+import { forcedPass as forcedPass_, passErrorOf as passErrorOf_, HAND_ERROR as HAND_ERROR_, interceptChance as interceptChance_, laneReach as laneReach_, planPass as planPass_, stickInterceptChance as stickInterceptChance_, type PassPlan } from './passing';
 import { crossesEndBox as crossesEndBox_ } from './lanes';
 import { boardsNormal as boardsNormal_, distToBoards as distToBoards_, RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
@@ -14,11 +14,13 @@ import { hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, GRAVITY as GRAVITY_, skaterById as skaterById_ } from './util';
 import { tieOf } from './engage-state';
+import { hasBadge } from './badges';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const DT = DT_;
 const bladePos = bladePos_;
 const forcedPass = forcedPass_;
 const HAND_ERROR = HAND_ERROR_;
+const passErrorOf = passErrorOf_;
 const interceptChance = interceptChance_;
 const laneReach = laneReach_;
 const planPass = planPass_;
@@ -129,12 +131,12 @@ function release(
  */
 export function executePass(state: GameState, fromId: string, toId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
   const from = skaterById(state, fromId), to = skaterById(state, toId);
-  const passing = defs.get(fromId)!.attrs.passing;
+  const me = defs.get(fromId)!;
   const plan = planPass(state, from, to, defs, passPlan) ?? forcedPass(state, from, to, defs, passPlan);
   const p = state.puck.pos;
   const aim = plan.aim;
   const pressure = pressureOn(state, from);
-  const sigma = (PASS.error.base + (100 - passing) * PASS.error.perPoint + pressure * PASS.error.pressure) * HAND_ERROR[plan.hand];
+  const sigma = passErrorOf(me, pressure, plan.hand, p.x * state.attackDir[from.side] < -RINK.blueLineX);
   const angle = datan2(aim.y - p.y, aim.x - p.x) + rng.gauss() * sigma;
   const l = hypot2(aim.x - p.x, aim.y - p.y);
   out.push(gameEvent(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'pass', distance: l, hand: plan.hand } }));
@@ -156,7 +158,7 @@ export function passFromFeet(state: GameState, fromId: string, toId: string, spe
   const from = skaterById(state, fromId), to = skaterById(state, toId);
   const p = state.puck.pos;
   const aim = bladePos(to.pos, to.facing, defs.get(toId)!.shoots, { x: 0, y: 0 });
-  const sigma = PASS.error.base + (100 - defs.get(fromId)!.attrs.passing) * PASS.error.perPoint;
+  const sigma = passErrorOf(defs.get(fromId)!, 0, 'forehand', p.x * state.attackDir[from.side] < -RINK.blueLineX);
   const angle = datan2(aim.y - p.y, aim.x - p.x) + rng.gauss() * sigma;
   const l = hypot2(aim.x - p.x, aim.y - p.y);
   out.push(gameEvent(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'pass', distance: l, hand: 'forehand' } }));
@@ -265,13 +267,31 @@ export function shotRush(state: GameState, s: SkaterState, defs: Map<string, Pla
   return out;
 }
 
+const BADGE = TUNING.badges;
+
 /**
  * A shot's spread (sigma, m) for shooter `me` from `d` m under `pressure`, of `type`, `rushed` (0..1, shotRush) and with
- * `tie` (Task 10: a tied-up shooter's spread is times 1 + TUNING.engage.limits.spread * his tie).
+ * `tie` (Task 10: a tied-up shooter's spread is times 1 + TUNING.engage.limits.spread * his tie); `rebound`: a rebound
+ * shot. Badges (Task 12, TUNING.badges): Quick Release counts pressure at quickReleasePressure; One-Timer's one-timer
+ * spread is times oneTimerSpread instead of the type's; Net-Front Finisher's rebound shot is times finisherReboundSpread.
  */
-export function spreadOf(me: PlayerDef, d: number, pressure: number, type: ShotType, rushed: number, tie: number): number {
+export function spreadOf(me: PlayerDef, d: number, pressure: number, type: ShotType, rushed: number, tie: number, rebound = false): number {
+  const pr = hasBadge(me, 'Quick Release') ? BADGE.quickReleasePressure : 1;
+  const ts = type === 'oneTimer' && hasBadge(me, 'One-Timer') ? BADGE.oneTimerSpread : TYPE_SPREAD[type];
+  const rb = rebound && hasBadge(me, 'Net-Front Finisher') ? BADGE.finisherReboundSpread : 1;
   return (SHOT.spread.base + (100 - me.attrs.shootingAccuracy) * SHOT.spread.perPoint + d * SHOT.spread.perMetre
-    + pressure * SHOT.spread.pressure) * TYPE_SPREAD[type] * (1 + SHOT.rushed.spread * rushed) * (1 + TUNING.engage.limits.spread * tie);
+    + pressure * SHOT.spread.pressure * pr) * ts * rb * (1 + SHOT.rushed.spread * rushed) * (1 + TUNING.engage.limits.spread * tie);
+}
+
+/** A shot's speed (m/s) by `me` of `type`, before rushing: TUNING.shot.speed for his power, times the type's; Heavy Slapshot's slapshot times heavySlapSpeed. */
+export function shotSpeedOf(me: PlayerDef, type: ShotType): number {
+  return (SHOT.speed.base + me.attrs.shootingPower * SHOT.speed.perPoint) * TYPE_SPEED[type] * (type === 'slap' && hasBadge(me, 'Heavy Slapshot') ? BADGE.heavySlapSpeed : 1);
+}
+
+/** Whether a shot `side` lets go now is a rebound shot: within TUNING.rebound.windowSeconds of a save on the net it attacks (Task 8). */
+function reboundNow(state: GameState, side: Side): boolean {
+  const ls = state.lastSave;
+  return ls !== null && ls.side !== side && (state.tick - ls.tick) * DT <= TUNING.rebound.windowSeconds;
 }
 
 /** The spread executeShot would give `shooterId`'s shot now, of `type` (shotTypeFor when not given). */
@@ -279,7 +299,7 @@ export function shotSpread(state: GameState, shooterId: string, defs: Map<string
   const s = skaterById(state, shooterId), me = defs.get(shooterId)!;
   const p = state.puck.pos, d = hypot2(state.attackDir[s.side] * RINK.goalLineX - p.x, p.y), pressure = pressureOn(state, s);
   const t = type ?? shotTypeFor(state, s, me.shoots, d, pressure);
-  return spreadOf(me, d, pressure, t, shotRush(state, s, defs, rushProbe).rushed, state.engagements.length > 0 ? tieOf(state, shooterId) : 0);
+  return spreadOf(me, d, pressure, t, shotRush(state, s, defs, rushProbe).rushed, state.engagements.length > 0 ? tieOf(state, shooterId) : 0, reboundNow(state, s.side));
 }
 const rushProbe: ShotRush = { checker: null, rushed: 0, stick: 0 };
 
@@ -319,7 +339,7 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
   // The checker's stick on it: blocked at his stick, or deflected wide.
   const sticked = checker !== null && rng.chance(rush.stick);
   const stickBlock = sticked && rng.chance(SHOT.rushed.stick.block);
-  const sigma = spreadOf(me, d, pressure, type, rushed, state.engagements.length > 0 ? tieOf(state, shooterId) : 0);
+  const sigma = spreadOf(me, d, pressure, type, rushed, state.engagements.length > 0 ? tieOf(state, shooterId) : 0, reboundNow(state, s.side));
   const shade = goalieShade(state, s.side);
   const openSide = shade > 0 ? -1 : 1;
   const aimSide = rng.chance(clamp(0.5 + Math.abs(shade) * SHOT.openSidePull, 0.5, SHOT.openSideMax)) ? openSide : -openSide;
@@ -336,7 +356,7 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
     if (rng.chance(W.highShare)) z = RINK.netHeight + by;
     else y = aimSide * (RINK.netHalfWidth + by);
   }
-  const speed = (SHOT.speed.base + a.shootingPower * SHOT.speed.perPoint) * TYPE_SPEED[type] * (1 - SHOT.rushed.speed * rushed) * (sticked ? SHOT.rushed.stick.keep : 1);
+  const speed = shotSpeedOf(me, type) * (1 - SHOT.rushed.speed * rushed) * (sticked ? SHOT.rushed.stick.keep : 1);
   const dx = netX - p.x, dy = y - p.y;
   const l = hypot2(dx, dy) || 1;
   const t = l / speed;
@@ -364,8 +384,7 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
 
 /** A shot just released: a rebound shot when released within TUNING.rebound.windowSeconds of a save on that net (Task 8). */
 function newShot(state: GameState, shooterId: string, side: Side, from: Vec2, fromDist: number, shotType: ShotType): ShotInFlight {
-  const ls = state.lastSave;
-  const rebound = ls !== null && ls.side !== side && (state.tick - ls.tick) * DT <= TUNING.rebound.windowSeconds;
+  const rebound = reboundNow(state, side);
   return { shooterId, side, from, fromDist, tick: state.tick, blockTried: [], shotType, tippedBy: null, tipTried: [], rebound, screened: false, faced: false };
 }
 

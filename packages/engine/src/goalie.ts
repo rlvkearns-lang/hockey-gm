@@ -7,7 +7,8 @@ import { FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
 import { wrapAngle as wrapAngle_ } from './skating';
 import { TUNING as TUNING_ } from './tuning';
-import { saveOutcome as saveOutcome_ } from './rebounds';
+import { saveOutcome as saveOutcome_, type SaveFacts } from './rebounds';
+import { hasBadge } from './badges';
 import { slideStopChance } from './slide';
 import type { Crossing, EventDetails, GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, ShotInFlight, Side } from './types';
 import { dist as dist_, hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
@@ -69,6 +70,24 @@ function goalieAttrs(defs: Map<string, PlayerDef>, id: string): GoalieAttrs {
 }
 
 
+/** `f` with the goalie `id`'s badges (Task 12: Rebound Control, Glove Hand). */
+function withBadges(defs: Map<string, PlayerDef> | undefined, id: string, f: SaveFacts): SaveFacts {
+  const d = defs?.get(id);
+  if (d === undefined || d.badges === undefined) return f;
+  f.reboundControlBadge = hasBadge(d, 'Rebound Control');
+  f.gloveHandBadge = hasBadge(d, 'Glove Hand');
+  return f;
+}
+
+/** Whether Glove Hand counts on a puck reaching goalie `g` (of `gd`) at (y, z) at net end `end`: he has it and it comes to his catching side above TUNING.badges.gloveHeight (Task 12). */
+function gloveSide(gd: PlayerDef | undefined, g: GoalieState, y: number, z: number, end: 1 | -1): boolean {
+  if (gd === undefined || !hasBadge(gd, 'Glove Hand') || z <= TUNING.badges.gloveHeight) return false;
+  return poseFor(gd.catches ?? 'L', { netEnd: end, dy: y - g.pos.y, z }) === 'glove';
+}
+
+/** Whether `shot`'s shooter has Quick Release (a tipped shot is the tipper's: none). */
+const quickOf = (defs: Map<string, PlayerDef>, shot: ShotInFlight): boolean => shot.tippedBy === null && hasBadge(defs.get(shot.shooterId)!, 'Quick Release');
+
 /** The side whose net is at `end` (+1 or -1 along x). */
 const defenderOf = (state: GameState, end: 1 | -1): Side => (state.attackDir.home === end ? 'away' : 'home');
 
@@ -89,6 +108,10 @@ export type SaveInput = {
   tipped?: boolean;
   /** 0 to 1: how much of his last save's pose he still has to come out of (his poseT over the pose length): G.save.recovering at 1. */
   recovering?: number;
+  /** Task 12: the shooter has Quick Release (the goalie's reaction time times TUNING.badges.quickReleaseReaction). */
+  quickRelease?: boolean;
+  /** Task 12: the goalie has Glove Hand and the puck comes to his catching side above gloveHeight (+ TUNING.badges.gloveSave log-odds). */
+  gloveHand?: boolean;
 };
 
 /** Chance that the goalie stops a shot on net. Parity: clamped to [0.03, 0.97]. */
@@ -97,12 +120,12 @@ export function saveChance(input: SaveInput): number {
   let skill = 0, w = 0;
   for (const [k, wt] of Object.entries(G.saveSkill) as [keyof GoalieAttrs, number][]) { skill += a[k] * wt; w += wt; }
   skill /= w;
-  const reaction = Math.min(1, input.distance / Math.max(1, input.shotSpeed));
+  const reaction = Math.min(1, input.distance / Math.max(1, input.shotSpeed)) * (input.quickRelease === true ? TUNING.badges.quickReleaseReaction : 1);
   const lm = input.lateralMiss;
   // Skill counts nearly linearly around 70 (less above it than below) and flattens out toward the extremes.
   const per = skill >= 70 ? G.save.perPointAbove : G.save.perPoint;
   const skillTerm = per * G.save.skillSpan * dtanh((skill - 70) / G.save.skillSpan);
-  const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0)
+  const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0) + (input.gloveHand === true ? TUNING.badges.gloveSave : 0)
     + Math.min(G.save.slowMax, G.save.perSlowSpeed * Math.max(0, G.save.slowFrom - input.shotSpeed)) * clamp(input.distance / G.save.slowFull, 0, 1)
     - (input.screened ? G.save.screened : 0)
     - (input.tipped ? G.save.tipped : 0)
@@ -151,7 +174,7 @@ export function goaliePlaysPass(state: GameState, defs: Map<string, PlayerDef>, 
   const stop = gameEvent(state, { type: 'stop', side: defSide, playerId: g.id, otherId: pass.fromId, pos: pk.pos, detail: { pose, kind: 'rebound', speed } });
   out.push(stop);
   const cross: Crossing = { side: (pk.pos.y - g.pos.y) * -end, height: 0 };
-  stop.detail.kind = saveOutcome(state, defSide, { pose, speed, screened: false, tipped: false, reboundControl: goalieAttrs(defs, g.id).reboundControl }, cross, rng, out, 'cover');
+  stop.detail.kind = saveOutcome(state, defSide, withBadges(defs, g.id, { pose, speed, screened: false, tipped: false, reboundControl: goalieAttrs(defs, g.id).reboundControl }), cross, rng, out, 'cover');
   return true;
 }
 
@@ -368,6 +391,7 @@ export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
     goalie: ga, lateralMiss: Math.abs(cy - g.pos.y) * Math.abs(vx) / v + squareErr * G.squareMissPerRad, shotSpeed: speed,
     distance: hypot2(nx - f.x, ly - f.y), screened, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: cz,
     night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
+    quickRelease: quickOf(defs, shot), gloveHand: gloveSide(defs.get(g.id), g, cy, cz, end),
   });
   const shooterId = shot.tippedBy ?? shot.shooterId;
   const at = { x: gx, y: cy };
@@ -397,7 +421,7 @@ export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   state.shotInFlight = null;
   const save = gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: at, detail: { pose, kind: 'rebound', cross } });
   out.push(save);
-  save.detail.kind = saveOutcome(state, defSide, { pose, speed, screened, tipped, reboundControl: ga.reboundControl }, cross, rng, out);
+  save.detail.kind = saveOutcome(state, defSide, withBadges(defs, g.id, { pose, speed, screened, tipped, reboundControl: ga.reboundControl }), cross, rng, out);
   return true;
 }
 
@@ -521,6 +545,7 @@ export function resolveOnNet(
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
     screened, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
     night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
+    quickRelease: quickOf(defs, shot), gloveHand: gloveSide(defs.get(g.id), g, ev.y, ev.z, end),
   });
   // Only a shot is a shot on goal (Task 7 review).
   if (shot) {
@@ -541,14 +566,14 @@ export function resolveOnNet(
       g.poseT = POSE_SECONDS;
       const stop = gameEvent(state, { type: 'stop', side: defSide, playerId: g.id, otherId: rel !== null ? rel.id : shooterId, pos: state.puck.pos, detail: { pose, kind: 'rebound', speed: ev.speed } });
       out.push(stop);
-      stop.detail.kind = saveOutcome(state, defSide, { pose, speed: ev.speed, screened, tipped: false, reboundControl: ga.reboundControl }, cross, rng, out, 'cover');
+      stop.detail.kind = saveOutcome(state, defSide, withBadges(defs, g.id, { pose, speed: ev.speed, screened, tipped: false, reboundControl: ga.reboundControl }), cross, rng, out, 'cover');
       return 'save';
     }
     g.pose = pose;
     g.poseT = POSE_SECONDS;
     const save = gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shooterId, pos: state.puck.pos, detail: { pose, kind: 'rebound', cross } });
     out.push(save);
-    save.detail.kind = saveOutcome(state, defSide, { pose, speed: ev.speed, screened, tipped, reboundControl: ga.reboundControl }, cross, rng, out);
+    save.detail.kind = saveOutcome(state, defSide, withBadges(defs, g.id, { pose, speed: ev.speed, screened, tipped, reboundControl: ga.reboundControl }), cross, rng, out);
     return 'save';
   }
 
@@ -584,5 +609,5 @@ export function lateSave(state: GameState, defs: Map<string, PlayerDef> | undefi
   }
   g.pose = pose;
   g.poseT = POSE_SECONDS;
-  save.detail.kind = saveOutcome(state, defSide, { pose, speed: hypot2(pk.vel.x, pk.vel.y), screened: shot.screened, tipped: shot.tippedBy !== null, reboundControl: defs ? goalieAttrs(defs, g.id).reboundControl : 70 }, cross, rng, out);
+  save.detail.kind = saveOutcome(state, defSide, withBadges(defs, g.id, { pose, speed: hypot2(pk.vel.x, pk.vel.y), screened: shot.screened, tipped: shot.tippedBy !== null, reboundControl: defs ? goalieAttrs(defs, g.id).reboundControl : 70 }), cross, rng, out);
 }

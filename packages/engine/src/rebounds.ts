@@ -27,22 +27,27 @@ const R = TUNING.goalie.rebound;
 /** How long (s) he shows holding the puck (TUNING.goalie.rebound.coverSeconds). */
 const COVER_SECONDS = R.coverSeconds;
 
-/** What decides a save's outcome: his pose, the shot's speed (m/s), a screen, a tip, and his reboundControl. */
-export type SaveFacts = { pose: SavePose; speed: number; screened: boolean; tipped: boolean; reboundControl: number };
+/**
+ * What decides a save's outcome: his pose, the shot's speed (m/s), a screen, a tip, his reboundControl, and his badges
+ * (Task 12): Rebound Control, Glove Hand.
+ */
+export type SaveFacts = { pose: SavePose; speed: number; screened: boolean; tipped: boolean; reboundControl: number; reboundControlBadge?: boolean; gloveHandBadge?: boolean };
 
 /**
  * Chances of each outcome; each within [0.03, 0.97] and summing to 1. held: G.freeze[pose] (base + perPoint *
  * reboundControl) less 0.004 per m/s over 25, less 0.08 screened, less 0.12 tipped; of the rest, steered: R.steered.base (0.3; 0.35 until the Task 8b close-out, for more rebounds) + 0.005 *
- * (reboundControl - 50), less 0.1 tipped; the rest leave a rebound.
+ * (reboundControl - 50), less 0.1 tipped; the rest leave a rebound. Badges (Task 12, TUNING.badges): Rebound Control adds
+ * reboundControlShare to held and to steered; Glove Hand adds gloveHeld to held on a glove save.
  */
 export function saveOutcomeChances(f: SaveFacts): Record<SaveKind, number> {
   const fz = G.freeze[f.pose];
+  const B = TUNING.badges, rc = f.reboundControlBadge === true ? B.reboundControlShare : 0;
   const held = clamp(fz.base + fz.perPoint * f.reboundControl - R.heldPerSpeed * Math.max(0, f.speed - R.heldFrom)
-    - (f.screened ? R.heldScreened : 0) - (f.tipped ? R.heldTipped : 0), 0.03, 0.94);
+    - (f.screened ? R.heldScreened : 0) - (f.tipped ? R.heldTipped : 0) + rc + (f.gloveHandBadge === true && f.pose === 'glove' ? B.gloveHeld : 0), 0.03, 0.94);
   const rest = 1 - held;
   const share = R.steered.base + R.steered.perPoint * (f.reboundControl - 50) - (f.tipped ? R.steered.tipped : 0);
   // Each of the two at least 0.03 (rest is at least 0.06).
-  const steered = clamp(rest * share, 0.03, rest - 0.03);
+  const steered = clamp(rest * share + rc, 0.03, rest - 0.03);
   return { held, steered, rebound: rest - steered };
 }
 

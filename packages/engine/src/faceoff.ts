@@ -1,3 +1,4 @@
+import { hasBadge } from './badges';
 import { recordTouch } from './actions';
 import { clearContests, effective, winProb } from './contests/core';
 import { gameEvent } from './events';
@@ -146,7 +147,8 @@ export function drawChance(state: GameState, defs: Map<string, PlayerDef>): numb
   const rating = (side: Side): number => {
     const c = onIceIn(state, side, ['C'])[0];
     const d = c ? defs.get(c.id) : undefined;
-    return c && d ? effective(d, c, FACEOFFS) : NO_CENTRE_RATING;
+    // (Task 12: a Faceoff Specialist's rating is TUNING.badges.faceoffRating higher.)
+    return c && d ? effective(d, c, FACEOFFS) + (hasBadge(d, 'Faceoff Specialist') ? TUNING.badges.faceoffRating : 0) : NO_CENTRE_RATING;
   };
   return winProb((rating('home') - rating('away')) * TUNING.faceoff.edgeScale);
 }

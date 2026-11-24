@@ -24,6 +24,7 @@
  * 7.62), ly to his left.
  */
 import { tieOf, tiedChance } from './engage-state';
+import { hasBadge } from './badges';
 import { goalieShade as goalieShade_, pressureOn as pressureOn_, shotRush as shotRush_ } from './actions';
 import { composite as composite_ } from './attributes';
 import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
@@ -483,7 +484,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   }
 
   // ---- passes ----
-  const seen = 1 + Math.floor(a.vision / 25);
+  // (Task 12: Playmaker's Vision sees TUNING.badges.visionExtraPasses more.)
+  const seen = 1 + Math.floor(a.vision / 25) + (hasBadge(me, "Playmaker's Vision") ? TUNING.badges.visionExtraPasses : 0);
   passIds.length = 0;
   passValues.length = 0;
   passSeen.length = 0;
@@ -549,7 +551,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     v += passOn;
     // Vision: he sees the best `seen` passes as he reads them (value plus the error of his read, fixed for the possession).
     passKey.toId = m.id;
-    const sv = v + readError(plan, passKey, T0, sit.since);
+    const sv = v + readError(plan, passKey, T0, sit.since, me);
     let i = passSeen.length;
     while (i > 0 && passSeen[i - 1]! < sv) i--;
     if (i >= seen) continue;
@@ -873,7 +875,7 @@ export function planBeaten(options: readonly Option[], me: PlayerDef, sit: Situa
   const T = pickTemperature(me, sit.pressure);
   let cur = -Infinity, best = -Infinity;
   for (const o of options) {
-    const v = o.value + readError(plan, o, T, sit.since);
+    const v = o.value + readError(plan, o, T, sit.since, me);
     if (committed(o, plan) && v > cur) cur = v;
     if (v > best) best = v;
   }
@@ -889,11 +891,12 @@ export function pickTemperature(me: PlayerDef, pressure: number): number {
 /**
  * The error in his read of option `o`: persist * T0 * GUMBEL_SD * a normal keyed by his plan's seed and how many
  * TUNING.value.noise.readSeconds he has had the puck (`since`, uncapped: his read of the play holds that long, then he
- * reads it again); 0 with no seed.
+ * reads it again); 0 with no seed. Playmaker's Vision reads it times TUNING.badges.visionReadError (Task 12).
  */
-function readError(plan: CarrierPlan | null, o: Option, T0: number, since: number): number {
+function readError(plan: CarrierPlan | null, o: Option, T0: number, since: number, me: PlayerDef): number {
   if (plan === null || plan.seed === undefined) return 0;
-  return V.noise.persist * GUMBEL_SD * seenError(mix(plan.seed, Math.floor(since / V.noise.readSeconds) + 1), o) * T0;
+  return V.noise.persist * GUMBEL_SD * seenError(mix(plan.seed, Math.floor(since / V.noise.readSeconds) + 1), o) * T0
+    * (hasBadge(me, "Playmaker's Vision") ? TUNING.badges.visionReadError : 1);
 }
 
 /** Fills pickW with each option's weight in the draw (with `cap`, the kind cap applied); returns their total. */
@@ -904,7 +907,7 @@ function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: 
   pickW.length = n;
   for (let i = 0; i < n; i++) {
     const o = options[i]!;
-    const z = readError(plan, o, T, sit.since);
+    const z = readError(plan, o, T, sit.since, me);
     // His commitment to what he is doing fades over TUNING.value.holdCap seconds with the puck.
     const v = o.value + (committed(o, plan) ? V.stick * (1 - sit.held / V.holdCap) : 0) + z;
     pickW[i] = v;

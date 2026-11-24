@@ -1,3 +1,4 @@
+import { hasBadge } from '../badges';
 import { DT } from '../constants';
 import { bodyRadius, movementOf } from '../skating';
 import { TUNING } from '../tuning';
@@ -58,7 +59,8 @@ function closingSpeed(h: SkaterState, t: SkaterState): number {
 export function hitChance(
   hitter: PlayerDef, h: SkaterState, target: PlayerDef, t: SkaterState, closing: number, hitterChem = 0, targetChem = 0, jumpEdge = 0,
 ): number {
-  const edge = effective(hitter, h, T.hitter, hitterChem) - effective(target, t, T.brace, targetChem) + jumpEdge
+  // (Task 12: a Big Hitter's rating is TUNING.badges.bigHitterRating higher.)
+  const edge = effective(hitter, h, T.hitter, hitterChem) + (hasBadge(hitter, 'Big Hitter') ? TUNING.badges.bigHitterRating : 0) - effective(target, t, T.brace, targetChem) + jumpEdge
     + (movementOf(hitter, 1).mass * closing - movementOf(target, 1).mass * T.braceSpeed) / T.momentumScale;
   return winProb(edge);
 }
@@ -191,13 +193,13 @@ const logistic = (x: number): number => 1 / (1 + dexp(-x));
 
 /**
  * How hard a landed hit is. x = (closing - 6) * 0.25 + (hitterMass - targetMass) / 8 - (target balance - 70) / 20 - (sawIt ? 0.8 : 0) + margin
- * (margin 0..1: how clearly the roll was won). knockdown with chance clamp(logistic(x - 0.2), 0.03, 0.97); otherwise stagger with
+ * (margin 0..1: how clearly the roll was won) + `bonus` (a Big Hitter's TUNING.badges.bigHitterDegree, Task 12). knockdown with chance clamp(logistic(x - 0.2), 0.03, 0.97); otherwise stagger with
  * chance clamp(logistic(x + 1.2), 0.03, 0.97); otherwise a bump. `sawIt`: the hitter is within 100 degrees of the target's facing at contact.
  * (The numbers are TUNING.hit.degree's.)
  */
-export function hitDegreeChances(closing: number, hitterMass: number, targetMass: number, targetBalance: number, sawIt: boolean, margin: number): { knockdown: number; stagger: number } {
+export function hitDegreeChances(closing: number, hitterMass: number, targetMass: number, targetBalance: number, sawIt: boolean, margin: number, bonus = 0): { knockdown: number; stagger: number } {
   const x = (closing - D.closingFrom) * D.perClosing + (hitterMass - targetMass) / D.kgPerPoint - (targetBalance - D.balanceFrom) / D.balancePer
-    - (sawIt ? D.sawIt : 0) + margin;
+    - (sawIt ? D.sawIt : 0) + margin + bonus;
   const c = (v: number): number => Math.max(0.03, Math.min(0.97, v));
   return { knockdown: c(logistic(x + D.knockdown)), stagger: c(logistic(x + D.stagger)) };
 }
@@ -230,7 +232,7 @@ function resolveImpact(c: ContestStateOf<'hit'>, ctx: ContestCtx, h: SkaterState
   if (won) {
     // How hard it was (Task 9): by the closing speed, the weights, his balance, whether he saw it and the margin of the roll.
     const td = ctx.defs.get(t.id)!;
-    const ch = hitDegreeChances(Math.max(0, closingSpeed(h, t)), mh, mt, td.attrs.balance, sawIt(h, t), p - u);
+    const ch = hitDegreeChances(Math.max(0, closingSpeed(h, t)), mh, mt, td.attrs.balance, sawIt(h, t), p - u, hasBadge(ctx.defs.get(h.id)!, 'Big Hitter') ? TUNING.badges.bigHitterDegree : 0);
     degree = ctx.rng.chance(ch.knockdown) ? 'knockdown' : ctx.rng.chance(ch.stagger) ? 'stagger' : 'bump';
     if (degree === 'knockdown') {
       t.downT = DOWN_SECONDS[0] + (DOWN_SECONDS[1] - DOWN_SECONDS[0]) * (1 - u / p);

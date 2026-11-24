@@ -142,7 +142,7 @@ describe('tactics shade, they never decide (Review Focus 3)', () => {
     }
   }, LONG);
   it('players bend the tactic: asked to dump, grinders take it up far more than a skilled line does (odds of a dump-in, against the same line on mixed; seeds 1-4; Task 11 review fix)', () => {
-    // Seeds 1-16: grinders 0.073 -> 0.711 (odds times 31), playmakers 0.024 -> 0.086 (times 3.8). With no bend both lines
+    // Seeds 1-16 at d6e9888 (the rosters before Task 12): grinders 0.083 -> 0.710 (odds times 27), playmakers 0.021 -> 0.089 (times 4.5). With no bend both lines
     // would play the dump at 60; the bend plays it at about 136 for the grinders and 3.4 for the playmakers.
     const share = (type: string, zoneEntry: Tactics['zoneEntry']): number => tacticMeasures(tacticCounts(allOfType(gameSetup(1), 'home', type, { zoneEntry }), 'home', 4)).dumpInShare;
     const odds = (p: number): number => p / (1 - p);
@@ -161,11 +161,10 @@ describe('tactics: generated teams', () => {
     const ts = Array.from({ length: 40 }, (_, i) => resolveTactics(generateTeam(i + 1, 'T', 'T').tactics));
     for (const k of ['forecheck', 'zoneEntry', 'offence', 'defence', 'pinch'] as const) expect(new Set(ts.map((t) => t[k])).size).toBeGreaterThanOrEqual(2);
     expect(generateTeam(7, 'T', 'T').tactics).toEqual(generateTeam(7, 'T', 'T').tactics);
-    // The roster itself is unchanged by this task (same players and lines as before it: a fingerprint taken then).
-    // (Task 12 step 1 adds badges and the block habit, drawing nothing: without them the players are byte for byte as then.)
-    const old = (seed: number): string => JSON.stringify(generateTeam(seed, 'T', 'T').players.map(({ badges: _b, ...p }) => { const { block: _k, ...t } = p.tendencies; return { ...p, tendencies: t }; }));
-    expect(fnv(old(7))).toBe('7d85cfb2');
-    expect(fnv(old(1))).toBe('ad9d2797');
+    // The roster is a pure function of the seed: a fingerprint (Task 11 took it before tactics; Task 12's styles and
+    // badges changed every generated roster on purpose, so it was taken again then).
+    expect(fnv(JSON.stringify(generateTeam(7, 'T', 'T').players))).toBe('87250e33');
+    expect(fnv(JSON.stringify(generateTeam(1, 'T', 'T').players))).toBe('678acaa5');
     expect(fnv(JSON.stringify(generateTeam(7, 'T', 'T').lines))).toBe('5f189b89');
     const t = generateTeam(7, 'T', 'T');
     expect(t.tactics).toMatchObject(naturalTactics(t.players, t.lines));

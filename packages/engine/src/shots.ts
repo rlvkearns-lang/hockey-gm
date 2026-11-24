@@ -15,6 +15,7 @@ import type { GameEvent, GameState, PlayerDef } from './types';
 import { dist as dist_, hypot2 as hypot2_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, findSkater as findSkater_, other as other_ } from './util';
+import { hasBadge } from './badges';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const recordTouch = recordTouch_;
 const stepPuck = stepPuck_;
@@ -41,6 +42,11 @@ const BLOCK = TUNING.block;
 const MISS_SPEED = 3;
 const SHOT_MAX_SECONDS = 3;
 
+/** Chance `d` blocks a shot whose path passes his body: BLOCK.base + shotBlocking * BLOCK.perPoint (+ TUNING.badges.shotBlockerChance for a Shot Blocker, Task 12), within [0.03, 0.97]. */
+export function blockChance(d: PlayerDef): number {
+  return clamp(BLOCK.base + d.attrs.shotBlocking * BLOCK.perPoint + (hasBadge(d, 'Shot Blocker') ? TUNING.badges.shotBlockerChance : 0), 0.03, 0.97);
+}
+
 /**
  * A shot in flight below BLOCK.maxZ: each defender whose body the puck's path this tick passes within BLOCK.path (0.55 m) of, more
  * than BLOCK.clearOfShooter from the shooter, gets one chance, `clamp(BLOCK.base + shotBlocking * BLOCK.perPoint, 0.03, 0.97)`.
@@ -63,7 +69,7 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
     if (hypot2(s.pos.x - qx, s.pos.y - qy) > BLOCK.path) continue;
     if (shooter && dist(s.pos, shooter.pos) <= BLOCK.clearOfShooter) continue;
     shot.blockTried.push(s.id);
-    if (!rng.chance(clamp(BLOCK.base + defs.get(s.id)!.attrs.shotBlocking * BLOCK.perPoint, 0.03, 0.97))) continue;
+    if (!rng.chance(blockChance(defs.get(s.id)!))) continue;
     // It stops at him: at the point of its path nearest his body.
     pk.pos.x = qx;
     pk.pos.y = qy;

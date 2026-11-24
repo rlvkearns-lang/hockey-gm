@@ -15,6 +15,7 @@ import { hypot2 as hypot2_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_ } from './util';
 import { tieOf, tiedChance } from './engage-state';
+import { hasBadge } from './badges';
 const recordTouch = recordTouch_;
 const composite = composite_;
 const bladePos = bladePos_;
@@ -32,10 +33,10 @@ const T = TUNING.tip;
 const HAND_EYE = { puckHandling: 0.5, shootingAccuracy: 0.3, iq: 0.2 };
 const blade: Vec2 = { x: 0, y: 0 };
 
-/** Hand-eye for a tip: puckHandling .5, shootingAccuracy .3, iq .2. Chance: TUNING.tip.base (0.10) + TUNING.tip.perPoint (0.004) * (handEye - 50), clamped to [0.03, 0.97]. */
+/** Hand-eye for a tip: puckHandling .5, shootingAccuracy .3, iq .2. Chance: TUNING.tip.base (0.10) + TUNING.tip.perPoint (0.004) * (handEye - 50) (+ TUNING.badges.finisherTip for a Net-Front Finisher, Task 12), clamped to [0.03, 0.97]. */
 export function tipChance(d: PlayerDef, tie = 0): number {
   // A tied-up man (Task 10) tips it less often: times 1 - TUNING.engage.limits.tip * his tie, never never.
-  return tiedChance(clamp(T.base + T.perPoint * (composite(d.attrs, HAND_EYE) - 50), 0.03, 0.97), tie, TUNING.engage.limits.tip);
+  return tiedChance(clamp(T.base + T.perPoint * (composite(d.attrs, HAND_EYE) - 50) + (hasBadge(d, 'Net-Front Finisher') ? TUNING.badges.finisherTip : 0), 0.03, 0.97), tie, TUNING.engage.limits.tip);
 }
 
 /**

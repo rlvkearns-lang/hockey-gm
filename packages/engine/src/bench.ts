@@ -1,3 +1,4 @@
+import { hasBadge } from './badges';
 import { PERIOD_SECONDS as PERIOD_SECONDS_ } from './constants';
 import { gameEvent as gameEvent_ } from './events';
 import { faceoffPosition as faceoffPosition_ } from './faceoff';
@@ -6,7 +7,7 @@ import { movementOf as movementOf_ } from './skating';
 import { phaseFor as phaseFor_ } from './team-play';
 import { holdJob as holdJob_, indexOf as indexOf_ } from './commit';
 import { TUNING as TUNING_ } from './tuning';
-import type { BenchState, BenchUnit, GameEvent, GameSetup, GameState, Position, Side, SkaterState } from './types';
+import type { BenchState, BenchUnit, GameEvent, GameSetup, GameState, PlayerDef, Position, Side, SkaterState } from './types';
 import { hypot2 as hypot2_, type Vec2 } from './vec';
 import { dexp as dexp_, dlog as dlog_ } from './dmath';
 import { SIDES as SIDES_, skaterById as skaterById_ } from './util';
@@ -64,6 +65,11 @@ const drained = (energy: number, full: number, effort: number, dt: number): numb
 /** `energy` after resting long enough to keep `factor` of the gap to full. */
 const rested = (energy: number, factor: number): number => (energy >= 1 ? 1 : 1 - (1 - energy) * factor);
 
+/** Energy drained per second at full effort by `d`: fullDrain for his stamina, a Tireless man's times TUNING.badges.tirelessDrain (Task 12). */
+export function fullDrainOf(d: PlayerDef): number {
+  return fullDrain(d.attrs.stamina) * (hasBadge(d, 'Tireless') ? TUNING.badges.tirelessDrain : 1);
+}
+
 /** Energy after `dt` seconds on the ice at `effort` (0 standing, 1 top speed) for a skater of this stamina. */
 export function drainEnergy(energy: number, stamina: number, effort: number, dt: number): number {
   return drained(energy, fullDrain(stamina), effort, dt);
@@ -91,7 +97,7 @@ function infoFor(setup: GameSetup, skaters: SkaterState[]): Info[] {
   let a = infoCache.get(skaters);
   if (!a) {
     const defs = new Map(setup.home.players.concat(setup.away.players).map((p) => [p.id, p]));
-    a = skaters.map((s) => { const p = defs.get(s.id)!; return { fullDrain: fullDrain(p.attrs.stamina), topSpeed: movementOf(p, 1).topSpeed }; });
+    a = skaters.map((s) => { const p = defs.get(s.id)!; return { fullDrain: fullDrainOf(p), topSpeed: movementOf(p, 1).topSpeed }; });
     infoCache.set(skaters, a);
   }
   return a;

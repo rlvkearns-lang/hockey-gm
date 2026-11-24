@@ -1,3 +1,4 @@
+import { hasBadge } from './badges';
 import { DT } from './constants';
 import { effective as effective_, setCooldown as setCooldown_, onCooldown as onCooldown_, winProb as winProb_ } from './contests/core';
 import { gameEvent } from './events';
@@ -39,12 +40,20 @@ function loose(state: GameState, id: string, otherId: string): void { setCooldow
 
 const mass = (d: PlayerDef): number => d.weightKg + 9;
 
+/** A Net-Front Presence's TUNING.badges.netFrontEngage within netFrontRange m of either net's centre (Task 12). */
+function nearNetEdge(d: PlayerDef, s: SkaterState): number {
+  if (!hasBadge(d, 'Net-Front Presence')) return 0;
+  const B = TUNING.badges;
+  const dx = Math.abs(s.pos.x) - RINK.goalLineX;
+  return dx * dx + s.pos.y * s.pos.y <= B.netFrontRange * B.netFrontRange ? B.netFrontEngage : 0;
+}
+
 /**
  * Chance `a` wins a draw: winProb of the difference in (strength .35, balance .3, compete .35, with energy, form and morale
  * as in `effective`), plus mass difference / TUNING.engage.massPerPoint, plus TUNING.engage.insideEdge for the man inside.
  */
 export function engageChance(a: PlayerDef, sa: SkaterState, b: PlayerDef, sb: SkaterState, inside: 'a' | 'b' | null): number {
-  const edge = effective(a, sa, E.weights) - effective(b, sb, E.weights) + (mass(a) - mass(b)) / E.massPerPoint
+  const edge = effective(a, sa, E.weights) + nearNetEdge(a, sa) - effective(b, sb, E.weights) - nearNetEdge(b, sb) + (mass(a) - mass(b)) / E.massPerPoint
     + (inside === 'a' ? E.insideEdge : inside === 'b' ? -E.insideEdge : 0);
   return winProb(edge);
 }

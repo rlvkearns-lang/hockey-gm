@@ -1,3 +1,4 @@
+import { hasBadge } from '../badges';
 import { DT } from '../constants';
 import { RINK, zoneOf } from '../rink';
 import { movementOf } from '../skating';
@@ -119,7 +120,9 @@ function round(c: ContestStateOf<'netFront'>, ctx: ContestCtx, att: SkaterState,
   const ma = movementOf(ctx.defs.get(att.id)!, 1).mass, md = movementOf(ctx.defs.get(def.id)!, 1).mass;
   // Out of an engagement between them (Task 10): the man who had inside position has TUNING.engage.insideEdge in the first round.
   const inside = c.data.rounds === 0 ? c.data.inside ?? null : null;
-  const edge = contestRating(ctx, c, att.id, T.body) - contestRating(ctx, c, def.id, T.body) + (ma - md) / T.massPerPoint
+  // (Task 12: a Net-Front Presence's body rating is TUNING.badges.netFrontBody higher.)
+  const nfp = (id: string): number => (hasBadge(ctx.defs.get(id)!, 'Net-Front Presence') ? TUNING.badges.netFrontBody : 0);
+  const edge = contestRating(ctx, c, att.id, T.body) + nfp(att.id) - contestRating(ctx, c, def.id, T.body) - nfp(def.id) + (ma - md) / T.massPerPoint
     + (inside === att.id ? TUNING.engage.insideEdge : inside === def.id ? -TUNING.engage.insideEdge : 0);
   const effectTick = state.tick + Math.round(EFFECT_SECONDS / DT);
   c.data.rounds++;

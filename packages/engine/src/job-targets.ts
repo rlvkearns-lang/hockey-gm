@@ -6,6 +6,7 @@
  * attacks (goal line 27.13, blue line 7.62), ly to his left; `ps` is the puck's side (`ly >= 0 ? 1 : -1`). A defending
  * job's spots therefore have negative rx (his own net is at rx -27.13).
  */
+import { hasBadge } from './badges';
 import { composite as composite_ } from './attributes';
 import { DT } from './constants';
 import { dangerMan as dangerMan_, laneOpen as laneOpen_, passLaneWidth as passLaneWidth_, spaceAt as spaceAt_ } from './lanes';
@@ -864,7 +865,12 @@ function takeLane(state: GameState, s: SkaterState, out: Vec2): boolean {
   return true;
 }
 
-function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: Job, tactics: Tactics, out: Want, shadow: boolean, gap?: number): void {
+/** The gap a covering man `me` plays: `gap`, a Shutdown man's TUNING.badges.shutdownGap tighter (Task 12). */
+export function coverGapOf(me: PlayerDef | undefined, gap: number): number {
+  return me !== undefined && hasBadge(me, 'Shutdown') ? gap - TUNING.badges.shutdownGap : gap;
+}
+
+function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: Job, tactics: Tactics, out: Want, shadow: boolean, gap?: number, me?: PlayerDef): void {
   const mark = stickyMark(state, s, rule);
   if (mark === null) {
     const fallback = jobAnchor(state, s.side, job, tactics, anchorScratch);
@@ -873,7 +879,7 @@ function cover(state: GameState, s: SkaterState, rule: SkaterState | null, job: 
     if (shadow && shadowSpot(state, s, spotScratch, fallback) !== null) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; out.follow = 'puck'; }
     return;
   }
-  coverSpot(state, s, mark, gap ?? coverGap(state, s, mark), out.pos);
+  coverSpot(state, s, mark, coverGapOf(me, gap ?? coverGap(state, s, mark)), out.pos);
   if (shadow && shadowSpot(state, s, spotScratch, out.pos) !== null) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; }
   out.follow = 'man';
   out.markId = mark.id;
@@ -1056,7 +1062,7 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
     }
     case 'backcheckA': case 'backcheckB': {
       const m = backMan(state, s.side, job === 'backcheckA' ? 0 : 1);
-      cover(state, s, m, job, tactics, out, false);
+      cover(state, s, m, job, tactics, out, false, undefined, defs.get(s.id));
       if (m === null) out.follow = 'puck';
       return out;
     }
@@ -1097,14 +1103,14 @@ function jobWantOwn(state: GameState, s: SkaterState, job: Job, defs: Map<string
       const sx = spotScratch.x, sy = spotScratch.y;
       if (shadowSpot(state, s, p, spotScratch) !== null) { out.follow = 'puck'; return out; }
       const m = lowMan(state, s.side);
-      if (m !== null && hyp(m.pos.x - sx, m.pos.y - sy) <= LOW_MAN_RANGE) { cover(state, s, m, job, tactics, out, false); return out; }
+      if (m !== null && hyp(m.pos.x - sx, m.pos.y - sy) <= LOW_MAN_RANGE) { cover(state, s, m, job, tactics, out, false, undefined, defs.get(s.id)); return out; }
       p.x = sx; p.y = sy;
       return out;
     }
     case 'wingStrong': case 'wingWeak':
       // The weak-side winger sags into the lane to the most dangerous man when it is within reach (shadowSpot).
       // (Task 11: under defence 'pressure' they cover their point men tight, TUNING.tactics.pressure.gap.)
-      cover(state, s, pointMen(state, s.side)[job === 'wingStrong' ? 0 : 1]!, job, tactics, out, job === 'wingWeak', pressing(tactics) ? TT.pressure.gap : undefined);
+      cover(state, s, pointMen(state, s.side)[job === 'wingStrong' ? 0 : 1]!, job, tactics, out, job === 'wingWeak', pressing(tactics) ? TT.pressure.gap : undefined, defs.get(s.id));
       return out;
     default:
       // Utility jobs are steered elsewhere; hold where he is.

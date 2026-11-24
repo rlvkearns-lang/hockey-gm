@@ -1,3 +1,5 @@
+import { hasBadge } from '../badges';
+import { planOf } from '../commit';
 import { blockPickup, passFromFeet, recordTouch } from '../actions';
 import { bladePos } from '../blade';
 import { DT } from '../constants';
@@ -321,10 +323,13 @@ function joinSupport(c: Battle, ctx: ContestCtx): void {
   }
 }
 
-/** Rating points participant 0 has over participant 1 in a draw with `weights` (first man, support, chemistry in). */
+/** A Board Battler's TUNING.badges.boardBattlerRating in the pin and dig draws (Task 12). */
+const battler = (ctx: ContestCtx, id: string): number => (hasBadge(ctx.defs.get(id)!, 'Board Battler') ? TUNING.badges.boardBattlerRating : 0);
+
+/** Rating points participant 0 has over participant 1 in a pin or dig draw with `weights` (first man, support, chemistry, Board Battler in). */
 function sideEdge(c: Battle, ctx: ContestCtx, weights: Weights): number {
   const r = c.roles;
-  return contestRating(ctx, c, r.a, weights) - contestRating(ctx, c, r.b, weights)
+  return contestRating(ctx, c, r.a, weights) - contestRating(ctx, c, r.b, weights) + battler(ctx, r.a) - battler(ctx, r.b)
     + (r.first === r.a ? T.firstEdge : r.first === r.b ? -T.firstEdge : 0)
     + (r.supportA !== null ? T.supportEdge : 0) - (r.supportB !== null ? T.supportEdge : 0);
 }
@@ -346,7 +351,9 @@ function protect(c: Battle, ctx: ContestCtx): ContestResult | null {
   if (c.stageT < PROTECT_SECONDS - STAGE_EPS) return null;
   if (dist(carrier.pos, opp.pos) > PROTECT_REACH) return cooledOff(c, ctx, null, 'lostTouch');
   const mc = movementOf(ctx.defs.get(carrier.id)!, 1).mass, mo = movementOf(ctx.defs.get(opp.id)!, 1).mass;
-  const edge = contestRating(ctx, c, carrier.id, T.protect) - contestRating(ctx, c, opp.id, T.strip) + (mc - mo) / T.massPerPoint + T.protectEdge;
+  // (Task 12: a Shutdown man strips the man he marks with TUNING.badges.shutdownRating more.)
+  const shut = hasBadge(ctx.defs.get(opp.id)!, 'Shutdown') && planOf(state, opp.id).markId === carrier.id ? TUNING.badges.shutdownRating : 0;
+  const edge = contestRating(ctx, c, carrier.id, T.protect) - contestRating(ctx, c, opp.id, T.strip) - shut + (mc - mo) / T.massPerPoint + T.protectEdge;
   if (ctx.rng.next() < winProb(edge)) {
     ctx.emit(contestEvent(state, { type: 'battle', side: carrier.side, playerId: carrier.id, otherId: opp.id, pos: c.spot, detail: { how: 'protect', contestId: c.id, winnerSupportId: null, loserSupportId: null } }));
     setCooldown(state, opp.id, 'pokeCheck', T.loserPokeCooldown);

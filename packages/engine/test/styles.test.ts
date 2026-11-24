@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { blendHabits, STYLES, styleLabel, styleOf } from '../src/styles';
 import { PLAYER_TYPES } from '../src/player-types';
-import { def } from './helpers';
+import { generateTeam } from '../src/roster-gen';
+import { def, shareOf } from './helpers';
 
 describe('styles (Task 12)', () => {
   it('habits are two thirds primary and one third secondary', () => {
@@ -38,5 +39,21 @@ describe('styles (Task 12)', () => {
       Sniper: 0.2, Playmaker: 0.2, 'Power Forward': 0.5, 'Two-Way Forward': 0.6, 'Shutdown Forward': 0.8, Speedster: 0.2, Grinder: 0.7, Enforcer: 0.5,
       'Offensive Defenceman': 0.4, 'Defensive Defenceman': 0.85, 'Two-Way Defenceman': 0.6,
     });
+  });
+  it('generated players: every style appears, about 60% have a secondary, most have 0 to 3 badges', () => {
+    const ps = Array.from({ length: 30 }, (_, i) => generateTeam(i + 1, 'T', 'T')).flatMap((t) => t.players.filter((p) => p.position !== 'G'));
+    const styles = ps.map((p) => styleOf(p)!); for (const s of Object.keys(STYLES)) expect(styles.some((x) => x.primary === s)).toBe(true);
+    const withSecond = styles.filter((s) => s.secondary !== null).length / styles.length; expect(withSecond).toBeGreaterThan(0.3); expect(withSecond).toBeLessThan(0.8);
+    expect(shareOf(ps, (p) => (p.badges ?? []).length <= 3)).toBeGreaterThan(0.9); expect(shareOf(ps, (p) => (p.badges ?? []).length >= 1)).toBeGreaterThan(0.1);
+  });
+  it('a generated player: his type is his drawn primary style\'s, no sub-type, no style set by hand, habits a blend of his styles (Task 12)', () => {
+    const ps = Array.from({ length: 10 }, (_, i) => generateTeam(i + 1, 'T', 'T')).flatMap((t) => t.players);
+    for (const p of ps) {
+      expect(p.subType).toBeNull(); expect(p.style).toBeUndefined();
+      if (p.position === 'G') { expect(p.type).toBe('Goalie'); continue; }
+      expect(Object.values(STYLES).some((st) => st.typeKey === p.type)).toBe(true);
+      expect(p.tendencies.block).toBeGreaterThanOrEqual(0); expect(p.tendencies.block).toBeLessThanOrEqual(1);
+    }
+    expect(ps.some((p) => p.type === 'Shutdown Forward')).toBe(true);
   });
 });

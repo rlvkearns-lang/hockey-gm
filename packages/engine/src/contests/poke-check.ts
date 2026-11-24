@@ -1,10 +1,12 @@
+import { hasBadge } from '../badges';
+import { planOf } from '../commit';
 import { recordTouch } from '../actions';
 import { bladePos } from '../blade';
 import { movementOf } from '../skating';
 import { sitBack } from '../team-play';
 import { TUNING } from '../tuning';
 import { heldSeconds, watchTurnover } from '../turnovers';
-import type { ContestStateOf, PlayerDef, SkaterState } from '../types';
+import type { ContestStateOf, GameState, PlayerDef, SkaterState } from '../types';
 import { dist, hypot2 } from '../vec';
 import {
   carrierNow, carrierOf, contestEvent, contestRating, dropParticipant, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS,
@@ -157,10 +159,23 @@ export function pokeAttemptChance(d: PlayerDef): number {
  * either way). Returns the `data.outcome`.
  */
 function roll(c: ContestStateOf<'pokeCheck'>, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): 'take' | 'loose' | 'kept' | 'beaten' {
-  const edge = contestRating(ctx, c, checker.id, T.stick) - contestRating(ctx, c, carrier.id, T.hands) - T.carrierEdge;
+  const edge = contestRating(ctx, c, checker.id, T.stick) - contestRating(ctx, c, carrier.id, T.hands) - T.carrierEdge + pokeBadgeEdge(ctx.state, ctx.defs.get(checker.id)!, checker, ctx.defs.get(carrier.id)!, carrier);
   const p = winProb(edge);
   if (ctx.rng.next() < p) return ctx.rng.chance(T.takeShare) ? 'take' : 'loose';
   return ctx.rng.chance(beatenChance(p)) ? 'beaten' : 'kept';
+}
+
+/**
+ * Badges in a poke check (Task 12, TUNING.badges), in the checker's rating points: a Stick Checker's stick rating
+ * +stickCheckerStick; a Shutdown man's +shutdownRating against the man he marks; a Stickhandler's hands rating
+ * +stickhandlerHands and an Elusive carrier's edge +elusivePokeEdge count against him.
+ */
+export function pokeBadgeEdge(state: GameState, checker: PlayerDef, cs: SkaterState, carrier: PlayerDef, ks: SkaterState): number {
+  const B = TUNING.badges;
+  return (hasBadge(checker, 'Stick Checker') ? B.stickCheckerStick : 0)
+    + (hasBadge(checker, 'Shutdown') && planOf(state, cs.id).markId === ks.id ? B.shutdownRating : 0)
+    - (hasBadge(carrier, 'Stickhandler') ? B.stickhandlerHands : 0)
+    - (hasBadge(carrier, 'Elusive') ? B.elusivePokeEdge : 0);
 }
 
 /** Chance that a failed poke leaves the checker beaten, from his chance `p` of winning it: within [0.03, 0.97]. */
