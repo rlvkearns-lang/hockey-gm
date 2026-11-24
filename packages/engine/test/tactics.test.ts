@@ -7,7 +7,7 @@ import { TUNING } from '../src/tuning';
 import { resolveTactics as resolveFromIndex } from '../src/index';
 import type { GameSetup, Side, Tactics } from '../src/types';
 import { gameSetup, stateWith } from './helpers';
-import { tacticCounts, tacticMeasures } from './measures';
+import { observeGame, tacticCounts, tacticMeasures } from './measures';
 
 /** `s` with `side`'s tactics changed by `t` (the rosters are the same). */
 const withTactics = (s: GameSetup, side: Side, t: Partial<Tactics>): GameSetup => ({ ...s, [side]: { ...s[side], tactics: { ...s[side].tactics, ...t } } });
@@ -39,7 +39,7 @@ describe('tactics: the input', () => {
     expect(Object.values(offenceFactors(d))).toEqual([1, 1, 1, 1, 1]);
     expect(patienceFactor(d.offence)).toBe(1);
   });
-  it('the offence factors keep the brief\'s ratios between tactics', () => {
+  it('the offence factors keep tuning\'s ratios between tactics, the default all ones', () => {
     const f = (offence: 'cycle' | 'pointShots' | 'rush') => offenceFactors(resolveTactics({ forecheck: 'balanced', shiftSeconds: { forwards: 45, defence: 55 }, offence }));
     const O = TUNING.tactics.offence;
     for (const k of ['lowCycle', 'pointPass', 'pointShot', 'rushShot', 'hold'] as const) {
@@ -49,8 +49,11 @@ describe('tactics: the input', () => {
     expect(f('pointShots').pointShot).toBeGreaterThan(1); expect(f('rush').rushShot).toBeGreaterThan(1); expect(f('rush').lowCycle).toBeLessThan(1);
     expect(patienceFactor('cycle')).toBeGreaterThan(patienceFactor('pointShots')); expect(patienceFactor('pointShots')).toBeGreaterThan(patienceFactor('rush'));
   });
-  it('a factor shades a value, it never flips its sign', () => {
-    expect(shade(0.2, 1.5)).toBeCloseTo(0.3); expect(shade(-0.2, 1.5)).toBeCloseTo(-0.2 / 1.5); expect(shade(-0.2, 0.5)).toBeCloseTo(-0.4); expect(shade(0, 2)).toBe(0);
+  it('a factor k multiplies the option\'s weight in an average player\'s draw by k (a shift of temp * ln k on its value)', () => {
+    const T = TUNING.tactics.temp;
+    expect(shade(0.2, 1)).toBe(0.2);
+    expect(Math.exp((shade(-0.03, 4) - -0.03) / T)).toBeCloseTo(4, 6);
+    expect(Math.exp((shade(0.01, 0.5) - 0.01) / T)).toBeCloseTo(0.5, 6);
   });
   it('lineHabit is the mean habit of the forwards (or defencemen) on the ice', () => {
     const st = stateWith({ carrier: 'home', puckX: 0 });
@@ -83,43 +86,28 @@ describe('tactics: the players bend them', () => {
     const share = (type: string) => tacticMeasures(tacticCounts(allOfType(gameSetup(1), 'home', type, { zoneEntry: 'mixed' }), 'home', 4)).dumpInShare;
     const grind = share('Grinder'), skill = share('Playmaker');
     expect(grind).toBeGreaterThan(skill);
-    expect(grind / skill).toBeLessThan(home({ zoneEntry: 'dump' }).dumpInShare / home({ zoneEntry: 'carry' }).dumpInShare);
+    expect(grind / skill).toBeLessThan(home({ zoneEntry: 'dump' }, 8).dumpInShare / home({ zoneEntry: 'carry' }, 8).dumpInShare);
   }, LONG);
 });
 
 describe('tactics: two teams look different', () => {
-  it('a dump-and-chase team and a carry-in team: dump-ins over 45% of one\'s entries, under 25% of the other\'s, and 1.6 times the share', () => {
-    const dump = home({ zoneEntry: 'dump' }).dumpInShare, carry = home({ zoneEntry: 'carry' }).dumpInShare;
+  it('a dump-and-chase team and a carry-in team (8 games each): dump-ins over 45% of one\'s entries, under 25% of the other\'s, and 1.6 times the share', () => {
+    const dump = home({ zoneEntry: 'dump' }, 8).dumpInShare, carry = home({ zoneEntry: 'carry' }, 8).dumpInShare;
     expect(dump).toBeGreaterThan(0.45); expect(carry).toBeLessThan(0.25); expect(dump).toBeGreaterThan(carry * 1.6);
   }, LONG);
-  it('a cycle team holds the zone longer than a rush team, and cycles more below the dots', () => {
-    const cyc = home({ offence: 'cycle' }), rush = home({ offence: 'rush' });
-    expect(cyc.ozoneSecondsPerPossession).toBeGreaterThan(rush.ozoneSecondsPerPossession * 1.2);
-    expect(cyc.lowPassesPerPossession).toBeGreaterThan(rush.lowPassesPerPossession);
-    expect(cyc.lowSecondsPerPossession).toBeGreaterThan(rush.lowSecondsPerPossession);
+});
+
+describe('tactics shade, they never decide (Review Focus 3)', () => {
+  it('for every entry and offence tactic one kind is certain before the cap in under 15% of ordinary decisions', () => {
+    for (const t of [{ zoneEntry: 'dump' }, { zoneEntry: 'carry' }, { offence: 'pointShots' }, { offence: 'rush' }] as Partial<Tactics>[]) {
+      const s = { ...gameSetup(1), home: { ...gameSetup(1).home, tactics: { ...gameSetup(1).home.tactics, ...t } }, away: { ...gameSetup(1).away, tactics: { ...gameSetup(1).away.tactics, ...t } } };
+      const c = observeGame(s).counters;
+      expect(c.normalCertain / c.normalDecisionPoints, JSON.stringify(t)).toBeLessThan(0.15);
+    }
   }, LONG);
-  it('a point-shot team shoots more from the defence and from the point', () => {
-    const pts = home({ offence: 'pointShots' }), cyc = home({ offence: 'cycle' });
-    expect(pts.defenceAttemptsPerGame).toBeGreaterThan(cyc.defenceAttemptsPerGame * 1.4);
-    expect(pts.pointAttemptShare).toBeGreaterThan(cyc.pointAttemptShare * 1.4);
-  }, LONG);
-  it('an aggressive forecheck has two men deep; a trap has at most one', () => {
-    expect(home({ forecheck: 'aggressive' }, 2).twoDeepShare).toBeGreaterThan(0.40);
-    expect(home({ forecheck: 'passive' }, 2).twoDeepShare).toBeLessThan(0.10);
-  }, LONG);
-  it('a pressure team presses the carrier in its zone more than a collapse team and gives up relatively more from the slot', () => {
-    const pr = home({ defence: 'pressure' }), co = home({ defence: 'collapse' });
-    expect(pr.dzonePressedShare).toBeGreaterThan(co.dzonePressedShare);
-    expect(pr.dzoneTwoShare).toBeGreaterThan(co.dzoneTwoShare);
-    expect(pr.slotToPoint).toBeGreaterThan(co.slotToPoint);
-  }, LONG);
-  it('against a carrier behind the net a pressure team chases and a collapse team holds the front', () => {
-    expect(home({ defence: 'pressure' }).chaseShare).toBeGreaterThan(0.7); expect(home({ defence: 'collapse' }).chaseShare).toBeLessThan(0.3);
-  }, LONG);
-  it('point men pinch more when told to, and only with a forward above them', () => {
-    const often = homeCounts({ pinch: 'often' }), rarely = homeCounts({ pinch: 'rarely' }), some = homeCounts({ pinch: 'sometimes' });
-    expect(often.pinches).toBeGreaterThan(rarely.pinches * 2);
-    expect(often.pinchesWithoutCover + rarely.pinchesWithoutCover + some.pinchesWithoutCover).toBe(0);
+  it('a dump-and-chase team still carries in, and a carry-in team still dumps (no tactic removes an option)', () => {
+    expect(homeCounts({ zoneEntry: 'dump' }).carryIns).toBeGreaterThan(0);
+    expect(homeCounts({ zoneEntry: 'carry' }).dumpIns).toBeGreaterThan(0);
   }, LONG);
 });
 

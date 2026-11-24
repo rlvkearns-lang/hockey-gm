@@ -105,9 +105,8 @@ const NET_FRONT_GOALIE = 1.0;
 const LOW_MAN_RANGE = 6;
 /** A covering job faces the play (and may skate backward) within this far (m) of his man. */
 const FACE_MAN_RANGE = 4;
-/** Behind his own net a carrier is chased round it after this long (s) there, or by a defender this close (m) to him. */
+/** Behind his own net a carrier is chased round it after this long (s) there (at once under defence 'pressure', Task 11). */
 const BEHIND_CHASE_SECONDS = 1.5;
-const BEHIND_CHASE_RANGE = 3;
 /** Behind the net: rx beyond this (the back of the frame and a little). */
 const BEHIND_RX = 27.43;
 /** The office is behind the goal line: its spots stay beyond this rx. */
@@ -142,6 +141,9 @@ const pointIn = (t: Tactics): number => (t.offence === 'pointShots' ? TT.pointIn
 const pressing = (t: Tactics): boolean => t.defence === 'pressure';
 /** The two own-zone jobs that both go at a carrier below the dots under defence 'pressure' (Task 11). */
 const PRESSERS: ReadonlySet<Job> = new Set<Job>(['dCorner', 'dzCentre']);
+/** The own-zone jobs; under defence 'collapse' they hold in front of the goal line (rx -HOLD_FRONT) against a carrier behind the net. */
+const OWN_ZONE: ReadonlySet<Job> = new Set<Job>(['dCorner', 'dNet', 'dzCentre', 'wingStrong', 'wingWeak']);
+const HOLD_FRONT = 26.6;
 
 /** The view of the play from `side`: its attack direction, the puck's rx and ly, the puck's side, and the carrier. */
 type Frame = { dir: 1 | -1; pr: number; pl: number; ps: 1 | -1; carrier: SkaterState | null };
@@ -763,8 +765,8 @@ export function carrierTaker(state: GameState, side: Side): SkaterState | null {
 }
 
 /**
- * Under defence 'pressure' (Task 11): when the man who has the carrier holds dCorner or dzCentre and the carrier is below
- * the dots (and in front of the goal line), `s`, holding the other of the two, goes at him as well, from the slot side
+ * Under defence 'pressure' (Task 11): with the carrier below the dots (and in front of the goal line), the one of the
+ * dCorner and dzCentre men who is not the man who has him (the nearer to him, if neither is) goes at him as well, from the slot side
  * (TUNING.tactics.pressure.second m from him toward the slot). Returns false otherwise.
  */
 function secondPresser(state: GameState, s: SkaterState, out: Want): boolean {
@@ -775,8 +777,16 @@ function secondPresser(state: GameState, s: SkaterState, out: Want): boolean {
   const dir = state.attackDir[s.side];
   const crx = c.pos.x * dir;
   if (crx >= CONTAIN_ABOVE || crx < -GOAL) return false;
-  const tj = jobNow(state, s.side, indexOf(state, taker.id));
-  if (tj === null || !PRESSERS.has(tj)) return false;
+  // The one of the corner man and the centre (not the man who has him) nearest the carrier.
+  let near: SkaterState | null = null, nd = Infinity;
+  for (let k = 0; k < state.skaters.length; k++) {
+    const t = state.skaters[k]!;
+    const j = jobNow(state, s.side, k);
+    if (t === taker || !standing(t) || t.side !== s.side || j === null || !PRESSERS.has(j)) continue;
+    const d = hyp(t.pos.x - c.pos.x, t.pos.y - c.pos.y);
+    if (d < nd) { nd = d; near = t; }
+  }
+  if (near !== s) return false;
   setRel(spotScratch, -20, 0, dir);
   const dx = spotScratch.x - c.pos.x, dy = spotScratch.y - c.pos.y, l = hyp(dx, dy) || 1;
   out.pos.x = c.pos.x + (dx / l) * TT.pressure.second;
@@ -793,8 +803,9 @@ function secondPresser(state: GameState, s: SkaterState, out: Want): boolean {
 /**
  * Has the carrier (`s` is carrierTaker): below the dots, or wherever the carrier is shielding the puck (his plan is
  * protect), he pressures him (PRESS_GAP goal-side, skating through him); above them he contains him (CONTAIN_GAP
- * goal-side). Behind the net he waits at the near post until he is within
- * BEHIND_CHASE_RANGE of the carrier or has waited BEHIND_CHASE_SECONDS. Returns false when `s` is not the taker.
+ * goal-side). Behind the net he waits at the near post until he has waited BEHIND_CHASE_SECONDS (Task 11, defence
+ * 'collapse'; before it, also until he was within 3 m of the carrier), or under defence 'pressure' goes at once.
+ * Returns false when `s` is not the taker.
  */
 function takeCarrier(state: GameState, s: SkaterState, out: Want, tactics: Tactics): boolean {
   if (carrierTaker(state, s.side) !== s) return false;
@@ -809,7 +820,9 @@ function takeCarrier(state: GameState, s: SkaterState, out: Want, tactics: Tacti
     const plan = state.plans[indexOf(state, s.id)]!;
     // He has waited once his post spot (a held spot, no man) is BEHIND_TICKS old.
     const waited = plan.follow === 'spot' && plan.markId === null && state.tick - plan.targetTick > BEHIND_TICKS;
-    if (distV(s.pos, c.pos) > BEHIND_CHASE_RANGE && !waited) {
+    // (Task 11: a collapsing team holds the post for the whole wait, however near he comes; before, he went at once
+    // from within 3 m.)
+    if (!waited) {
       setRel(p, -26.6, (c.pos.y * dir >= 0 ? 1 : -1) * 1.3, dir);
       out.follow = 'spot';
       out.markId = null;
@@ -876,6 +889,13 @@ export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<st
     if (out.follow === 'spot') out.follow = 'puck';
     // A lane is taken now or not at all: he gets there flat out.
     if (distV(s.pos, out.pos) > 1) out.effort = 'sprint';
+  }
+  // Defence 'collapse' (Task 11): with their carrier behind the net, the own-zone men hold the front of it: nobody goes
+  // behind the goal line after him, a man back there or a lane (the man who has him waits at the post, takeCarrier).
+  if (!pressing(tactics) && OWN_ZONE.has(job)) {
+    const c = curCarrier(state);
+    const dir = state.attackDir[s.side];
+    if (c !== null && c.side !== s.side && c.pos.x * dir < -BEHIND_RX && out.pos.x * dir < -HOLD_FRONT) out.pos.x = -HOLD_FRONT * dir;
   }
   return out;
 }

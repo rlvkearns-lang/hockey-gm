@@ -764,16 +764,18 @@ export function countGames(seeds: number[]): PlayCounters {
  * - ozonePossessions / ozoneTicks: as the play measures (its possession, the puck in the offensive zone), for it alone;
  *   ozoneLowTicks: of those, with the puck below the faceoff dots (rx > 21.03); lowPasses: a pass or rim it releases
  *   below the dots, a pass going to a teammate also below them (the cycle).
- * - attempts / pointAttempts (released 11 m or more from the net: TUNING.options.farShot) / defenceAttempts.
- * - forecheckTicks: live ticks with an opposing carrier in its offensive zone; forecheckTwoDeep: of those, with two or
- *   more of its forwards below the far hash marks (rx > 21); forecheckDeep: the number of them summed.
+ * - attempts / pointAttempts (released from the point: above the tops of the circles, rx < 14) / defenceAttempts.
+ * - forecheckTicks: live ticks 2 s or more into its committed forecheck phase (its men have taken their spots) with the opposing carrier deep in its offensive zone
+ *   (below the far hash marks, rx > 21: where a forecheck is one man or two); forecheckTwoDeep: of those, with two or more of its forwards below the hash
+ *   marks too; forecheckDeep: the number of them summed.
  * - dzoneCarrierTicks: live ticks with an opposing carrier in its own zone; dzoneCarrierPressed: one of its skaters
  *   (standing) within 3 m of him; dzoneCarrierTwo: two of them.
  * - allowedSlot / allowedPoint: the other side's attempts released in the slot (rx > 17, |ly| < 4.3, the shooter's
  *   frame) and from 11 m or more.
- * - behindSpells: an opposing carrier behind its net (beyond rx 27.43 of his attack, within 4 m of the middle) that it
- *   chased, or that lasted 1.0 s; behindChased: of those, chased: one of its skaters went behind the goal line within
- *   2 m of him or came within 1.2 m of him in the spell's first 1.0 s.
+ * - behindSpells: an opposing carrier behind its net (beyond rx 27.43 of his attack, within 4 m of the middle) for 1.0 s;
+ *   behindChased: of those, one of its skaters who was in front of the goal line when the spell began is behind it
+ *   within 3 m of him then (he went round after him; holding the post, a man stays in front of the goal line; a man
+ *   who was back there already, following him or tied up, is not a chase).
  * - pinches: one of its defencemen, standing in the offensive zone (rx > 6.62) with the puck loose there, is given the
  *   loose-puck job (chase or battleSupport) he did not hold; pinchesWithoutCover: of those, with no teammate holding job
  *   highForward nearer the blue line than the puck (each read from the tick before, when the jobs were handed out).
@@ -792,6 +794,12 @@ const TACTIC_KEYS: readonly TacticCounterKey[] = [
 ];
 const DOTS_RX = 21.03;
 const HASH_RX = 21;
+/** The forecheck is set (its men have had time to take their spots) this long (s) into the phase. */
+const FORECHECK_SET = 2;
+/** A carrier behind the net is chased with a man behind the goal line within this far (m) of him. */
+const CHASED = 3;
+/** An attempt from the point: released above the tops of the circles (rx under 14). */
+const POINT_RX = 14;
 const PUCK_JOBS = new Set(['chase', 'battleSupport', 'receive']);
 
 /** Call `tick` after every `game.step()` with `game.drainEvents()`; `counters()` gives `side`'s TacticCounters for the game. */
@@ -803,7 +811,7 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
   const isDslot = (s: SkaterState): boolean => s.slot === 'LD' || s.slot === 'RD';
   let prev: { carrier: string | null; puckRx: number; puckLy: number; live: boolean; jobs: string[]; rx: number[]; ly: number[]; down: boolean[]; onIce: boolean[] } | null = null;
   let inZone = false;
-  let behind: { id: string; ticks: number; chased: boolean; counted: boolean } | null = null;
+  let behind: { id: string; ticks: number; chased: boolean; front: Set<string> } | null = null;
   return {
     tick(st, events) {
       const dir = st.attackDir[side], live = st.phase === 'live';
@@ -822,7 +830,7 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
           const d = st.attackDir[e.side], rx = e.pos.x * d, ly = e.pos.y * d, far = Math.hypot(GOAL - rx, ly) >= TUNING.options.farShot;
           if (e.side === side) {
             c.attempts++;
-            if (far) c.pointAttempts++;
+            if (rx < POINT_RX) c.pointAttempts++;
             const s = st.skaters.find((k) => k.id === e.playerId);
             if (s && isDslot(s)) c.defenceAttempts++;
           } else {
@@ -839,7 +847,7 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
       inZone = mine;
       if (live && cs !== undefined && cs.side === opp) {
         const crx = cs.pos.x * dir;
-        if (crx > BLUE) {
+        if (crx > HASH_RX && st.teamPhase[side].phase === 'forecheck' && st.tick - st.teamPhase[side].sinceTick >= ticksOf(FORECHECK_SET)) {
           c.forecheckTicks++;
           let deep = 0;
           for (const s of st.skaters) if (s.onIce && s.side === side && !isDslot(s) && s.downT === 0 && s.pos.x * dir > HASH_RX) deep++;
@@ -855,18 +863,15 @@ export function createTacticObserver(setup: GameSetup, side: Side): { tick(state
         }
         // behind its own net
         if (crx < -27.43 && Math.abs(cs.pos.y) < 4) {
-          if (behind === null || behind.id !== cs.id) behind = { id: cs.id, ticks: 0, chased: false, counted: false };
+          if (behind === null || behind.id !== cs.id) behind = { id: cs.id, ticks: 0, chased: false, front: new Set(st.skaters.filter((s) => s.onIce && s.side === side && s.pos.x * dir >= -GOAL).map((s) => s.id)) };
           behind.ticks++;
-          if (behind.ticks <= ticksOf(1.0) && !behind.chased) {
+          if (behind.ticks === ticksOf(1.0)) {
             for (const s of st.skaters) {
               if (!s.onIce || s.side !== side || s.downT > 0) continue;
-              const d = Math.hypot(s.pos.x - cs.pos.x, s.pos.y - cs.pos.y);
-              if (d <= 1.2 || (s.pos.x * dir < -GOAL && d <= 2)) { behind.chased = true; break; }
+              if (behind.front.has(s.id) && s.pos.x * dir < -GOAL && Math.hypot(s.pos.x - cs.pos.x, s.pos.y - cs.pos.y) <= CHASED) { behind.chased = true; break; }
             }
-          }
-          if (!behind.counted && (behind.chased || behind.ticks >= ticksOf(0.5))) {
-            // Counted once it is a spell (0.5 s) or chased; its chase is settled after 1.0 s.
-            if (behind.ticks >= ticksOf(1.0) || behind.chased) { behind.counted = true; c.behindSpells++; if (behind.chased) c.behindChased++; }
+            c.behindSpells++;
+            if (behind.chased) c.behindChased++;
           }
         } else behind = null;
       } else behind = null;

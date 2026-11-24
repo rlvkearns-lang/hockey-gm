@@ -291,48 +291,59 @@ export const TUNING = deepFreeze({
 
   /**
    * Team tactics (tactics.ts, Task 11). Every factor a tactic applies is here; tactics shade option values and jobs and
-   * never decide (every chance stays inside its clamp). The default tactics (zoneEntry mixed, offence cycle, forecheck as
-   * set, defence collapse, pinch sometimes) play as the engine did before tactics.
+   * never decide (no option is removed, every chance stays inside its clamp). The defaults (zoneEntry mixed, offence
+   * cycle, defence collapse, pinch sometimes; forecheck as set) keep the carrier's valuation exactly as before; three
+   * job rules are new for every team (pinching, collapse holding the front of the net, the post held for the whole wait).
    *
-   * - entry: multipliers on the carrier's neutral-zone options (options.ts): `carryIn` on a carry toward the zone,
-   *   `dump` on the dump. A multiplier m makes a positive value v * m and a negative one v / m (as a habit does).
+   * - temp: a factor k is applied to an option's value as + temp * ln k (tactics.ts shade): for an average player
+   *   unpressured (his pick temperature, TUNING.value.pick, is about temp) it multiplies the option's weight in his draw
+   *   by k. (The brief's plain multiple of the value did next to nothing: values are small differences, often below 0.)
+   * - entry: factors on the carrier's neutral-zone options (options.ts): `carryIn` on a carry toward the zone, `dump` on
+   *   the dump. Set from play, far above the brief's 1.25 / 0.6 and 0.8 / 1.6: before tactics a team dumped about 4% of
+   *   its entries (a dump sits 0.02 to 0.07 below his best option at the line, three to five temperatures); a weight
+   *   factor of 30 on the dump gave 28%, 240 gave 32 to 40%. Measured numbers in task-11-report.md.
    * - bend: the men on the ice bend an entry tactic: its factor f becomes f ** e, e = max(min, perHabit * h), h the
    *   mean habit of the on-ice forwards for what the tactic asks for (tend.carry under 'carry', tend.dump under 'dump').
    *   An average line (0.5) plays it as written; a line that does not like it (grinders asked to carry) plays it less.
    *   (The brief's 0.5 + h bends too little for its own test: grinders asked to carry would dump 1.16 times as often
-   *   as a skilled line, against 1.3; perHabit 2 gives 1.34.)
-   * - offence: the brief's multipliers (lowCycle on a rim and a pass or carry to a man or a spot below the dots,
-   *   pointPass on a pass to a point man, pointShot on a shot from options.farShot m or more, rushShot on a shot on an
-   *   odd-man rush, hold on protecting it in the zone and holding it behind the net). options.ts uses them divided by
-   *   the default's (cycle), so the default plays as before and the tactics differ from each other as the brief says.
-   * - patience: TUNING.patience's tactic factor by offence.
+   *   as a skilled line, against 1.3.)
+   * - offence: factors (lowCycle on a rim, a pass to a man below the dots and the office carry; pointPass on a pass to
+   *   a point man; pointShot on a shot from options.farShot m or more; rushShot on a shot on an odd-man rush; hold on
+   *   protecting it in the zone and holding it behind the net). options.ts uses them divided by the default's (cycle),
+   *   so the default plays as before. The brief's, except pointShots' pointPass 1.6 and pointShot 3 (brief 1.4 / 1.4:
+   *   defencemen's attempts rose 1.26 times, against the brief's 1.4).
+   * - patience: TUNING.patience's tactic factor by offence (rush 0.5: at 0.8 a cycle team's possessions in the zone were
+   *   1.14 times a rush team's, at 0.6 1.19, against the brief's 1.2).
    * - pointIn (m): with pointShots the point men hold this much further in.
    * - joinRush: the joinRush tendency a defenceman needs for the dJoin job (rush tactic: `rush`; otherwise `other`).
    * - passiveF1 (rx, m): with a passive forecheck the first forechecker holds at the top of the circles (`hold`, on the
    *   carrier's line, within `holdLy` m of the middle) while the carrier is below it.
    * - pressure: defence 'pressure' (job-targets.ts): the wingers cover their point men at `gap` m; the corner man and the
-   *   centre both go at a carrier below the dots (the second man `second` m goal-side of him); the corner man chases a
-   *   carrier behind the net at once. 'collapse' (the default) is the defensive play as before: one man has the carrier
-   *   (pressing below the dots, containing above), the wingers cover at TUNING.cover's gap, and behind the net the man
-   *   who has the carrier waits at the post (job-targets.ts BEHIND_CHASE_SECONDS) unless he is right on him.
+   *   centre both go at a carrier below the dots (the second `second` m off him toward the slot); the man who has a
+   *   carrier behind the net goes round after him at once. 'collapse': one man has the carrier (pressing below the dots,
+   *   containing above), the wingers cover at TUNING.cover's gap; with the carrier behind the net the man who has him
+   *   waits at the post (job-targets.ts BEHIND_CHASE_SECONDS) and the others hold in front of the goal line.
    * - pinch (m): a point man goes down the wall for a loose or contested puck on his side within this far of him, and
-   *   only while a teammate with job highForward is above the puck (nearer the blue line than it).
-   * - natural: generateTeam's rules (naturalTactics), from the roster alone.
+   *   only while a teammate with job highForward is above the puck (nearer the blue line than it). pinchEager (m): one
+   *   who may goes as if that much nearer the puck than he is (negative: further), against the other men for it.
+   * - natural: generateTeam's rules (naturalTactics), from the roster alone (the brief's numbers).
    */
   tactics: {
-    entry: { carry: { carryIn: 1.25, dump: 0.6 }, mixed: { carryIn: 1, dump: 1 }, dump: { carryIn: 0.8, dump: 1.6 } },
+    temp: 0.0136,
+    entry: { carry: { carryIn: 1.25, dump: 0.6 }, mixed: { carryIn: 1, dump: 1 }, dump: { carryIn: 0.2, dump: 600 } },
     bend: { perHabit: 2, min: 0.2 },
     offence: {
       cycle: { lowCycle: 1.3, pointPass: 1, pointShot: 0.8, rushShot: 1, hold: 1.2 },
-      pointShots: { lowCycle: 1, pointPass: 1.4, pointShot: 1.4, rushShot: 1, hold: 1 },
+      pointShots: { lowCycle: 1, pointPass: 2, pointShot: 4, rushShot: 1, hold: 1 },
       rush: { lowCycle: 0.8, pointPass: 0.9, pointShot: 1, rushShot: 1.3, hold: 0.8 },
     },
-    patience: { cycle: 1, pointShots: 0.9, rush: 0.8 },
+    patience: { cycle: 1, pointShots: 0.9, rush: 0.5 },
     pointIn: 1,
     joinRush: { rush: 0.45, other: 0.6 },
     passiveF1: { hold: 15.5, holdLy: 6 },
     pressure: { gap: 1.2, second: 2.2 },
     pinch: { often: 9, sometimes: 6, rarely: 3 },
+    pinchEager: { often: 5, sometimes: 0, rarely: -4 },
     natural: {
       entry: { carry: 0.15, dump: -0.05 },
       pointShots: { shootingPower: 74, shoot: 0.35 },

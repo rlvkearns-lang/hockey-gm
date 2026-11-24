@@ -61,11 +61,16 @@ const BLUE = RINK.blueLineX;
  * distance of him (TUNING.tactics.pinch by tactics.pinch) and a teammate with job highForward is above it (nearer the
  * blue line than the puck): otherwise he holds the line and someone else goes. True when `d` may not go.
  */
+/** A defenceman of `side` at the point with the puck loose in the zone it attacks: inside the blue line or within 1 m of it. */
+function atPoint(state: GameState, side: Side, d: SkaterState): boolean {
+  const dir = state.attackDir[side];
+  return isDefenceman(d) && state.puck.pos.x * dir > BLUE && d.pos.x * dir > BLUE - 1;
+}
+
 function heldAtPoint(state: GameState, side: Side, d: SkaterState, tactics: Tactics): boolean {
-  if (!isDefenceman(d)) return false;
+  if (!atPoint(state, side, d)) return false;
   const dir = state.attackDir[side], p = state.puck.pos;
   const prx = p.x * dir;
-  if (prx <= BLUE || d.pos.x * dir <= BLUE - 1) return false;
   const reach = TUNING.tactics.pinch[tactics.pinch ?? 'sometimes'];
   if (hyp(p.x - d.pos.x, p.y - d.pos.y) > reach || (p.y >= 0) !== (d.pos.y >= 0)) return true;
   for (let k = 0; k < state.skaters.length; k++) {
@@ -181,11 +186,11 @@ function jobsWith(state: GameState, side: Side, tactics: Tactics, carrier: Skate
 }
 
 /** The free skater of `side` (from `pool`) nearest `to`, keeping whoever holds `job` now unless another is nearer by more than TUNING.commit.chaserMargin. */
-function stickyNearest(state: GameState, pool: number[], job: Job, to: Vec2): number {
+function stickyNearest(state: GameState, pool: number[], job: Job, to: Vec2, bias: number[] | null = null): number {
   let near = -1, nearD = Infinity, cur = -1, curD = Infinity;
   for (const i of pool) {
     const s = state.skaters[i]!;
-    const d = hyp(s.pos.x - to.x, s.pos.y - to.y);
+    const d = hyp(s.pos.x - to.x, s.pos.y - to.y) + (bias === null ? 0 : bias[i] ?? 0);
     if (d < nearD) { nearD = d; near = i; }
     if (state.plans[i]!.job === job && d < curD) { curD = d; cur = i; }
   }
@@ -196,6 +201,8 @@ const poolScratch: number[] = [];
 const netScratch: Vec2 = { x: 0, y: 0 };
 const chasePool: number[] = [];
 const heldPool: number[] = [];
+/** Per skater index: the pinch bias (m) on his distance to the loose puck (Task 11). */
+const pinchBias: number[] = [];
 /** Jobs are handed out afresh every ASSIGN_TICKS ticks (0.2 s), and at once on a trigger or a change of the list. */
 const ASSIGN_TICKS = 6;
 const outHome: (Job | null)[] = [];
@@ -248,8 +255,12 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
     chasePool.length = 0;
     heldPool.length = 0;
     // (A point man who may not pinch is in neither pool: he never goes, Task 11.)
+    let eager = false;
     for (const i of pool) {
+      pinchBias[i] = 0;
       if (heldAtPoint(state, side, sk[i]!, tactics)) continue;
+      // A point man who may pinch goes as if he were TUNING.tactics.pinchEager m nearer (further for a negative one).
+      if (atPoint(state, side, sk[i]!)) { pinchBias[i] = -TUNING.tactics.pinchEager[tactics.pinch ?? 'sometimes']; eager = true; }
       heldPool.push(i);
       if (stay === null || state.plans[i]!.job !== stay) chasePool.push(i);
     }
@@ -259,8 +270,8 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
       // Nobody may go for it.
     } else if (shot !== null) {
       netScratch.x = state.attackDir[shot.side] * RINK.goalLineX; netScratch.y = 0;
-      puckMan = stickyNearest(state, from, 'chase', netScratch);
-    } else puckMan = stickyNearest(state, from, 'chase', state.puck.pos);
+      puckMan = stickyNearest(state, from, 'chase', netScratch, eager ? pinchBias : null);
+    } else puckMan = stickyNearest(state, from, 'chase', state.puck.pos, eager ? pinchBias : null);
     let job: Job | null = puckMan < 0 ? null : 'chase';
     const pass = state.pendingPass;
     if (pass !== null) for (const i of pool) if (sk[i]!.id === pass.toId) { puckMan = i; job = 'receive'; }

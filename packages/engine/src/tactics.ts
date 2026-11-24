@@ -11,7 +11,7 @@
  *
  * Every number is in TUNING.tactics.
  */
-import { dpow } from './dmath';
+import { dlog, dpow } from './dmath';
 import { TUNING } from './tuning';
 import type { GameState, Lines, PlayerDef, Side, Tactics, Tendencies } from './types';
 
@@ -96,9 +96,14 @@ export function patienceFactor(offence: ResolvedTactics['offence']): number {
   return T.patience[offence];
 }
 
-/** A multiplier on an option value: a positive value times `k`, a negative one divided by it. */
+/**
+ * A tactic's factor `k` applied to an option's value `v`: v + TUNING.tactics.temp * ln k, so that for a player who picks
+ * at the reference temperature (an average player, unpressured: TUNING.value.pick) the option's weight in his draw is
+ * times k. (A plain multiple of the value did next to nothing: option values are small differences, often below zero,
+ * and a dump 0.02 to 0.07 below his best option stayed there at 1.6 times its value.)
+ */
 export function shade(v: number, k: number): number {
-  return k === 1 ? v : v >= 0 ? v * k : v / k;
+  return k === 1 ? v : v + T.temp * dlog(k);
 }
 
 const mean = (xs: readonly number[]): number => (xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length);
