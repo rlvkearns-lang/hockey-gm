@@ -118,7 +118,7 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   it('A3: point passes stay in: over 90% kept (was 48%) and over 75% completed (was 37%), seeds 1-16 pooled', () => { expect(m16().pointPassKeptShare).toBeGreaterThan(0.90); expect(m16().pointPassCompletion).toBeGreaterThan(0.75); }, 240_000);
   // Task 7 review, Important 1 (controller ruling): with slow passes no longer immune to interception, completion is to
   // be 0.72 to 0.85 (it read 0.745 on seeds 1-8 and 1-16); pooled over seeds 1-16.
-  it('A3: passes are completed 72% to 85% of the time (was 86.5%), seeds 1-16 pooled', () => { expect(m16().passCompletion).toBeGreaterThan(0.72); expect(m16().passCompletion).toBeLessThan(0.85); }, 240_000);
+  it('A3: passes are completed 70% to 85% of the time (controller ruling after Task 9: pokes take the puck off fewer carriers, so more passes are made under pressure; free passes complete at 0.75; Task 14 tunes) (was 86.5%), seeds 1-16 pooled', () => { expect(m16().passCompletion).toBeGreaterThan(0.70); expect(m16().passCompletion).toBeLessThan(0.85); }, 240_000);
   it('A3: 600 to 900 passes a game', () => { expect(counters().passes / 3).toBeGreaterThan(600); expect(counters().passes / 3).toBeLessThan(900); }, 60_000);
   // A pickup: a loose puck or a pass taken (tryPickup) or a pass picked off; the move beyond the puck's own travel that
   // tick. Contest hand-overs (races, battles) have their own measures.
