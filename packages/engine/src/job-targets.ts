@@ -8,14 +8,26 @@
  */
 import { composite } from './attributes';
 import { DT } from './constants';
-import { clearPathToNet, dangerMan, laneOpen, laneWidth, spaceAt } from './lanes';
+import { dangerMan, laneOpen, laneWidth, spaceAt } from './lanes';
 import { clipToNets, RINK, resolveBoards, resolveNets } from './rink';
 import { TUNING } from './tuning';
 import type { GameState, Job, PlayerDef, Side, SkaterState, Tactics } from './types';
 import type { Want } from './commit';
 import { indexOf } from './commit';
 import { carrierOf, clamp } from './util';
-import { dist, hypot2, type Vec2 } from './vec';
+import type { Vec2 } from './vec';
+
+// Local copies of vec.ts helpers (hot loops: a call across modules costs more under the test runner's module wrapper).
+const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);
+const distV = (a: Vec2, b: Vec2): number => hyp(a.x - b.x, a.y - b.y);
+function segD(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const abx = bx - ax, aby = by - ay;
+  const l2 = abx * abx + aby * aby;
+  let t = l2 === 0 ? 0 : ((px - ax) * abx + (py - ay) * aby) / l2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return hyp(px - (ax + abx * t), py - (ay + aby * t));
+}
+
 
 const GOAL = RINK.goalLineX;
 const BLUE = RINK.blueLineX;
@@ -27,6 +39,9 @@ const JB = TUNING.jobs;
 const ONSIDE_MARGIN = 1;
 /** The nearest defender plays this far (m) goal-side of the carrier he pressures. */
 const PRESS_GAP = 1.2;
+/** Drivers go to the net once the puck is this far (m) inside the blue line; the trailer follows it in from TRAIL_IN. */
+const DRIVE_IN = 3;
+const TRAIL_IN = 10;
 /** A chaser leads a moving puck by at most this many seconds. */
 const MAX_LEAD_SECONDS = 1.2;
 /** Speed (m/s) used to estimate how long a chaser needs to reach the puck. */
@@ -42,6 +57,12 @@ const LANE_CAP = 3;
 const NET_FRONT_OUT = 1.8;
 /** A net-front defender looks for an attacker within this far (m) of the net front. */
 const NET_FRONT_RANGE = 4;
+/** The net-front defender leads his man by this long (s), and goes round him this wide (m) from the wrong side. */
+const NET_FRONT_LEAD = 0.25;
+const NET_FRONT_ROUND = 1;
+/** Where the net-front defender tries to stand: (m along the line from his man to the net, m beside it), in turn, until one is this far (m) from his goalie. */
+const NET_FRONT_TRIES: readonly (readonly [number, number])[] = [[1.2, 0], [0.9, 0.35], [0.9, -0.35], [0.7, 0.6], [0.7, -0.6], [0.45, 0.75], [0.45, -0.75]];
+const NET_FRONT_GOALIE = 1.0;
 /** A covering job faces the play (and may skate backward) within this far (m) of his man. */
 const FACE_MAN_RANGE = 4;
 /** Behind his own net a carrier is chased round it after this long (s) there, or by a defender this close (m) to him. */
@@ -70,7 +91,7 @@ function frameOf(state: GameState, side: Side, f: Frame = frameScratch): Frame {
   f.pr = state.puck.pos.x * dir;
   f.pl = state.puck.pos.y * dir;
   f.ps = f.pl >= 0 ? 1 : -1;
-  f.carrier = carrierOf(state);
+  f.carrier = curCarrier(state);
   return f;
 }
 
@@ -87,13 +108,43 @@ const standing = (s: SkaterState): boolean => s.onIce && s.downT === 0;
 
 // ---- marks: which opponent each covering job looks after (derived from the state alone) ----
 
+/**
+ * While team play hands out jobs (between beginMarks and endMarks) each side's marks are worked out once: a derived
+ * cache, rebuilt on every assignJobs call and never read outside it.
+ */
+type Marks = { dm: SkaterState | null; dmOk: boolean; ok: boolean; nf: SkaterState | null; nfOk: boolean; pm: (SkaterState | null)[]; pmOk: boolean; low: SkaterState | null; lowOk: boolean;
+  ww: SkaterState | null; wwOk: boolean; back: (SkaterState | null)[]; backOk: boolean };
+const blankMarks = (): Marks => ({ dm: null, dmOk: false, ok: false, nf: null, nfOk: false, pm: [null, null], pmOk: false, low: null, lowOk: false, ww: null, wwOk: false, back: [null, null], backOk: false });
+const marks: Record<Side, Marks> = { home: blankMarks(), away: blankMarks() };
+let caching = false;
+let passCarrier: SkaterState | null = null;
+/** The carrier (the pass's own while team play hands out jobs). */
+const curCarrier = (state: GameState): SkaterState | null => (caching ? passCarrier : carrierOf(state));
+
+/** Starts a pass of team play over `state`: marks are cached until endMarks. */
+export function beginMarks(carrier: SkaterState | null): void {
+  caching = true;
+  passCarrier = carrier;
+  for (const m of [marks.home, marks.away]) { m.nfOk = m.pmOk = m.lowOk = m.wwOk = m.backOk = m.dmOk = false; }
+}
+export function endMarks(): void {
+  caching = false;
+}
+
 /** The opponent of `side` nearest the front of `side`'s own net, within NET_FRONT_RANGE of it; null if none. */
 export function netFrontMark(state: GameState, side: Side): SkaterState | null {
+  const mk = marks[side];
+  if (caching && mk.nfOk) return mk.nf;
+  const r = netFrontMarkNow(state, side);
+  if (caching) { mk.nf = r; mk.nfOk = true; }
+  return r;
+}
+function netFrontMarkNow(state: GameState, side: Side): SkaterState | null {
   const fx = -state.attackDir[side] * (GOAL - NET_FRONT_OUT);
   let best: SkaterState | null = null, bestD = NET_FRONT_RANGE;
   for (const o of state.skaters) {
     if (!standing(o) || o.side === side) continue;
-    const d = hypot2(o.pos.x - fx, o.pos.y);
+    const d = hyp(o.pos.x - fx, o.pos.y);
     if (d <= bestD) { bestD = d; best = o; }
   }
   return best;
@@ -107,6 +158,13 @@ const pointScratch: (SkaterState | null)[] = [null, null];
  * The array is reused: read it before the next call.
  */
 export function pointMen(state: GameState, side: Side): (SkaterState | null)[] {
+  const mk = marks[side];
+  if (caching && mk.pmOk) return mk.pm;
+  const r = pointMenNow(state, side);
+  if (caching) { mk.pm[0] = r[0]!; mk.pm[1] = r[1]!; mk.pmOk = true; return mk.pm; }
+  return r;
+}
+function pointMenNow(state: GameState, side: Side): (SkaterState | null)[] {
   const f = frameOf(state, side);
   let a: SkaterState | null = null, b: SkaterState | null = null;
   for (const o of state.skaters) {
@@ -129,6 +187,13 @@ export function pointMen(state: GameState, side: Side): (SkaterState | null)[] {
 
 /** The opponent `side`'s centre covers in its own zone: not the carrier, the net-front man or a point man; nearest the slot. */
 export function lowMan(state: GameState, side: Side): SkaterState | null {
+  const mk = marks[side];
+  if (caching && mk.lowOk) return mk.low;
+  const r = lowManNow(state, side);
+  if (caching) { mk.low = r; mk.lowOk = true; }
+  return r;
+}
+function lowManNow(state: GameState, side: Side): SkaterState | null {
   const f = frameOf(state, side);
   const nf = netFrontMark(state, side);
   const pm = pointMen(state, side);
@@ -137,7 +202,7 @@ export function lowMan(state: GameState, side: Side): SkaterState | null {
   let best: SkaterState | null = null, bestD = Infinity;
   for (const o of state.skaters) {
     if (!standing(o) || o.side === side || o === f.carrier || o === nf || o === p0 || o === p1) continue;
-    const d = hypot2(o.pos.x - sx, o.pos.y);
+    const d = hyp(o.pos.x - sx, o.pos.y);
     if (d < bestD) { bestD = d; best = o; }
   }
   return best;
@@ -145,6 +210,13 @@ export function lowMan(state: GameState, side: Side): SkaterState | null {
 
 /** The widest opponent on the weak side (away from the puck) without the puck, for the weak-side gap defenceman; null if none is there. */
 export function widestWeak(state: GameState, side: Side): SkaterState | null {
+  const mk = marks[side];
+  if (caching && mk.wwOk) return mk.ww;
+  const r = widestWeakNow(state, side);
+  if (caching) { mk.ww = r; mk.wwOk = true; }
+  return r;
+}
+function widestWeakNow(state: GameState, side: Side): SkaterState | null {
   const f = frameOf(state, side);
   let best: SkaterState | null = null, bestW = 1;
   for (const o of state.skaters) {
@@ -157,6 +229,8 @@ export function widestWeak(state: GameState, side: Side): SkaterState | null {
 
 /** The back-checkers' men: the opponents without the puck (not the weak-side gap defenceman's), nearest `side`'s net first. `k` 0 or 1. */
 export function backMan(state: GameState, side: Side, k: 0 | 1): SkaterState | null {
+  const mk = marks[side];
+  if (caching && mk.backOk) return mk.back[k]!;
   const f = frameOf(state, side);
   const ww = widestWeak(state, side);
   let first: SkaterState | null = null, second: SkaterState | null = null;
@@ -166,28 +240,37 @@ export function backMan(state: GameState, side: Side, k: 0 | 1): SkaterState | n
     if (first === null || rx < first.pos.x * f.dir) { second = first; first = o; }
     else if (second === null || rx < second.pos.x * f.dir) second = o;
   }
+  if (caching) { mk.back[0] = first; mk.back[1] = second; mk.backOk = true; }
   return k === 0 ? first : second;
 }
 
 /** The skater of `side` with the puck, or null. */
 function ownCarrier(state: GameState, side: Side): SkaterState | null {
-  const c = carrierOf(state);
+  const c = curCarrier(state);
   return c !== null && c.side === side ? c : null;
 }
 /** The opponent of `side` with the puck, or null. */
 function oppCarrier(state: GameState, side: Side): SkaterState | null {
-  const c = carrierOf(state);
+  const c = curCarrier(state);
   return c !== null && c.side !== side ? c : null;
 }
 
 // ---- anchors ----
+
+/** `m`'s position, or (rx, ly) with no man. */
+function manPos(out: Vec2, dir: 1 | -1, m: SkaterState | null, rx: number, ly: number): Vec2 {
+  if (m === null) return setRel(out, rx, ly, dir);
+  out.x = m.pos.x;
+  out.y = m.pos.y;
+  return out;
+}
 
 /** The net-front man's spot for `side`: on the line from the net centre to the puck, NET_FRONT_OUT from the net. */
 export function netFrontSpot(state: GameState, side: Side, out: Vec2): Vec2 {
   const f = frameOf(state, side);
   if (f.pr > GOAL - 1.5) return setRel(out, GOAL - NET_FRONT_OUT, f.ps * 0.4, f.dir);
   const dx = f.pr - GOAL, dy = f.pl;
-  const l = hypot2(dx, dy) || 1;
+  const l = hyp(dx, dy) || 1;
   return setRel(out, GOAL + (dx / l) * NET_FRONT_OUT, (dy / l) * NET_FRONT_OUT, f.dir);
 }
 
@@ -208,7 +291,6 @@ export function jobAnchor(state: GameState, side: Side, job: Job, tactics: Tacti
   const own = ownCarrier(state, side), opp = oppCarrier(state, side);
   const ball = own ?? opp;
   const crx = ball ? ball.pos.x * dir : pr;
-  const manPos = (m: SkaterState | null, rx: number, ly: number): Vec2 => (m ? (out.x = m.pos.x, out.y = m.pos.y, out) : setRel(out, rx, ly, dir));
   switch (job) {
     case 'netFront': return netFrontSpot(state, side, out);
     case 'lowSupport': return setRel(out, clamp(crx < 21 ? crx + 7 : crx - 7, BLUE + 1, 25.5), ps * 11, dir);
@@ -216,9 +298,10 @@ export function jobAnchor(state: GameState, side: Side, job: Job, tactics: Tacti
     case 'highForward': return setRel(out, 16, ps * 2, dir);
     case 'pointStrong': return setRel(out, 9.1, ps * 8.5, dir);
     case 'pointWeak': return setRel(out, 9.1, -ps * 4, dir);
-    case 'driveWide': return pr > BLUE ? setRel(out, GOAL - 1, -ps * 1.6, dir) : setRel(out, Math.min(pr + 3, BLUE - ONSIDE_MARGIN), -ps * 8, dir);
-    case 'driveMiddle': return pr > BLUE ? setRel(out, GOAL - 2.3, 0, dir) : setRel(out, Math.min(pr + 2, BLUE - ONSIDE_MARGIN), ps * 1, dir);
-    case 'trailer': return setRel(out, pr - 7, ps * 3, dir);
+    case 'driveWide': return pr > BLUE + DRIVE_IN ? setRel(out, GOAL - 1, -ps * 1.6, dir) : setRel(out, Math.min(pr + 3, BLUE - ONSIDE_MARGIN), -ps * 8, dir);
+    case 'driveMiddle': return pr > BLUE + DRIVE_IN ? setRel(out, GOAL - 2.3, 0, dir) : setRel(out, Math.min(pr + 2, BLUE - ONSIDE_MARGIN), ps * 1, dir);
+    // The trailer stays outside the line until the play is well in.
+    case 'trailer': return setRel(out, pr < BLUE + TRAIL_IN ? Math.min(pr - 7, BLUE - ONSIDE_MARGIN) : pr - 7, ps * 3, dir);
     case 'dJoin': return setRel(out, Math.max(-24, pr - 9), -ps * 7, dir);
     case 'dHold': return setRel(out, Math.max(-24, pr - 14), ps * 4, dir);
     case 'dHoldWeak': return setRel(out, Math.max(-24, pr - 14), -ps * 4, dir);
@@ -226,10 +309,10 @@ export function jobAnchor(state: GameState, side: Side, job: Job, tactics: Tacti
     case 'centreLow': return setRel(out, -19, ps * 3, dir);
     case 'stretch': return setRel(out, -2, -ps * 9, dir);
     case 'dPartner': return setRel(out, -25, -ps * 4, dir);
-    case 'f1': return manPos(opp, pr, pl);
+    case 'f1': return manPos(out, dir, opp, pr, pl);
     case 'f2': {
       if (tactics.forecheck === 'passive') return setRel(out, 3, ps * 8, dir);
-      return manPos(opp, pr, pl);
+      return manPos(out, dir, opp, pr, pl);
     }
     case 'f3': return setRel(out, Math.min(tactics.forecheck === 'passive' ? -2 : 13, pr - 4), pl * 0.3, dir);
     case 'dLineStrong': case 'dLineWeak': {
@@ -242,13 +325,13 @@ export function jobAnchor(state: GameState, side: Side, job: Job, tactics: Tacti
       const w = widestWeak(state, side);
       return setRel(out, Math.max(-24, crx - 7), w ? w.pos.y * dir * 0.8 : -ps * 4, dir);
     }
-    case 'backcheckA': return manPos(backMan(state, side, 0), Math.max(-22, pr - 5), -ps * 3);
-    case 'backcheckB': return manPos(backMan(state, side, 1), Math.max(-22, pr - 5), ps * 3);
-    case 'dCorner': return opp && opp.pos.x * dir < -19 ? manPos(opp, 0, 0) : setRel(out, -23.5, ps * 5, dir);
-    case 'dNet': return manPos(netFrontMark(state, side), -25.1, -ps * 0.8);
-    case 'dzCentre': return manPos(lowMan(state, side), -20, ps * 1.5);
-    case 'wingStrong': return manPos(pointMen(state, side)[0]!, -11, ps * 8);
-    case 'wingWeak': return manPos(pointMen(state, side)[1]!, -11, -ps * 8);
+    case 'backcheckA': return manPos(out, dir, backMan(state, side, 0), Math.max(-22, pr - 5), -ps * 3);
+    case 'backcheckB': return manPos(out, dir, backMan(state, side, 1), Math.max(-22, pr - 5), ps * 3);
+    case 'dCorner': return opp && opp.pos.x * dir < -19 ? manPos(out, dir, opp, 0, 0) : setRel(out, -23.5, ps * 5, dir);
+    case 'dNet': return manPos(out, dir, netFrontMark(state, side), -25.1, -ps * 0.8);
+    case 'dzCentre': return manPos(out, dir, lowMan(state, side), -20, ps * 1.5);
+    case 'wingStrong': return manPos(out, dir, pointMen(state, side)[0]!, -11, ps * 8);
+    case 'wingWeak': return manPos(out, dir, pointMen(state, side)[1]!, -11, -ps * 8);
     default: {
       // chase, receive, battleSupport and the utility jobs: the puck.
       out.x = state.puck.pos.x;
@@ -328,11 +411,11 @@ const laneScratch: Vec2 = { x: 0, y: 0 };
 export function coverSpot(state: GameState, s: SkaterState, mark: SkaterState, gap: number, out: Vec2): Vec2 {
   const nx = -state.attackDir[s.side] * GOAL;
   const dx = nx - mark.pos.x, dy = -mark.pos.y;
-  const l = hypot2(dx, dy) || 1;
+  const l = hyp(dx, dy) || 1;
   const g = Math.min(gap, l * 0.5);
   out.x = mark.pos.x + (dx / l) * g;
   out.y = mark.pos.y + (dy / l) * g;
-  const c = carrierOf(state);
+  const c = curCarrier(state);
   if (c === mark) return out;
   const from = c !== null && c.side === mark.side ? c.pos : state.puck.pos;
   const q = nearestOnSeg(out.x, out.y, from.x, from.y, mark.pos.x, mark.pos.y, laneScratch);
@@ -348,10 +431,13 @@ export function coverSpot(state: GameState, s: SkaterState, mark: SkaterState, g
 export function shadowSpot(state: GameState, s: SkaterState, out: Vec2, from: Vec2 = s.target): Vec2 | null {
   const c = oppCarrier(state, s.side);
   if (c === null) return null;
-  const m = dangerMan(state, c);
+  let m: SkaterState | null;
+  const mk = marks[s.side];
+  if (caching && mk.dmOk) m = mk.dm;
+  else { m = dangerMan(state, c); if (caching) { mk.dm = m; mk.dmOk = true; } }
   if (m === null) return null;
   const q = nearestOnSeg(s.pos.x, s.pos.y, c.pos.x, c.pos.y, m.pos.x, m.pos.y, laneScratch);
-  if (hypot2(q.x - from.x, q.y - from.y) > CV.shadowReach) return null;
+  if (hyp(q.x - from.x, q.y - from.y) > CV.shadowReach) return null;
   out.x = q.x;
   out.y = q.y;
   return out;
@@ -361,7 +447,7 @@ export function shadowSpot(state: GameState, s: SkaterState, out: Vec2, from: Ve
 function pressSpot(state: GameState, s: SkaterState, man: SkaterState, gap: number, out: Vec2): Vec2 {
   const netX = -state.attackDir[s.side] * GOAL;
   const dx = netX - man.pos.x, dy = -man.pos.y;
-  const l = hypot2(dx, dy) || 1;
+  const l = hyp(dx, dy) || 1;
   out.x = man.pos.x + (dx / l) * gap;
   out.y = man.pos.y + (dy / l) * gap;
   return out;
@@ -375,7 +461,7 @@ const routeProbe: Vec2 = { x: 0, y: 0 };
  */
 function chaseSpot(state: GameState, s: SkaterState, out: Vec2): void {
   const p = state.puck;
-  const t = Math.min(MAX_LEAD_SECONDS, dist(s.pos, p.pos) / CHASE_SPEED);
+  const t = Math.min(MAX_LEAD_SECONDS, distV(s.pos, p.pos) / CHASE_SPEED);
   out.x = p.pos.x + p.vel.x * t;
   out.y = p.pos.y + p.vel.y * t;
   routeProbe.x = out.x;
@@ -400,7 +486,7 @@ const BEHIND_TICKS = Math.round(BEHIND_CHASE_SECONDS / DT);
 function getOpen(state: GameState, s: SkaterState, job: Job, anchor: Vec2, radius: number, out: Vec2, minRx = -Infinity): void {
   const plan = state.plans[indexOf(state, s.id)]!;
   const t = s.target;
-  if (plan.job === job && hypot2(t.x - anchor.x, t.y - anchor.y) <= radius + 0.5 && laneOpen(state, s.side, passFrom(state, s, fromScratch), t)) {
+  if (plan.job === job && hyp(t.x - anchor.x, t.y - anchor.y) <= radius + 0.5 && laneOpen(state, s.side, passFrom(state, s, fromScratch), t)) {
     out.x = t.x;
     out.y = t.y;
     return;
@@ -432,8 +518,9 @@ function pointSpot(state: GameState, s: SkaterState, job: Job, anchor: Vec2, out
 }
 
 /** Fills `out` for a covering job on `mark` (null: hold `fallback`), with the lane shadow where it is within reach. */
-function cover(state: GameState, s: SkaterState, mark: SkaterState | null, fallback: Vec2, out: Want, shadow: boolean): void {
+function cover(state: GameState, s: SkaterState, mark: SkaterState | null, job: Job, tactics: Tactics, out: Want, shadow: boolean): void {
   if (mark === null) {
+    const fallback = jobAnchor(state, s.side, job, tactics, anchorScratch);
     out.pos.x = fallback.x;
     out.pos.y = fallback.y;
     if (shadow && shadowSpot(state, s, spotScratch, fallback) !== null) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; out.follow = 'puck'; }
@@ -443,7 +530,7 @@ function cover(state: GameState, s: SkaterState, mark: SkaterState | null, fallb
   if (shadow && shadowSpot(state, s, spotScratch, out.pos) !== null) { out.pos.x = spotScratch.x; out.pos.y = spotScratch.y; }
   out.follow = 'man';
   out.markId = mark.id;
-  if (dist(s.pos, mark.pos) <= FACE_MAN_RANGE) out.face = state.puck.pos;
+  if (distV(s.pos, mark.pos) <= FACE_MAN_RANGE) out.face = state.puck.pos;
 }
 
 /**
@@ -462,7 +549,7 @@ export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<st
   out.effort = 'skate';
   out.slow = 'coast';
   out.through = false;
-  const a = jobAnchor(state, s.side, job, tactics, anchorScratch);
+  const a = NO_ANCHOR.has(job) ? anchorScratch : jobAnchor(state, s.side, job, tactics, anchorScratch);
   const opp = oppCarrier(state, s.side);
   switch (job) {
     case 'chase': case 'receive':
@@ -500,7 +587,7 @@ export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<st
       return out;
     case 'driveWide': case 'driveMiddle':
       p.x = a.x; p.y = a.y;
-      if (pr <= BLUE) { out.follow = 'puck'; out.through = true; out.effort = 'sprint'; }
+      if (pr <= BLUE + DRIVE_IN) { out.follow = 'puck'; out.through = true; out.effort = 'sprint'; }
       return out;
     case 'dJoin': case 'dHold': case 'dHoldWeak':
       p.x = a.x; p.y = a.y;
@@ -520,7 +607,7 @@ export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<st
         if (behind) {
           const plan = state.plans[indexOf(state, s.id)]!;
           const waited = plan.job === 'dCorner' && plan.follow === 'spot' && state.tick - plan.targetTick > BEHIND_TICKS;
-          if (dist(s.pos, opp.pos) > BEHIND_CHASE_RANGE && !waited) { setRel(p, -26.6, ps * 1.3, dir); return out; }
+          if (distV(s.pos, opp.pos) > BEHIND_CHASE_RANGE && !waited) { setRel(p, -26.6, ps * 1.3, dir); return out; }
         }
       }
       if (opp === null) { p.x = state.puck.pos.x; p.y = state.puck.pos.y; out.follow = 'puck'; out.effort = 'sprint'; return out; }
@@ -572,28 +659,43 @@ export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<st
     }
     case 'backcheckA': case 'backcheckB': {
       const m = backMan(state, s.side, job === 'backcheckA' ? 0 : 1);
-      cover(state, s, m, a, out, false);
+      cover(state, s, m, job, tactics, out, false);
       if (m === null) out.follow = 'puck';
       return out;
     }
     case 'dNet': {
       const m = netFrontMark(state, s.side);
-      if (m === null) { p.x = a.x; p.y = a.y; return out; }
-      // Between that man and the net: on the line from him to the net centre.
+      if (m === null) { jobAnchor(state, s.side, job, tactics, p); return out; }
+      // Between that man and the net: on the line from where he is going to the net centre. Caught on the wrong side
+      // of him, he goes round him on his own side first.
       const nx = -dir * GOAL;
-      const dx = nx - m.pos.x, dy = -m.pos.y, l = hypot2(dx, dy) || 1;
-      const g = Math.min(CV.gap, l * 0.5);
-      p.x = m.pos.x + (dx / l) * g;
-      p.y = m.pos.y + (dy / l) * g;
+      const mx = m.pos.x + m.vel.x * NET_FRONT_LEAD, my = m.pos.y + m.vel.y * NET_FRONT_LEAD;
+      const dx = nx - mx, dy = -my, l = hyp(dx, dy) || 1;
+      // On that line, or beside it (away from his goalie) where the goalie's body leaves no room on it.
+      const gl = state.goalies[s.side].pos;
+      let bestClear = -Infinity;
+      for (let k = 0; k < NET_FRONT_TRIES.length && bestClear < NET_FRONT_GOALIE; k++) {
+        const g = Math.min(NET_FRONT_TRIES[k]![0], l * 0.6), o = NET_FRONT_TRIES[k]![1];
+        const cx = mx + (dx / l) * g - (dy / l) * o, cy = my + (dy / l) * g + (dx / l) * o;
+        const clear = hyp(cx - gl.x, cy - gl.y);
+        if (clear > bestClear) { bestClear = clear; p.x = cx; p.y = cy; }
+      }
+      if (hyp(s.pos.x - nx, s.pos.y) > hyp(m.pos.x - nx, m.pos.y)) {
+        const side = (s.pos.y - m.pos.y) * dx - (s.pos.x - m.pos.x) * dy >= 0 ? 1 : -1;
+        p.x += (-dy / l) * side * NET_FRONT_ROUND;
+        p.y += (dx / l) * side * NET_FRONT_ROUND;
+      }
       out.follow = 'man';
       out.markId = m.id;
+      out.slow = 'ease';
+      if (distV(s.pos, p) > 1) out.effort = 'sprint';
       return out;
     }
     case 'dzCentre':
-      cover(state, s, lowMan(state, s.side), a, out, true);
+      cover(state, s, lowMan(state, s.side), job, tactics, out, true);
       return out;
     case 'wingStrong': case 'wingWeak':
-      cover(state, s, pointMen(state, s.side)[job === 'wingStrong' ? 0 : 1]!, a, out, false);
+      cover(state, s, pointMen(state, s.side)[job === 'wingStrong' ? 0 : 1]!, job, tactics, out, false);
       return out;
     default:
       // Utility jobs are steered elsewhere; hold where he is.
@@ -602,8 +704,10 @@ export function jobWant(state: GameState, s: SkaterState, job: Job, defs: Map<st
   }
 }
 
+/** Jobs whose want does not start from jobAnchor (cover jobs work it out only without a man). */
+const NO_ANCHOR: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'f1', 'f2', 'dGapStrong', 'dGapWeak', 'backcheckA', 'backcheckB', 'dNet', 'dzCentre', 'wingStrong', 'wingWeak', 'tagUp']);
+
 /** True for the jobs that cover a man (they face the play within FACE_MAN_RANGE of him). */
 export const isCoverJob = (job: Job): boolean => COVER_JOBS.has(job);
 /** True for the jobs that face the play. */
 export const facesPlay = (job: Job): boolean => FACING.has(job);
-export { clearPathToNet };

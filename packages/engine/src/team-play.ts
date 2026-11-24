@@ -9,7 +9,7 @@ import { carrierOf } from './util';
 import type { Drive } from './skating';
 import { commitTo, effortToReach, holding, holdJob, setFace, shapePhase, speedFor, triggerFor, updateTeamPhase, type Want } from './commit';
 import { assignTeamJobs, boardBattle, supportTarget } from './jobs';
-import { jobWant } from './job-targets';
+import { beginMarks, endMarks, jobWant } from './job-targets';
 
 export { supportTarget } from './jobs';
 
@@ -20,6 +20,8 @@ const ONSIDE_MARGIN = 1;
 const ONSIDE_EASE_FROM = 2;
 /** Under a delayed offside, the offending team skates to this far (m) outside the blue line to tag up. */
 const TAG_UP_MARGIN = 1;
+/** After the hold a held spot is reviewed every REVIEW_TICKS ticks (0.1 s), counted from when it was issued. */
+const REVIEW_TICKS = 3;
 /** Targets stay this far (m) inside the boards and clear of the net frames. */
 const TARGET_BOARDS_MARGIN = 1;
 const TARGET_NET_MARGIN = 0.6;
@@ -122,6 +124,8 @@ function faceOf(state: GameState, s: SkaterState, job: Job): Vec2 | null {
   return FACE_SPOT_JOBS.has(job) ? state.puck.pos : null;
 }
 const FACE_SPOT_JOBS: ReadonlySet<Job> = new Set<Job>(['dGapStrong', 'dGapWeak', 'dLineStrong', 'dLineWeak', 'dNet', 'pointStrong', 'pointWeak', 'netFront', 'battleSupport']);
+/** Jobs that follow the puck or a man every tick (the rest that follow one do so every other tick). */
+const TRACK_EVERY_TICK: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'f1', 'dCorner', 'dNet', 'driveWide', 'driveMiddle']);
 /** Jobs that skate flat out after the puck or its carrier whatever the distance. */
 const SPRINT_JOBS: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'battleSupport', 'f1', 'tagUp']);
 
@@ -139,6 +143,11 @@ const SPRINT_JOBS: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'battleS
 export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tactics: Record<Side, Tactics>): void {
   const carrier = carrierOf(state);
   updateTeamPhase(state, carrier);
+  beginMarks(carrier);
+  try { assignAll(state, defs, tactics, carrier); } finally { endMarks(); }
+}
+
+function assignAll(state: GameState, defs: Map<string, PlayerDef>, tactics: Record<Side, Tactics>, carrier: SkaterState | null): void {
   const homeJobs = assignTeamJobs(state, 'home', defs, tactics.home);
   const awayJobs = assignTeamJobs(state, 'away', defs, tactics.away);
   const battle = carrier ? null : boardBattle(state);
@@ -160,10 +169,17 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
     const tagging = job === 'tagUp';
     const chasing = job === 'chase' || job === 'receive';
     let trigger: ReplanReason | null = null;
-    if (plan.job === job && holding(state, i, job) && (trigger = triggerFor(state, i, job)) === null) {
-      // Inside the hold, with nothing to re-plan for: he keeps his spot; only how he gets there follows his need.
+    if (plan.job === job && plan.follow === 'spot' && (holding(state, i, job) || (state.tick - plan.targetTick) % REVIEW_TICKS !== 0)
+      && (trigger = triggerFor(state, i, job)) === null) {
+      // Inside the hold, or between reviews, with nothing to re-plan for: he keeps his spot; only how he gets there
+      // follows his need.
       setFace(s, faceOf(state, s, job));
       spotEffort(state, s, plan, keepLegal(state, s, s.target, chasing, tagging, false), tagging);
+      continue;
+    }
+    if (plan.job === job && plan.follow !== 'spot' && !TRACK_EVERY_TICK.has(job) && (state.tick + i) % 2 === 1
+      && (trigger ?? (trigger = triggerFor(state, i, job))) === null) {
+      // A man or the puck he follows from a distance is tracked every other tick: his target, face and effort stay.
       continue;
     }
     jobWant(state, s, job, defs, tactics[s.side], want);
@@ -175,6 +191,8 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
     // Ready to stop at the line; caught beyond it, he gets back onside as fast as he can.
     const onside = keepLegal(state, s, wantPos, chasing, tagging);
     if (onside !== 'free') { want.slow = 'stop'; want.through = false; }
+    // Ready to stop at the line means not arriving at it flat out.
+    if (onside === 'atLine' && want.effort === 'sprint') want.effort = 'skate';
     if (onside === 'beyond') want.effort = 'sprint';
     commitTo(state, i, want, trigger ?? triggerFor(state, i, job));
     // A held target the play has since made illegal (the puck left the zone) is pulled back onside.
@@ -188,6 +206,7 @@ export function assignJobs(state: GameState, defs: Map<string, PlayerDef>, tacti
         const e = effortToReach(Math.sqrt(dx * dx + dy * dy));
         plan.effort = e === 'glide' ? 'skate' : e;
       }
+      if (held === 'atLine' && plan.effort === 'sprint') plan.effort = 'skate';
       if (held === 'beyond') plan.effort = 'sprint';
       s.speedCap = speedFor(plan.effort, plan.job, s.energy);
     }

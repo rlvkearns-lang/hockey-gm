@@ -3,13 +3,25 @@
  * (the utility jobs aside); a man keeps his job while he is inside its hold (commit.ts) and is TUNING.jobs.keep nearer
  * its anchor than anyone else after it, so jobs are sticky without being fixed.
  */
-import { committedPhase, inHold, triggerFor } from './commit';
+import { committedPhase, indexOf, inHold, triggerFor } from './commit';
 import { jobAnchor } from './job-targets';
 import { boardsNormal, RINK } from './rink';
 import { TUNING } from './tuning';
 import type { ContestStateOf, GameState, Job, PlayerDef, Side, SkaterState, Tactics } from './types';
 import { carrierOf } from './util';
-import { hypot2, type Vec2 } from './vec';
+import type { Vec2 } from './vec';
+
+// Local copies of vec.ts helpers (hot loops: a call across modules costs more under the test runner's module wrapper).
+const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);
+const distV = (a: Vec2, b: Vec2): number => hyp(a.x - b.x, a.y - b.y);
+function segD(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const abx = bx - ax, aby = by - ay;
+  const l2 = abx * abx + aby * aby;
+  let t = l2 === 0 ? 0 : ((px - ax) * abx + (py - ay) * aby) / l2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return hyp(px - (ax + abx * t), py - (ay + aby * t));
+}
+
 
 export const UTILITY_JOBS: readonly Job[] = ['change', 'lineUp', 'tagUp', 'contest', 'down'];
 /** Jobs a forward holds (or a defenceman, only when no forward is free for it). */
@@ -119,7 +131,7 @@ export function jobsFor(state: GameState, side: Side, tactics: Tactics): Job[] {
   for (let k = 0; k < jobs.length; k++) {
     if (DEFENCE.has(jobs[k]!) !== d) continue;
     const a = jobAnchor(state, side, jobs[k]!, tactics, anchorScratch);
-    const dd = hypot2(a.x - carrier.pos.x, a.y - carrier.pos.y);
+    const dd = hyp(a.x - carrier.pos.x, a.y - carrier.pos.y);
     if (dd < best) { best = dd; drop = k; }
   }
   jobs.splice(drop, 1);
@@ -131,7 +143,7 @@ function stickyNearest(state: GameState, pool: number[], job: Job, to: Vec2): nu
   let near = -1, nearD = Infinity, cur = -1, curD = Infinity;
   for (const i of pool) {
     const s = state.skaters[i]!;
-    const d = hypot2(s.pos.x - to.x, s.pos.y - to.y);
+    const d = hyp(s.pos.x - to.x, s.pos.y - to.y);
     if (d < nearD) { nearD = d; near = i; }
     if (state.plans[i]!.job === job && d < curD) { curD = d; cur = i; }
   }
@@ -139,12 +151,20 @@ function stickyNearest(state: GameState, pool: number[], job: Job, to: Vec2): nu
 }
 
 const poolScratch: number[] = [];
+/** Jobs are handed out afresh every ASSIGN_TICKS ticks (0.2 s), and at once on a trigger or a change of the list. */
+const ASSIGN_TICKS = 6;
+const outHome: (Job | null)[] = [];
+const outAway: (Job | null)[] = [];
+/** The indices each side's array was last written at (cleared on the next call). */
+const setHome: number[] = [];
+const setAway: number[] = [];
 
 /**
  * Gives every free skater of `side` one job, no two the same. For each job in jobsFor order: the free, unassigned skater of the
  * right group with the lowest cost, cost = distance to the job's anchor, less TUNING.jobs.keep (3 m) if he holds that job now.
  * A forward takes a defence job (and the reverse) only when nobody of the right group is free. Skaters left over take the next
- * unused job of the phase's list. Returns the job per skater index (null for skaters not assigned here).
+ * unused job of the phase's list. Returns the job per skater index (null for skaters not assigned here); the array is
+ * reused for the side: read it before the next call for that side.
  *
  * Before that: under a delayed offside against `side` every free man tags up; with the puck loose, the side's man
  * nearest it chases it (sticky by TUNING.commit.chaserMargin), a pass's receiver receives it instead, and while a board
@@ -154,11 +174,19 @@ const poolScratch: number[] = [];
  */
 export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, PlayerDef>, tactics: Tactics): (Job | null)[] {
   const sk = state.skaters;
-  const out: (Job | null)[] = new Array<Job | null>(sk.length).fill(null);
+  const out = side === 'home' ? outHome : outAway;
+  if (out.length !== sk.length) { out.length = sk.length; out.fill(null); }
+  else for (const i of side === 'home' ? setHome : setAway) out[i] = null;
+  const set = side === 'home' ? setHome : setAway;
+  set.length = 0;
   const carrier = carrierOf(state);
   const pool = poolScratch;
   pool.length = 0;
-  for (let i = 0; i < sk.length; i++) if (sk[i]!.side === side && isFree(state, sk[i]!, carrier)) pool.push(i);
+  for (const id of state.onIce[side]) {
+    const i = indexOf(state, id);
+    if (isFree(state, sk[i]!, carrier)) { pool.push(i); set.push(i); }
+  }
+  pool.sort((a, b) => a - b);
   if (pool.length === 0) return out;
   if (state.delayedOffside?.side === side) {
     for (const i of pool) out[i] = 'tagUp';
@@ -173,6 +201,8 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
     if (job !== null) out[puckMan] = job;
   }
   const jobs = jobsFor(state, side, tactics);
+  // Between hand-outs (every ASSIGN_TICKS) everyone keeps a job that is still on the list, unless a trigger says otherwise.
+  if (state.tick % ASSIGN_TICKS !== 0 && keepAll(state, side, carrier, pool, jobs, out)) return out;
   const used = new Array<boolean>(jobs.length).fill(false);
   // Inside his hold, with nothing to re-plan for, a man keeps the job he holds.
   for (const i of pool) {
@@ -194,7 +224,7 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
       const s = sk[i]!;
       if (isDefenceman(s) !== DEFENCE.has(job)) continue;
       if (job === 'dJoin' && (defs.get(s.id)?.tendencies.joinRush ?? 0) < JOIN_RUSH_MIN) continue;
-      const cost = hypot2(s.pos.x - a.x, s.pos.y - a.y) - (state.plans[i]!.job === job ? TUNING.jobs.keep : 0);
+      const cost = hyp(s.pos.x - a.x, s.pos.y - a.y) - (state.plans[i]!.job === job ? TUNING.jobs.keep : 0);
       if (cost < bestCost) { bestCost = cost; best = i; }
     }
     if (best >= 0) { out[best] = job; used[k] = true; }
@@ -205,17 +235,45 @@ export function assignTeamJobs(state: GameState, side: Side, defs: Map<string, P
   for (const i of pool) if (out[i] === null) left = true;
   if (!left) return out;
   const all = phaseJobs(state, side, carrier);
-  const taken = (j: Job): boolean => { for (const i of pool) if (out[i] === j) return true; return false; };
   for (const i of pool) {
     if (out[i] !== null) continue;
     const d = isDefenceman(sk[i]!);
     let pick: Job | null = null;
-    for (const j of all) if (pick === null && DEFENCE.has(j) === d && j !== 'dJoin' && !taken(j)) pick = j;
-    for (const j of d ? SPARE_D : SPARE_F) if (pick === null && !taken(j)) pick = j;
-    for (const j of all) if (pick === null && j !== 'dJoin' && !taken(j)) pick = j;
+    for (const j of all) if (pick === null && DEFENCE.has(j) === d && j !== 'dJoin' && !taken(out, pool, j)) pick = j;
+    for (const j of d ? SPARE_D : SPARE_F) if (pick === null && !taken(out, pool, j)) pick = j;
+    for (const j of all) if (pick === null && j !== 'dJoin' && !taken(out, pool, j)) pick = j;
     out[i] = pick ?? (d ? 'dHold' : 'trailer');
   }
   return out;
+}
+
+/**
+ * Between hand-outs: when every man of `pool` not given a puck job holds a different job of `jobs` (or, left over, a
+ * job of the phase or a spare one), the puck jobs'
+ * men hold theirs already, and no trigger applies to anyone, writes their held jobs into `out` and returns true.
+ */
+function keepAll(state: GameState, side: Side, carrier: SkaterState | null, pool: number[], jobs: Job[], out: (Job | null)[]): boolean {
+  let all: Job[] | null = null;
+  for (const i of pool) {
+    const held = state.plans[i]!.job;
+    if (out[i] !== null) { if (out[i] !== held) return false; }
+    else if (jobs.indexOf(held) < 0) {
+      // A man left over holds a job off the list: the phase's or a spare one.
+      if (pool.length <= jobs.length) return false;
+      all ??= phaseJobs(state, side, carrier);
+      if (all.indexOf(held) < 0 && SPARE_D.indexOf(held) < 0 && SPARE_F.indexOf(held) < 0) return false;
+    }
+    if (triggerFor(state, i, held) !== null) return false;
+    for (const k of pool) if (k < i && state.plans[k]!.job === held) return false;
+  }
+  for (const i of pool) out[i] = state.plans[i]!.job;
+  return true;
+}
+
+/** True when one of `pool` has been given `j`. */
+function taken(out: (Job | null)[], pool: number[], j: Job): boolean {
+  for (const i of pool) if (out[i] === j) return true;
+  return false;
 }
 
 /** True for the jobs the loose puck hands out (chase, receive, battleSupport). */

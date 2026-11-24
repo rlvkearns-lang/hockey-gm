@@ -13,5 +13,5 @@ it('a game runs within budget', () => {
     simulateGame(gameSetup(seed));
     ms.push(performance.now() - t);
   }
-  expect(Math.min(...ms)).toBeLessThan(2500);
+  console.log(ms.map(Math.round).join(" ")); expect(Math.min(...ms)).toBeLessThan(2500);
 }, 60_000);

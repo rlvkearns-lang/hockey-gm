@@ -7,7 +7,19 @@ import { dexp } from './dmath';
 import { RINK } from './rink';
 import { TUNING } from './tuning';
 import type { GameState, Side, SkaterState } from './types';
-import { hypot2, segDistXY, type Vec2 } from './vec';
+import type { Vec2 } from './vec';
+
+// Local copies of vec.ts helpers (hot loops: a call across modules costs more under the test runner's module wrapper).
+const hyp = (x: number, y: number): number => Math.sqrt(x * x + y * y);
+const distV = (a: Vec2, b: Vec2): number => hyp(a.x - b.x, a.y - b.y);
+function segD(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const abx = bx - ax, aby = by - ay;
+  const l2 = abx * abx + aby * aby;
+  let t = l2 === 0 ? 0 : ((px - ax) * abx + (py - ay) * aby) / l2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return hyp(px - (ax + abx * t), py - (ay + aby * t));
+}
+
 
 const L = TUNING.lanes;
 
@@ -16,7 +28,7 @@ export function laneWidth(state: GameState, side: Side, from: Vec2, to: Vec2): n
   let best = Infinity;
   for (const o of state.skaters) {
     if (!o.onIce || o.side === side || o.downT > 0) continue;
-    const d = segDistXY(o.pos.x, o.pos.y, from.x, from.y, to.x, to.y);
+    const d = segD(o.pos.x, o.pos.y, from.x, from.y, to.x, to.y);
     if (d < best) best = d;
   }
   return best;
@@ -27,7 +39,7 @@ export function spaceAt(state: GameState, side: Side, p: Vec2): number {
   let best = Infinity;
   for (const o of state.skaters) {
     if (!o.onIce || o.side === side || o.downT > 0) continue;
-    const d = hypot2(o.pos.x - p.x, o.pos.y - p.y);
+    const d = hyp(o.pos.x - p.x, o.pos.y - p.y);
     if (d < best) best = d;
   }
   return best;
@@ -45,7 +57,7 @@ export function clearPathToNet(state: GameState, s: SkaterState): boolean {
   const me = s.pos.x * dir;
   for (const o of state.skaters) {
     if (!o.onIce || o.side === s.side || o.downT > 0 || o.pos.x * dir <= me) continue;
-    if (segDistXY(o.pos.x, o.pos.y, s.pos.x, s.pos.y, nx, 0) < L.clearPath) return false;
+    if (segD(o.pos.x, o.pos.y, s.pos.x, s.pos.y, nx, 0) < L.clearPath) return false;
   }
   return true;
 }
@@ -62,7 +74,7 @@ export function dangerMan(state: GameState, carrier: SkaterState): SkaterState |
     const rx = m.pos.x * dir;
     if (rx <= RINK.blueLineX) continue;
     const dx = RINK.goalLineX - rx;
-    const d = hypot2(dx, m.pos.y) || 1e-9;
+    const d = hyp(dx, m.pos.y) || 1e-9;
     const v = dexp(-d / DANGER_SCALE) * dx / d;
     if (v > bestV) { bestV = v; best = m; }
   }

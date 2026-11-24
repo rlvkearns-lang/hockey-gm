@@ -62,8 +62,9 @@ describe('every player has a job', () => {
     st.skaters[strong]!.pos = { x: 7, y: -6 }; st.skaters[other]!.pos = { x: 7, y: 7 };
     st.tick += 2; assignJobs(st, defs, tactics);
     expect(st.plans[strong]!.job).toBe('dLineStrong'); expect(st.plans[other]!.job).not.toBe('dLineStrong');
-    st.tick += 12; assignJobs(st, defs, tactics);
-    expect(st.plans[other]!.job).toBe('dLineStrong'); expect(st.plans[other]!.reason).toBe('newJob'); expect(st.plans[other]!.targetTick).toBe(st.tick);
+    st.tick += 11; let handed = -1;                                                                  // 0.43 s since it was issued
+    for (let t = 0; t < 3 && handed < 0; t++) { st.tick++; assignJobs(st, defs, tactics); if (st.plans[other]!.job === 'dLineStrong') handed = st.tick; }
+    expect(handed).toBeGreaterThan(0); expect(st.plans[other]!.reason).toBe('newJob'); expect(st.plans[other]!.targetTick).toBe(handed);
     expect(st.plans[strong]!.job).toBe('dLineWeak');
   });
   it('getting open is active: a covered man moves to a spot the carrier can reach', () => {

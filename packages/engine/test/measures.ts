@@ -30,7 +30,8 @@ export type PlayCounterKey =
   | 'ozonePossessions' | 'ozoneTicks' | 'ozoneAttempts' | 'ozoneSamples' | 'ozoneTwoOpen' | 'ozoneDangerShadowed'
   | 'behindNetPossessions' | 'passesOutFront' | 'wrapAttempts'
   | 'contactOver03' | 'puckJumpTicks'
-  | 'holdViolations' | 'goalieOverlapTicks' | 'raceJumpTicks';
+  | 'goalieOverlapTicks' | 'raceJumpTicks'
+  | 'duplicateJobTicks' | 'netFrontDefenderTicks' | 'netFrontDefenderBetween';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
@@ -42,7 +43,8 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'ozonePossessions', 'ozoneTicks', 'ozoneAttempts', 'ozoneSamples', 'ozoneTwoOpen', 'ozoneDangerShadowed',
   'behindNetPossessions', 'passesOutFront', 'wrapAttempts',
   'contactOver03', 'puckJumpTicks',
-  'holdViolations', 'goalieOverlapTicks', 'raceJumpTicks',
+  'goalieOverlapTicks', 'raceJumpTicks',
+  'duplicateJobTicks', 'netFrontDefenderTicks', 'netFrontDefenderBetween',
 ];
 
 export type PlayMeasures = {
@@ -80,8 +82,11 @@ const MAN_CLEAR = 1.5;
 const DANGER_LANE = 1.2;
 const DANGER_SCALE = 9;
 const BEHIND_RX = 27.43;
-/** A held spot may be re-issued on review no sooner than this many ticks after it was last issued (TUNING.commit.holdSeconds). */
-const HOLD_TICKS = ticksOf(0.4);
+/** Jobs any number of a team's skaters may hold at once. */
+const UTILITY = new Set(['change', 'lineUp', 'tagUp', 'contest', 'down']);
+/** A net-front defender "has" his man within this far (m); he is between him and the net within NET_FRONT_LANE of that line. */
+const NET_FRONT_MAN = 2;
+const NET_FRONT_LANE = 0.8;
 /** A goalie's body radius (TUNING.goalieBody.radius). */
 const GOALIE_RADIUS = 0.55;
 /** A race win moves the puck at most the pickup reach plus the carry reach, with this slack (m). */
@@ -114,8 +119,6 @@ export function createObserver(setup: GameSetup): Observer {
 
   const c = emptyCounters();
   let maxJump = 0;
-  /** The last tick each skater's held spot was issued. */
-  const lastIssued = new Map<string, number>();
   /** Each skater's speed and target on the tick he was last seen on the ice. */
   const prev = new Map<string, { tick: number; speed: number; tx: number; ty: number }>();
   /** Last tick each skater was counted at top speed (a run goes on while this is the previous tick). */
@@ -273,11 +276,6 @@ export function createObserver(setup: GameSetup): Observer {
       const i = st.skaters.indexOf(s);
       const plan = st.plans[i]!;
       const spot = plan.follow === 'spot';
-      if (live && spot && plan.targetTick === tick && plan.reason === 'review') {
-        const last = lastIssued.get(s.id);
-        if (last !== undefined && tick - last < HOLD_TICKS) c.holdViolations++;
-      }
-      if (spot && plan.targetTick === tick) lastIssued.set(s.id, tick);
       if (live) {
         for (const g of [st.goalies.home, st.goalies.away]) {
           if (Math.hypot(s.pos.x - g.pos.x, s.pos.y - g.pos.y) < GOALIE_RADIUS + (radius.get(s.id) ?? 0.38) - 1e-6) c.goalieOverlapTicks++;
@@ -301,6 +299,29 @@ export function createObserver(setup: GameSetup): Observer {
       }
       if (p === undefined) prev.set(s.id, { tick, speed, tx: s.target.x, ty: s.target.y });
       else { p.tick = tick; p.speed = speed; p.tx = s.target.x; p.ty = s.target.y; }
+    }
+  }
+
+  /** Jobs: a team never has two men on the same job; the net-front defender stands between his man and the net. */
+  function jobs(st: GameState): void {
+    if (st.phase !== 'live') return;
+    for (const side of ['home', 'away'] as const) {
+      const seen = new Set<string>();
+      let dup = false;
+      st.skaters.forEach((s, i) => {
+        if (!s.onIce || s.side !== side) return;
+        const plan = st.plans[i]!;
+        const job = plan.job;
+        if (!UTILITY.has(job)) { if (seen.has(job)) dup = true; seen.add(job); }
+        if (job !== 'dNet' || plan.markId === null) return;
+        const m = skaterById(st, plan.markId);
+        if (m === undefined || Math.hypot(m.pos.x - s.pos.x, m.pos.y - s.pos.y) > NET_FRONT_MAN) return;
+        c.netFrontDefenderTicks++;
+        const nx = -st.attackDir[side] * RINK.goalLineX;
+        const nearer = Math.hypot(s.pos.x - nx, s.pos.y) < Math.hypot(m.pos.x - nx, m.pos.y);
+        if (nearer && segDist(s.pos.x, s.pos.y, m.pos.x, m.pos.y, nx, 0) <= NET_FRONT_LANE) c.netFrontDefenderBetween++;
+      });
+      if (dup) c.duplicateJobTicks++;
     }
   }
 
@@ -356,6 +377,7 @@ export function createObserver(setup: GameSetup): Observer {
     tick(st, events) {
       if (st.phase === 'live') c.liveTicks++;
       skaters(st);
+      jobs(st);
       const wasOzone = ozone;
       zonePlay(st);
       // an attempt counts for the offensive-zone possession it ended, too
