@@ -93,8 +93,11 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   it('A3: the carried puck is on the shooting side in over 99% of carrying ticks', () => { expect(counters().carryWrongSide / counters().carryTicks).toBeLessThan(0.01); }, 60_000);
   it('A3: point passes stay in: over 90% kept (was 48%) and over 75% completed (was 37%)', () => { expect(m().pointPassKeptShare).toBeGreaterThan(0.90); expect(m().pointPassCompletion).toBeGreaterThan(0.75); }, 60_000);
   it('A3: passes are completed 75% to 92% of the time (was 86.5%)', () => { expect(m().passCompletion).toBeGreaterThan(0.75); expect(m().passCompletion).toBeLessThan(0.92); }, 60_000);
+  // A pickup: a loose puck or a pass taken (tryPickup) or a pass picked off; the move beyond the puck's own travel that
+  // tick. Contest hand-overs (races, battles) have their own measures.
   it('A3: a pickup moves the puck at most 1.2 m', () => { expect(counters().pickupSnapMax).toBeLessThanOrEqual(1.2); }, 60_000);
-  // Before Task 6, 1 to 3 goals a game came from a pass, rim or clear that slid in with no shot (1.6 a game over seeds 1-8).
+  // At 1763a70, 1 to 3 goals a game came from a pass, rim or clear that slid in with no shot (1.6 a game over seeds 1-8;
+  // 0.375 after the Task 5 review fixes, 0 or 1 in eight games after Task 6).
   it('A3: a pass almost never slides into the net: at most one goal in seeds 1-8 from a pass, rim, dump or clear with no shot', () => {
     expect(countGames([1, 2, 3, 4, 5, 6, 7, 8]).passGoals).toBeLessThanOrEqual(1);
   }, 120_000);

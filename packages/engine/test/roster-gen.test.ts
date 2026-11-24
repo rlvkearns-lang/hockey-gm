@@ -41,4 +41,14 @@ describe('roster-gen', () => {
   it('overall shifts the whole team', () => {
     expect(teamMean(generateTeam(1, 'A', 'A', 85))).toBeGreaterThan(teamMean(generateTeam(1, 'A', 'A', 55)) + 20);
   });
+  it('goalies catch left 88% of the time (a stream of their own: every other roster value is as it was, see task-6-report.md)', () => {
+    let left = 0, n = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      for (const p of generateTeam(seed, 'T', 'T').players) {
+        if (p.position !== 'G') { expect(p.catches).toBeUndefined(); continue; }
+        n++; if (p.catches === 'L') left++; else expect(p.catches).toBe('R');
+      }
+    }
+    expect(left / n).toBeGreaterThan(0.84); expect(left / n).toBeLessThan(0.92);
+  });
 });

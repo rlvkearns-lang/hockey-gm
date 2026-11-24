@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { DT } from '../../src/constants';
-import { beatenChance, pokeAttemptChance } from '../../src/contests/poke-check';
+import { beatenChance, pokeAttemptChance, pokeCheckContest } from '../../src/contests/poke-check';
+import { createRng } from '../../src/rng';
+import { defs, place, skater, stateWith } from '../helpers';
 import { def, pokeOutcomes, pokeOutOfReach, pokeReleased, runPoke, share, startPoke, stepsUntilDone } from '../helpers';
 
 describe('poke checks', () => {
@@ -31,5 +33,16 @@ describe('poke checks', () => {
     expect(r.events.filter((e) => e.type !== 'contestStart' && e.type !== 'contestEnd')).toEqual([]);
     expect(r.events.find((e) => e.type === 'contestEnd')).toMatchObject({ detail: { kind: 'pokeCheck', result: 'outOfReach', winnerId: null } });
     expect(r.carrierId).toBe('home-C'); expect(r.contestIds).toBe(0);
+  });
+  it('a poke measures to the puck on the blade, not to the carrier: in reach of the puck, out of reach of his body, he can poke (Task 6)', () => {
+    let pokes = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      const st = stateWith({ carrier: 'home', puckX: 0 });                          // carrier at (-0.6, 0), the puck at (0, 0)
+      for (const o of st.skaters) if (o.side === 'away') place(st, `away:${o.slot}` as never, -20, o.pos.y);
+      place(st, 'away:C', 1.5, 0);                                                    // 1.5 m from the puck, 2.1 m from the carrier
+      const ctx = { state: st, defs, rng: createRng(seed), emit: () => {}, chemistry: [], memo: new Map<string, unknown>() };
+      if (pokeCheckContest.trigger(ctx, skater(st, 'away', 'C')) !== null) pokes++;
+    }
+    expect(pokes).toBeGreaterThan(0);
   });
 });

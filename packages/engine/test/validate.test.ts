@@ -10,6 +10,7 @@ const cases: [string, Breaker, SetupProblem, RegExp][] = [
   ['duplicate id', (s) => { s.home.players[1]!.id = s.home.players[0]!.id; }, 'duplicate-id', /duplicate/i],
   ['line names a missing player', (s) => { s.home.lines.forwards[0]![0] = 'nobody'; }, 'bad-lines', /nobody/],
   ['attribute out of range', (s) => { s.away.players[3]!.attrs.speed = 140; }, 'bad-attribute', /speed/],
+  ['a catching hand that is not L or R', (s) => { (s.home.players.find((p) => p.position === 'G')! as { catches?: string }).catches = 'X'; }, 'bad-player', /catches/],
   ['goalie on a forward line', (s) => { s.home.lines.forwards[0]![1] = s.home.lines.goalie; }, 'bad-lines', /goalie/i],
   ['too few forward lines', (s) => { s.home.lines.forwards.length = 2; }, 'bad-lines', /forward lines/i],
   ['same player on two lines', (s) => { s.home.lines.forwards[1]![0] = s.home.lines.forwards[0]![0]; }, 'bad-lines', /twice/i],
