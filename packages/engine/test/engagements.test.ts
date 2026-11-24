@@ -40,11 +40,11 @@ const gapOf = (h: Harness, a: string, b: string): number => {
 /** Home C and away LD skating into each other at the net front for 1.5 s: the state then, and how long they were in contact. */
 function pairInContact(c: PlayerDef, d: PlayerDef): { state: Harness['st']; secondsInContact: number } {
   const h = harness(['home-C', 'away-LD'], { 'home-C': c, 'away-LD': d }, { puckX: 15, puckY: 8 });
-  place2(h.st, 'home-C', 22, 0.3, 0); place2(h.st, 'away-LD', 23.6, 0, Math.PI);
+  place2(h.st, 'home-C', 22, 0.05, 0); place2(h.st, 'away-LD', 23.6, 0, Math.PI);
   sk(h, 'home-C').vel = { x: 2, y: 0 }; sk(h, 'away-LD').vel = { x: -1, y: 0 };
-  sk(h, 'home-C').target = { x: 25.5, y: 0 }; sk(h, 'away-LD').target = { x: 21, y: 0.3 };
+  sk(h, 'home-C').target = { x: 25.5, y: 0 }; sk(h, 'away-LD').target = { x: 21, y: 0.05 };
   let contact = 0;
-  for (let i = 0; i < 45; i++) { step(h); if (gapOf(h, 'home-C', 'away-LD') <= 0.15 + 1e-9) contact += DT; }
+  for (let i = 0; i < 45; i++) { step(h); if (gapOf(h, "home-C", "away-LD") <= 0.15 + 1e-9) contact += DT; }
   return { state: h.st, secondsInContact: contact };
 }
 

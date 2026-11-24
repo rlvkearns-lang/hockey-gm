@@ -1,13 +1,27 @@
 import { DT } from './constants';
-import { effective, setCooldown, onCooldown, winProb } from './contests/core';
+import { effective as effective_, setCooldown as setCooldown_, onCooldown as onCooldown_, winProb as winProb_ } from './contests/core';
 import { gameEvent } from './events';
-import { RINK } from './rink';
+import { RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
-import { bodyRadius } from './skating';
+import { bodyRadius as bodyRadius_ } from './skating';
 import { TUNING } from './tuning';
 import type { Engagement, GameEvent, GameState, PlayerDef, SkaterState } from './types';
 
 export { engagementOf, engageSpeedFactor, tieOf, tiedChance } from './engage-state';
+// Local bindings of the imports used every tick (a call through an imported binding costs more under the test runner).
+const effective = effective_;
+const setCooldown = setCooldown_;
+const onCooldown = onCooldown_;
+const winProb = winProb_;
+const RINK = RINK_;
+const bodyRadius = bodyRadius_;
+/** Each player's body radius (derived from his def; never changes in a game). */
+const radiusCache = new WeakMap<PlayerDef, number>();
+function radiusOf(d: PlayerDef): number {
+  let r = radiusCache.get(d);
+  if (r === undefined) { r = bodyRadius(d.weightKg); radiusCache.set(d, r); }
+  return r;
+}
 
 /**
  * Battling for position (Task 10, design A5): two opponents whose bodies come together engage instead of bouncing apart.
@@ -43,7 +57,8 @@ export function engageChance(a: PlayerDef, sa: SkaterState, b: PlayerDef, sb: Sk
 
 /** Per skater index: whether he is in an engagement this tick (scratch, refilled each call). */
 const engaged: boolean[] = [];
-/** Per skater index: his body radius (scratch). */
+/** The free on-ice skaters' indexes and radii this tick (scratch). */
+const cand: number[] = [];
 const radii: number[] = [];
 
 const free = (s: SkaterState): boolean => s.onIce && !s.leaving && s.downT === 0 && s.contestId === null;
@@ -94,16 +109,17 @@ export function engagementTick(state: GameState, defs: Map<string, PlayerDef>, r
   }
   es.length = k;
 
-  // New engagements: opposing pairs in body contact (a cheap broad phase on squared distances).
-  radii.length = n;
-  for (let i = 0; i < n; i++) { const s = sk[i]!; radii[i] = s.onIce ? bodyRadius(defs.get(s.id)!.weightKg) : 0; }
-  for (let i = 0; i < n; i++) {
-    const a = sk[i]!;
-    if (engaged[i] || !free(a)) continue;
-    for (let j = i + 1; j < n; j++) {
-      const b = sk[j]!;
-      if (engaged[j] || b.side === a.side || !free(b)) continue;
-      const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y, r = radii[i]! + radii[j]! + E.contact;
+  // New engagements: opposing pairs in body contact, among the free on-ice men (a cheap broad phase on squared distances).
+  cand.length = 0;
+  radii.length = 0;
+  for (let i = 0; i < n; i++) { const s = sk[i]!; if (s.onIce && !engaged[i] && free(s)) { cand.push(i); radii.push(radiusOf(defs.get(s.id)!)); } }
+  for (let ci = 0; ci < cand.length; ci++) {
+    const i = cand[ci]!, a = sk[i]!;
+    if (engaged[i]) continue;
+    for (let cj = ci + 1; cj < cand.length; cj++) {
+      const j = cand[cj]!, b = sk[j]!;
+      if (engaged[j] || b.side === a.side) continue;
+      const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y, r = radii[ci]! + radii[cj]! + E.contact;
       if (dx * dx + dy * dy > r * r) continue;
       // Glancing past each other at speed is no battle for position.
       // (Across the line between them: one going by the other; into or apart along it is a man leaning in or pushing off.)
@@ -119,9 +135,12 @@ export function engagementTick(state: GameState, defs: Map<string, PlayerDef>, r
   }
 }
 
+/** Each skater list's index by id (derived: the list's order never changes in a game; a restored state has a new list). */
+const indexCache = new WeakMap<readonly SkaterState[], Map<string, number>>();
 function indexIn(sk: readonly SkaterState[], id: string): number {
-  for (let i = 0; i < sk.length; i++) if (sk[i]!.id === id) return i;
-  return -1;
+  let m = indexCache.get(sk);
+  if (m === undefined) { m = new Map(); for (let i = 0; i < sk.length; i++) m.set(sk[i]!.id, i); indexCache.set(sk, m); }
+  return m.get(id) ?? -1;
 }
 
 type EndResult = Exclude<EngagementResult, 'whistle'>;
@@ -134,7 +153,7 @@ function stepEngagement(
   if (!a.onIce || !b.onIce || a.leaving || b.leaving || a.downT > 0 || b.downT > 0) return 'released';
   const da = defs.get(a.id)!, db = defs.get(b.id)!;
   const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y, dd = dx * dx + dy * dy;
-  const touch = bodyRadius(da.weightKg) + bodyRadius(db.weightKg) + E.contact, apart = touch + E.releaseGap;
+  const touch = radiusOf(da) + radiusOf(db) + E.contact, apart = touch + E.releaseGap;
   if (dd > apart * apart) return 'released';
   // Giving up: his job changed since it began (he has somewhere else to be). He is out of it once he has pushed off (out
   // of body contact); until then the battle goes on and his tie holds him.
@@ -144,8 +163,8 @@ function stepEngagement(
     loose(state, quitter.id, quitter === a ? b.id : a.id);
     return e.inside !== null && e.inside !== quitter.id ? 'heldPosition' : 'released';
   }
-  e.kind = kindOf(state, a, b);
   if (state.tick < e.nextDrawTick) return null;
+  e.kind = kindOf(state, a, b);
   e.nextDrawTick += DRAW_TICKS;
   const p = engageChance(da, a, db, b, e.inside === a.id ? 'a' : e.inside === b.id ? 'b' : null);
   const aWins = rng.next() < p;
