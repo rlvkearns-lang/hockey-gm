@@ -146,6 +146,27 @@ export function executePass(state: GameState, fromId: string, toId: string, defs
 }
 
 /**
+ * A short pass along the ice from the puck where it lies (in his feet: nobody carries it) by `fromId` to `toId`'s blade
+ * at `speed` m/s (Task 9: a board battle won by support is moved to the supporter). Off by a normal error that shrinks
+ * with passing, as executePass's. Its `pass` (hand forehand) and `release` events go into `out`; the pass is pending to
+ * `toId` (interceptions and the receiver's take as for any pass).
+ */
+export function passFromFeet(state: GameState, fromId: string, toId: string, speed: number, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
+  const from = skaterById(state, fromId), to = skaterById(state, toId);
+  const p = state.puck.pos;
+  const aim = bladePos(to.pos, to.facing, defs.get(toId)!.shoots, { x: 0, y: 0 });
+  const sigma = PASS.error.base + (100 - defs.get(fromId)!.attrs.passing) * PASS.error.perPoint;
+  const angle = datan2(aim.y - p.y, aim.x - p.x) + rng.gauss() * sigma;
+  const l = hypot2(aim.x - p.x, aim.y - p.y);
+  out.push(gameEvent(state, { type: 'pass', side: from.side, playerId: fromId, otherId: toId, pos: p, detail: { kind: 'pass', distance: l, hand: 'forehand' } }));
+  release(state, from, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'pass', toId);
+  state.pendingPass = {
+    fromId, toId, untilTick: state.tick + Math.round((l / speed + PASS.graceSeconds) / DT), tried: [], clear: checkersOf(state, from), pressure: pressureOn(state, from),
+    aim, bobbled: false, cover: 0, oneTimer: false,
+  };
+}
+
+/**
  * The opponents within PASS.clearOfPasser (m) of the passer as he lets it go: the pressure they put on him is in the pass's
  * error (and a poke check is theirs to try), so they get no interception try at it as it leaves his blade: on the tick
  * of its release and the PASS.clearTicks ticks after it (pendingPass.clear). After that they try like anyone

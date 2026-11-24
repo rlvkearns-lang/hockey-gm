@@ -9,7 +9,7 @@ const common = { tick: 0, period: 1, clock: 1093, side: 'home' as const, playerI
 
 suite('describe', () => {
   it('reads a battle in plain words', () => {
-    expect(describe({ ...common, clock: 1107, type: 'battle', detail: { how: 'netFront', contestId: 1 } }, defs, abbr)).toBe('18:27 1st — Net-front battle: Ray Carver (HBR) beat Theo Ingram');
+    expect(describe({ ...common, clock: 1107, type: 'battle', detail: { how: 'netFront', contestId: 1, winnerSupportId: null, loserSupportId: null } }, defs, abbr)).toBe('18:27 1st — Net-front battle: Ray Carver (HBR) beat Theo Ingram');
   });
   it('reads a goal with assists and one without', () => {
     expect(describe({ ...common, type: 'goal', clock: 300, period: 2, assistIds: ['b', 'c'], detail: { distance: 5.7, releaseTick: 0, cross: { side: 0.3, height: 0.5 }, shotType: 'wrist', tippedFrom: null, screened: false, rebound: false } }, defs, abbr))
@@ -18,7 +18,7 @@ suite('describe', () => {
   });
   it('reads a save, a hit and a takeaway', () => {
     expect(describe({ ...common, type: 'save', detail: { pose: 'glove', kind: 'held', cross: { side: 0.6, height: 1 } } }, defs, abbr)).toContain('Ray Carver (HBR) stopped Theo Ingram\'s shot with the glove');
-    expect(describe({ ...common, type: 'hit', detail: { result: 'landed', contestId: 1 } }, defs, abbr)).toContain('Hit: Ray Carver (HBR) hit Theo Ingram');
+    expect(describe({ ...common, type: 'hit', detail: { result: 'landed', contestId: 1, degree: 'knockdown' } }, defs, abbr)).toContain('Hit: Ray Carver (HBR) hit Theo Ingram');
     expect(describe({ ...common, type: 'takeaway', detail: { how: 'poke', atTick: 0 } }, defs, abbr)).toContain('took the puck from Theo Ingram with a poke check');
   });
   it('a trapped puck is a whistle between the two men, not a goalie covering it', () => {
@@ -36,7 +36,7 @@ suite('describe', () => {
     expect(kindOf({ ...common, type: 'pass', detail: { kind: 'pass', distance: 9, hand: 'forehand' } })).toBe('pass');
     expect(kindOf({ ...common, type: 'lineChange', detail: { unit: 'forwards', from: 0, to: 1, onTheFly: true, phase: 'rush' } })).toBe('lineChange');
     expect(kindOf({ ...common, type: 'goal', detail: { distance: 3, releaseTick: 0, cross: { side: 0.3, height: 0.5 }, shotType: 'wrist', tippedFrom: null, screened: false, rebound: false } })).toBe('goal');
-    expect(kindOf({ ...common, type: 'hit', detail: { result: 'landed', contestId: 1 } })).toBe('other');
+    expect(kindOf({ ...common, type: 'hit', detail: { result: 'landed', contestId: 1, degree: 'knockdown' } })).toBe('other');
     expect(whenText({ clock: 65, period: 3 })).toBe('1:05 3rd');
   });
 });

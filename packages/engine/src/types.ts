@@ -223,6 +223,9 @@ export type ShotInFlight = {
   beat?: boolean;
 };
 
+/** How hard a landed hit was (Task 9): a bump (a nudge), a stagger (he keeps his feet and loses a step) or a knockdown. */
+export type HitDegree = 'bump' | 'stagger' | 'knockdown';
+
 /** The kinds of staged contest (contests/*.ts). */
 export type ContestKind = 'hit' | 'pokeCheck' | 'boardBattle' | 'netFront' | 'looseRace';
 
@@ -265,7 +268,7 @@ export type ContestRoles = {
 /** Each kind's own working values. */
 export type ContestData = {
   /** `p`: the hitter's chance once contact is made; `recover`: how long he regathers; `result` once decided. */
-  hit: { p: number; recover: number; result: 'pending' | 'landed' | 'absorbed' | 'bounced' | 'missed' };
+  hit: { p: number; recover: number; result: 'pending' | 'landed' | 'absorbed' | 'bounced' | 'missed'; /** How hard a landed hit was; null until then, or otherwise. */ degree: HitDegree | null };
   pokeCheck: { outcome: 'undecided' | 'take' | 'loose' | 'kept' | 'beaten' };
   boardBattle: {
     /** The puck is in their feet at `spot` (sliding there for `slide` more ticks): nobody may pick it up. */
@@ -381,6 +384,8 @@ export type GameState = {
   screenedUntilTick: Record<Side, number>;
   /** Skater `id` has his stick tied up (no pass reception, no loose-puck pickup or race) while tick < `tick` (net-front). */
   tiedUpUntil: { id: string; tick: number }[];
+  /** Skaters staggered by a hit (Task 9): each skates at most TUNING.hit.degree.staggerCap of his top speed until `untilTick`. */
+  staggered: { id: string; untilTick: number }[];
   /** Skater `id` won his last net-front round: +10 in a loose-puck race (a rebound) while tick < `untilTick`. */
   reboundEdge: { id: string; untilTick: number } | null;
   /**
@@ -481,7 +486,7 @@ export type EventDetails = {
   stop: { pose: SavePose; kind: SaveKind; speed: number };
   /** playerId blocked otherId's shot. */
   block: { distance: number; releaseTick: number };
-  hit: { result: 'landed' | 'absorbed' | 'bounced'; contestId: number };
+  hit: { result: 'landed' | 'absorbed' | 'bounced'; contestId: number; /** How hard a landed hit was; null otherwise. */ degree: HitDegree | null };
   /** playerId won the puck off otherId (shown, not counted in the box score). */
   turnover: { how: TurnoverHow };
   /** Box score: playerId took it off otherId at `atTick` (pos is where), and his team kept it. */
@@ -489,7 +494,11 @@ export type EventDetails = {
   /** Box score: playerId's pass was picked off by otherId at `atTick` (pos is where), under little pressure. */
   giveaway: { how: 'intercepted'; atTick: number };
   /** playerId beat otherId in a board battle (how it was won) or a net-front battle (`netFront`). */
-  battle: { how: 'protect' | 'pinned' | 'stick' | 'support' | 'scramble' | 'netFront'; contestId: number };
+  battle: {
+    how: 'protect' | 'pinned' | 'stick' | 'support' | 'scramble' | 'netFront'; contestId: number;
+    /** Each side's supporting player in a board battle (null: none, or not a board battle). */
+    winnerSupportId: string | null; loserSupportId: string | null;
+  };
   /** Offside against `side`; faceoff at `spot`. */
   offside: { spot: Vec2 };
   /** Icing by `side`; faceoff at `spot`. */
@@ -502,7 +511,11 @@ export type EventDetails = {
   /** A contest began (pos: its spot). */
   contestStart: { contestId: number; kind: ContestKind; participants: string[] };
   /** A contest ended: how, who won it, and what happened to the puck. */
-  contestEnd: { contestId: number; kind: ContestKind; result: ContestOutcome; winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged' };
+  contestEnd: {
+    contestId: number; kind: ContestKind; result: ContestOutcome; winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged';
+    /** Who has or is being passed the puck as a result (null: nobody). */
+    puckTo: string | null;
+  };
 };
 
 export type GameEventType = keyof EventDetails;

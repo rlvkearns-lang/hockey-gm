@@ -1,4 +1,6 @@
 import { recordTouch } from '../actions';
+import { bladePos } from '../blade';
+import { movementOf } from '../skating';
 import { sitBack } from '../team-play';
 import { TUNING } from '../tuning';
 import { heldSeconds, watchTurnover } from '../turnovers';
@@ -18,27 +20,43 @@ const RESOLVE_SECONDS = 0.1;
 /** A badly beaten defender loses a step: his speedCap is halved for this long. */
 const BEATEN_SECONDS = 0.7;
 const BEATEN_SPEED_CAP = 0.5;
-/** How fast the checker moves while the stick is out (fraction of top speed). */
+/**
+ * How fast the checker moves while the stick is out (fraction of top speed): REACH_SPEED_CAP, or as fast as the carrier
+ * skates (Task 9: from a stick length he keeps with him) plus REACH_KEEP. He makes for the stand-off point from where the
+ * puck will be LEAD_SECONDS on.
+ */
 const REACH_SPEED_CAP = 0.5;
+const REACH_KEEP = 0.15;
+const LEAD_SECONDS = 0.2;
 
 function setTarget(s: SkaterState, x: number, y: number): void {
   s.target.x = x;
   s.target.y = y;
 }
 
-/** The checker reaches for the puck, facing it. (The carrier is in `freeIds`: he keeps playing his own way.) */
+/**
+ * The checker reaches for the puck from a stick length, facing it: he makes for the point T.standOff from it on his side
+ * of it (Task 9: he was skating onto it). (The carrier is in `freeIds`: he keeps playing his own way.)
+ */
 function steerReach(ctx: ContestCtx, checker: SkaterState): void {
-  const p = ctx.state.puck.pos;
-  setTarget(checker, p.x, p.y);
+  const pk = ctx.state.puck;
+  const p = pk.pos;
+  // Where the puck will be a moment on (a carrier skating away is followed, not lost).
+  const px = p.x + pk.vel.x * LEAD_SECONDS, py = p.y + pk.vel.y * LEAD_SECONDS;
+  const dx = checker.pos.x - px, dy = checker.pos.y - py, d = hypot2(dx, dy);
+  if (d > 1e-9) setTarget(checker, px + (dx / d) * T.standOff, py + (dy / d) * T.standOff);
+  else setTarget(checker, checker.pos.x, checker.pos.y);
   if (checker.faceTarget) { checker.faceTarget.x = p.x; checker.faceTarget.y = p.y; } else checker.faceTarget = { x: p.x, y: p.y };
-  checker.speedCap = REACH_SPEED_CAP;
+  const v = hypot2(pk.vel.x, pk.vel.y), top = ctx.defs.has(checker.id) ? movementOf(ctx.defs.get(checker.id)!, 1).topSpeed : 9;
+  checker.speedCap = Math.min(1, Math.max(REACH_SPEED_CAP, v / top + REACH_KEEP));
 }
 
 /**
  * Poke check, stages `reach` (REACH_SECONDS: the stick goes out), `resolve` (RESOLVE_SECONDS: `leader` is the
  * winner) and, after a failure by a wide margin, `beaten` (the checker alone, a step behind). Participants: the
  * checker, then the carrier (in `freeIds`: only the checker is steered). The carrier letting the puck go before it
- * resolves, or being out of the checker's reach when the reach ends, ends it with no result.
+ * resolves, or the checker not a stick length from the puck when the reach ends (T.minReach to T.stickReach), ends it
+ * with no result. A `take` gives the checker the puck: it goes to his blade (applyResult).
  * Roles: `checker`, `carrier`. `data.outcome`: undecided, the checker takes it, knocks it loose, the carrier keeps it,
  * or keeps it and the checker is beaten.
  */
@@ -56,7 +74,13 @@ export const pokeCheckContest: Contest<'pokeCheck'> = {
     if (!carrier || carrier.side === s.side || !isFree(carrier) || state.puck.z > 0) return null;
     // In range of the puck (on the carrier's blade), and in front of the carrier or beside him.
     const pk = state.puck.pos;
-    if (hypot2(s.pos.x - pk.x, s.pos.y - pk.y) > T.triggerRange) return null;
+    // A stick length away (Task 9): on top of the puck he has no poke at it, nor when, as he and it are going, it will be
+    // on top of him or out of his reach when the stick gets there (REACH_SECONDS on: he cannot stop or turn in that time).
+    const dp = hypot2(s.pos.x - pk.x, s.pos.y - pk.y);
+    if (dp > T.triggerRange || dp < T.minReach) return null;
+    const vel = state.puck.vel;
+    const ahead = hypot2(pk.x - s.pos.x + (vel.x - s.vel.x) * REACH_SECONDS, pk.y - s.pos.y + (vel.y - s.vel.y) * REACH_SECONDS);
+    if (ahead < T.minReach || ahead > T.stickReach) return null;
     const dx = s.pos.x - carrier.pos.x, dy = s.pos.y - carrier.pos.y;
     const d = hypot2(dx, dy);
     if (d > 0 && (dcos(carrier.facing) * dx + dsin(carrier.facing) * dy) / d < T.frontCos) return null;
@@ -99,7 +123,9 @@ export const pokeCheckContest: Contest<'pokeCheck'> = {
 
     if (c.stage === 'reach') {
       if (c.stageT < REACH_SECONDS - STAGE_EPS) return null;
-      if (dist(checker.pos, state.puck.pos) > T.stickReach) return { winnerId: null, puck: 'unchanged', outcome: 'outOfReach' }; // the stick cannot get to the puck
+      // From a stick length only: too far, the stick cannot get there; too close, he is on top of it (Task 9).
+      const reach = dist(checker.pos, state.puck.pos);
+      if (reach > T.stickReach || reach < T.minReach) return { winnerId: null, puck: 'unchanged', outcome: 'outOfReach' };
       c.data.outcome = roll(c, ctx, checker, carrier);
       c.leader = c.data.outcome === 'take' || c.data.outcome === 'loose' ? checker.id : carrier.id;
       enterStage(c, 'resolve');
@@ -132,9 +158,19 @@ export function beatenChance(p: number): number {
   return Math.max(0.03, Math.min(0.97, T.beatenChance * 2 * (1 - p)));
 }
 
+/** A take puts the puck on his blade only from this close (m) to it (the most a pickup moves it); further, it is raked loose toward him. */
+const TAKE_REACH = 1.2;
+const bladeScratch = { x: 0, y: 0 };
+
 function finish(c: ContestStateOf<'pokeCheck'>, ctx: ContestCtx, checker: SkaterState, carrier: SkaterState): ContestResult | null {
   const state = ctx.state;
-  const outcome = c.data.outcome;
+  let outcome = c.data.outcome;
+  // A take goes to his blade (Task 9); with the carrier gone on by then (it shows for RESOLVE_SECONDS), it is raked
+  // loose toward him instead.
+  const pk = state.puck.pos;
+  const blade = bladePos(checker.pos, checker.facing, ctx.defs.get(checker.id)!.shoots, bladeScratch);
+  const far = outcome === 'take' && hypot2(blade.x - pk.x, blade.y - pk.y) > TAKE_REACH;
+  if (far) { outcome = 'loose'; c.data.outcome = 'loose'; }
   if (outcome === 'beaten') {
     dropParticipant(state, c, carrier.id);
     enterStage(c, 'beaten');
@@ -148,12 +184,12 @@ function finish(c: ContestStateOf<'pokeCheck'>, ctx: ContestCtx, checker: Skater
     watchTurnover(state, checker.side, checker.id, carrier.id, 'poke', { held: heldSeconds(state, carrier.id) });
     return { winnerId: checker.id, puck: 'toWinner', outcome: 'take' };
   }
-  // His stick knocks it off the carrier's: a touch, and the puck squirts away from him.
+  // His stick knocks it off the carrier's: a touch, and the puck squirts away from him (raked toward his blade: see above).
   const p = state.puck.pos;
   state.lastTouch = { id: checker.id, side: checker.side };
   state.possession = checker.side;
   recordTouch(state, checker.id, checker.side);
-  const a = datan2(p.y - checker.pos.y, p.x - checker.pos.x) + ctx.rng.gauss() * T.looseSpread;
+  const a = far ? datan2(blade.y - p.y, blade.x - p.x) : datan2(p.y - checker.pos.y, p.x - checker.pos.x) + ctx.rng.gauss() * T.looseSpread;
   const v = ctx.rng.range(T.looseSpeed[0], T.looseSpeed[1]);
   return {
     winnerId: checker.id, puck: 'loose', outcome: 'loose',

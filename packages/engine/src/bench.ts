@@ -214,8 +214,16 @@ function startChange(state: GameState, setup: GameSetup, side: Side, unit: Unit,
   continueChange(state, setup, side, unit, b, now, false);
 }
 
+/** `s` is one of the two men of a board battle (Task 9: called off mid-battle, he left it with no winner). */
+function inBoardBattle(state: GameState, s: SkaterState): boolean {
+  if (s.contestId === null) return false;
+  for (const c of state.contests) if (c.id === s.contestId) return c.kind === 'boardBattle' && (c.roles.a === s.id || c.roles.b === s.id);
+  return false;
+}
+
 /**
- * Sends the outgoing players of `b`'s change to the door (all but the carrier); each one within reach of it (every
+ * Sends the outgoing players of `b`'s change to the door (all but the carrier and the two men of a board battle, who
+ * finish it first); each one within reach of it (every
  * one, with `force`) comes off. A replacement steps on at the door into an empty slot of the unit once nobody else on
  * the ice is within DOOR_CLEAR of it (with `force`, at once). The change ends when the incoming unit is all on.
  */
@@ -226,7 +234,7 @@ function continueChange(state: GameState, setup: GameSetup, side: Side, unit: Un
   for (const s of state.skaters) {
     if (!s.onIce || s.side !== side || !inUnit(unit, s.slot) || incoming.includes(s.id)) continue;
     if (!s.leaving) {
-      if (s.id === state.carrierId && !force) { busy = true; continue; }
+      if ((s.id === state.carrierId || inBoardBattle(state, s)) && !force) { busy = true; continue; }
       s.leaving = true;
       holdJob(state, indexOf(state, s.id), 'change', null, 'stop');
       if (state.pendingPass !== null && state.pendingPass.toId === s.id) state.pendingPass = null;

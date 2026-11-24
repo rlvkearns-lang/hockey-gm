@@ -186,3 +186,26 @@ export function boardsNormal(p: Vec2, out: Vec2): Vec2 {
   else { out.x = 0; out.y = sy; }
   return out;
 }
+
+const supportScratch: Vec2 = { x: 0, y: 0 };
+/**
+ * Where a board battle's supporting player stands (Task 9): `off` m from the battle's `spot` toward the centre of the net
+ * his side defends (at x = `ownNetX`), at least `minBoards` m off the boards, and clear of that net's frame. Writes `out`.
+ */
+export function supportSpot(spot: Vec2, ownNetX: number, off: number, minBoards: number, out: Vec2): Vec2 {
+  const dx = ownNetX - spot.x, dy = -spot.y, d = hypot2(dx, dy) || 1;
+  out.x = spot.x + (dx / d) * off;
+  out.y = spot.y + (dy / d) * off;
+  const b = distToBoards(out);
+  if (b < minBoards) {
+    const n = boardsNormal(out, supportScratch);
+    out.x -= n.x * (minBoards - b);
+    out.y -= n.y * (minBoards - b);
+  }
+  // Not in or against the net frame (a battle behind his own net): beside it, on the battle's side.
+  const ax = Math.abs(out.x), clear = 0.6;
+  if (ax > RINK.goalLineX - clear && ax < RINK.goalLineX + RINK.netDepth + clear && Math.abs(out.y) < RINK.netHalfWidth + clear) {
+    out.y = (spot.y >= 0 ? 1 : -1) * (RINK.netHalfWidth + clear);
+  }
+  return out;
+}

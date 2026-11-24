@@ -1,8 +1,10 @@
 import { DT } from '../constants';
 import { bodyRadius, movementOf } from '../skating';
 import { TUNING } from '../tuning';
-import type { ContestStateOf, GameState, PlayerDef, SkaterState } from '../types';
+import type { ContestStateOf, GameState, HitDegree, PlayerDef, SkaterState } from '../types';
 import { hypot2 } from '../vec';
+import { datan2, dexp } from '../dmath';
+import { wrapAngle } from '../skating';
 import {
   applyResult, carrierNow, contestChemistry, contestEvent, dropParticipant, effective, enterStage, isFree, onCooldown, setCooldown, skaterById,
   STAGE_EPS, winProb, type Contest, type ContestCtx,
@@ -132,7 +134,7 @@ export const hitContest: Contest<'hit'> = {
     steerHitter(h, t);
     return {
       id: -1, kind: KIND, stage: 'close', stageT: 0, participants: participants.slice(), leader: null,
-      spot: { x: t.pos.x, y: t.pos.y }, freeIds: [t.id], roles: { hitter: h.id, target: t.id }, data: { p: 0, recover: 0, result: 'pending' },
+      spot: { x: t.pos.x, y: t.pos.y }, freeIds: [t.id], roles: { hitter: h.id, target: t.id }, data: { p: 0, recover: 0, result: 'pending', degree: null },
     };
   },
 
@@ -184,6 +186,33 @@ function toRecover(state: GameState, c: ContestStateOf<'hit'>, tId: string, seco
   enterStage(c, 'recover');
 }
 
+const D = T.degree;
+const logistic = (x: number): number => 1 / (1 + dexp(-x));
+
+/**
+ * How hard a landed hit is. x = (closing - 6) * 0.25 + (hitterMass - targetMass) / 8 - (target balance - 70) / 20 - (sawIt ? 0.8 : 0) + margin
+ * (margin 0..1: how clearly the roll was won). knockdown with chance clamp(logistic(x - 0.2), 0.03, 0.97); otherwise stagger with
+ * chance clamp(logistic(x + 1.2), 0.03, 0.97); otherwise a bump. `sawIt`: the hitter is within 100 degrees of the target's facing at contact.
+ * (The numbers are TUNING.hit.degree's.)
+ */
+export function hitDegreeChances(closing: number, hitterMass: number, targetMass: number, targetBalance: number, sawIt: boolean, margin: number): { knockdown: number; stagger: number } {
+  const x = (closing - D.closingFrom) * D.perClosing + (hitterMass - targetMass) / D.kgPerPoint - (targetBalance - D.balanceFrom) / D.balancePer
+    - (sawIt ? D.sawIt : 0) + margin;
+  const c = (v: number): number => Math.max(0.03, Math.min(0.97, v));
+  return { knockdown: c(logistic(x + D.knockdown)), stagger: c(logistic(x + D.stagger)) };
+}
+
+/** The most of his top speed `id` may skate at now: TUNING.hit.degree.staggerCap while staggered by a hit, else 1. */
+export function staggerCap(state: GameState, id: string): number {
+  for (const s of state.staggered) if (s.id === id && state.tick < s.untilTick) return D.staggerCap;
+  return 1;
+}
+
+/** `t` saw `h` coming: `h` is within TUNING.hit.degree.sawAngle of his facing. */
+function sawIt(h: SkaterState, t: SkaterState): boolean {
+  return Math.abs(wrapAngle(datan2(h.pos.y - t.pos.y, h.pos.x - t.pos.x) - t.facing)) <= D.sawAngle;
+}
+
 /** The roll at the end of the impact, and what it does to both bodies and the puck. */
 function resolveImpact(c: ContestStateOf<'hit'>, ctx: ContestCtx, h: SkaterState, t: SkaterState): void {
   const state = ctx.state;
@@ -197,13 +226,29 @@ function resolveImpact(c: ContestStateOf<'hit'>, ctx: ContestCtx, h: SkaterState
   const push = Math.max(0, closingSpeed(h, t)) * (mh / (mh + mt));
   let result: 'landed' | 'absorbed' | 'bounced';
   let separated = false;
+  let degree: HitDegree | null = null;
   if (won) {
-    t.downT = DOWN_SECONDS[0] + (DOWN_SECONDS[1] - DOWN_SECONDS[0]) * (1 - u / p);
-    knock(t, ux * push, uy * push);
+    // How hard it was (Task 9): by the closing speed, the weights, his balance, whether he saw it and the margin of the roll.
+    const td = ctx.defs.get(t.id)!;
+    const ch = hitDegreeChances(Math.max(0, closingSpeed(h, t)), mh, mt, td.attrs.balance, sawIt(h, t), p - u);
+    degree = ctx.rng.chance(ch.knockdown) ? 'knockdown' : ctx.rng.chance(ch.stagger) ? 'stagger' : 'bump';
+    if (degree === 'knockdown') {
+      t.downT = DOWN_SECONDS[0] + (DOWN_SECONDS[1] - DOWN_SECONDS[0]) * (1 - u / p);
+      knock(t, ux * push, uy * push);
+    } else if (degree === 'stagger') {
+      // He keeps his feet and loses a step.
+      t.vel.x *= D.staggerKeep;
+      t.vel.y *= D.staggerKeep;
+      const until = state.tick + Math.round(D.staggerSeconds / DT);
+      let had = false;
+      for (const s of state.staggered) if (s.id === t.id) { s.untilTick = until; had = true; }
+      if (!had) state.staggered.push({ id: t.id, untilTick: until });
+    } else knock(t, ux * push * D.bumpPush, uy * push * D.bumpPush);
     h.vel.x *= 0.4;
     h.vel.y *= 0.4;
     result = 'landed';
-    separated = state.carrierId === t.id;
+    separated = state.carrierId === t.id
+      && (degree === 'knockdown' || ctx.rng.chance(degree === 'stagger' ? D.staggerLoose : D.bumpLoose));
     if (separated) {
       const vx = t.vel.x * LOOSE_CARRY + ctx.rng.gauss() * LOOSE_PUSH, vy = t.vel.y * LOOSE_CARRY + ctx.rng.gauss() * LOOSE_PUSH;
       applyResult(ctx, c, { winnerId: h.id, puck: 'loose', looseVel: { x: vx, y: vy }, outcome: 'landed' });
@@ -222,7 +267,8 @@ function resolveImpact(c: ContestStateOf<'hit'>, ctx: ContestCtx, h: SkaterState
     }
   }
   c.data.result = result;
-  ctx.emit(contestEvent(state, { type: 'hit', side: h.side, playerId: h.id, otherId: t.id, pos: c.spot, detail: { result, contestId: c.id } }));
+  c.data.degree = degree;
+  ctx.emit(contestEvent(state, { type: 'hit', side: h.side, playerId: h.id, otherId: t.id, pos: c.spot, detail: { result, contestId: c.id, degree } }));
   // A hit that knocks the puck off the carrier is a turnover (loose: not a box-score takeaway, see turnovers.ts).
   if (separated) ctx.emit(contestEvent(state, { type: 'turnover', side: h.side, playerId: h.id, otherId: t.id, pos: state.puck.pos, detail: { how: 'hit' } }));
   c.leader = won ? h.id : t.id;

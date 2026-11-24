@@ -17,6 +17,7 @@ import { RINK } from '../src/rink';
 import { TUNING } from '../src/tuning';
 import { listOptions, readSituation, topKindShare, type Option } from '../src/options';
 import { BRAIN_INTERVAL_TICKS } from '../src/constants';
+import { bladePos } from '../src/blade';
 import { DT } from '../src/constants';
 import type { GameEvent, GameSetup, GameState, PlayerDef, Side, SkaterState } from '../src/types';
 import { gameSetup } from './helpers';
@@ -134,7 +135,16 @@ const OUT_FRONT = { rxMin: 15.13, rxMax: 26.13, y: 6 };
 const WRAP_TICKS = ticksOf(1.5);
 const CONTACT_SLACK = 0.25;
 const CONTACT_TICKS = 10;
-const JUMP_SLACK = 0.5;
+/**
+ * The puck's teleport check (Task 9, Review Focus 4): on a live tick after a live tick, it moves no further than its speed
+ * allows (the largest of its speed before and after the tick, a release's that tick, and the carrier's, times DT) plus
+ * JUMP_SLACK (m). A carried puck rides the blade, which may swing CARRY_TURN (m) a tick beyond what his speed allows as he
+ * turns (game.ts carryPuck). On a hand-over (a new carrier) its move beyond its speed plus what is left to his blade
+ * (where it is carried to over the next ticks) is at most HAND_OVER (m): a pickup's kick.
+ */
+const JUMP_SLACK = 0.05;
+const CARRY_TURN = 0.2;
+const HAND_OVER = 1.2;
 const DECIDED = new Set(['pinned', 'stick', 'support', 'scramble']);
 const NO_WINNER = new Set(['released', 'lostTouch', 'abandoned', 'trapped']);
 
@@ -170,7 +180,8 @@ export function createObserver(setup: GameSetup): Observer {
   /** Last tick each player was the carrier of a behind-the-net possession (0.5 s or more there). */
   const lastBehind = new Map<string, number>();
   let contacts = new Map<string, number>();
-  let prevPuck: { x: number; y: number; speed: number; speed3: number; live: boolean } | null = null;
+  /** The puck at the end of the last tick: where, its speed (on the ice, and with z), whether play was live, and its carrier then (where he stood). */
+  let prevPuck: { x: number; y: number; speed: number; speed3: number; live: boolean; carrier: string | null } | null = null;
   /** The carrier at the end of the last tick, and whether he was on a breakaway then. */
   let prevBreakaway: { id: string; rx: number; clear: boolean; mates: Map<string, number> } | null = null;
   const optionScratch: Option[] = [];
@@ -297,8 +308,8 @@ export function createObserver(setup: GameSetup): Observer {
         case 'hit':
           if (e.detail.result === 'landed') {
             c.hitsLanded++;
-            const t = skaterById(st, e.otherId);
-            if (t && t.downT > 0) c.hitsKnockdown++;
+            // Task 9: a landed hit has a degree; only a knockdown puts him down.
+            if (e.detail.degree === 'knockdown') c.hitsKnockdown++;
           }
           break;
         default:
@@ -521,8 +532,10 @@ export function createObserver(setup: GameSetup): Observer {
     wasLoose = live && cs === undefined;
   }
 
+  const bladeAt = { x: 0, y: 0 };
   function puck(st: GameState, events: readonly GameEvent[]): void {
     const live = st.phase === 'live', p = st.puck, speed = speedOf(p.vel);
+    const cs = live ? skaterById(st, st.carrierId) : undefined;
     // Task 8: on a tick with a save or a tip (the puck is moved to where it met the goalie or the stick), it moves no
     // further than its speed before the tick allows (with 0.05 m slack).
     // (A shot released on the same tick moves at its release speed.)
@@ -532,13 +545,25 @@ export function createObserver(setup: GameSetup): Observer {
       if (Math.hypot(p.pos.x - prevPuck.x, p.pos.y - prevPuck.y) > v * DT + 0.05) c.saveJumpTicks++;
     }
     if (live && prevPuck !== null && prevPuck.live) {
-      const cs = skaterById(st, st.carrierId);
-      const vmax = Math.max(prevPuck.speed, speed, cs !== undefined ? speedOf(cs.vel) : 0);
-      const excess = Math.hypot(p.pos.x - prevPuck.x, p.pos.y - prevPuck.y) - vmax * DT;
-      if (excess > JUMP_SLACK) c.puckJumpTicks++;
+      // Its speed this tick: before and after it, a release's (a pass or shot let go and stopped, deflected or taken on the
+      // same tick moved at its release speed), and a carrier's.
+      let vmax = Math.max(prevPuck.speed, speed, cs !== undefined ? speedOf(cs.vel) : 0);
+      for (const e of events) if (e.type === 'release') vmax = Math.max(vmax, Math.hypot(e.detail.vel.x, e.detail.vel.y));
+      const move = Math.hypot(p.pos.x - prevPuck.x, p.pos.y - prevPuck.y);
+      let excess: number, limit = JUMP_SLACK;
+      if (cs !== undefined && cs.id === prevPuck.carrier) {
+        // Carried on: as fast as he skates, plus the blade's swing (game.ts carryPuck).
+        excess = move - vmax * DT - CARRY_TURN;
+      } else if (cs !== undefined) {
+        // A hand-over: how far it moved beyond its speed plus how far it still is from his blade (where it is carried to).
+        const b = bladePos(cs.pos, cs.facing, shoots.get(cs.id) === 1 ? 'L' : 'R', bladeAt);
+        excess = Math.max(0, move - vmax * DT) + Math.hypot(b.x - p.pos.x, b.y - p.pos.y);
+        limit = HAND_OVER;
+      } else excess = move - vmax * DT;
+      if (excess > limit + 1e-9) c.puckJumpTicks++;
       if (excess > maxJump) maxJump = excess;
     }
-    prevPuck = { x: p.pos.x, y: p.pos.y, speed, speed3: Math.hypot(p.vel.x, p.vel.y, p.vz), live };
+    prevPuck = { x: p.pos.x, y: p.pos.y, speed, speed3: Math.hypot(p.vel.x, p.vel.y, p.vz), live, carrier: cs !== undefined ? cs.id : null };
   }
 
   /**

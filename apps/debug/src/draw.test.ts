@@ -56,7 +56,7 @@ describe('draw', () => {
     const onIce = game.state.skaters.filter((s) => s.onIce);
     const [a, b] = onIce;
     game.state.contests.push({ id: 99, kind: 'hit', stage: 'close', stageT: 0, participants: [a!.id, b!.id], leader: null, spot: { x: 0, y: 0 }, freeIds: [],
-      roles: { hitter: a!.id, target: b!.id }, data: { p: 0, recover: 0, result: 'pending' } });
+      roles: { hitter: a!.id, target: b!.id }, data: { p: 0, recover: 0, result: 'pending', degree: null } });
     const { ctx, calls, texts } = recorder();
     draw(ctx, game.state, defs, 10);
     expect(calls.filter((c) => c.startsWith('arc')).length).toBeGreaterThanOrEqual(onIce.length);

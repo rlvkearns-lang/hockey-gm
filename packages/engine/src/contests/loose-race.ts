@@ -22,9 +22,13 @@ const RESOLVE_SECONDS = 0.1;
 const RACE_MAX_SECONDS = 2;
 /** After the draw the winner has this long (s) to get his blade to the puck (canTake) and pick it up, or the race is off. */
 const PICKUP_MAX_SECONDS = 1;
-/** In his feet (m from his centre), and the most a kick up to his blade moves it (m): as game.ts tryPickup. */
+/**
+ * In his feet (m from his centre), and the most a kick up to his blade moves it (m): as game.ts tryPickup, less 0.1 m
+ * (Task 9): the race is taken before he moves on the tick, and his stride and turn carry the blade on a little before
+ * the puck reaches it (two kicks in eight games went 1.21 m).
+ */
 const IN_FEET = 0.45;
-const MAX_KICK = 1.2;
+const MAX_KICK = 1.1;
 /** The loser yields: he is steered this far (m) to his side of the winner's line to the puck. */
 const YIELD_OFFSET = 1.5;
 /** A bounce leaves the puck at this speed (m/s), any direction. */

@@ -234,7 +234,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     pickupBlock: null, pendingPass: null, shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [], ticks: [] }, lastAttackTouch: { home: null, away: null },
     noChange: null, delayedOffside: null, icingWatch: null, lastRelease: null, contestCooldowns: [],
-    tiedUpUntil: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
+    tiedUpUntil: [], reboundEdge: null, turnoverWatch: null, lastSave: null, staggered: [],
     bench: {
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
       away: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
@@ -593,13 +593,13 @@ export function st(o: Partial<SkaterState>): SkaterState {
   return { ...at(0, 0), ...o };
 }
 
-type Duel = { st: GameState; ds: Map<string, PlayerDef>; rng: Rng; events: GameEvent[]; moves: Map<string, Movement> };
+export type Duel = { st: GameState; ds: Map<string, PlayerDef>; rng: Rng; events: GameEvent[]; moves: Map<string, Movement> };
 const duels = new WeakMap<GameState, Duel>();
 const contestDuel = new WeakMap<ContestState, Duel>();
 let duelSeed = 0;
 
-/** Home C (carrier, `carrierDef`) at x -0.6 facing +x; away C (`otherDef`) at (x, 0) moving (vx, 0); nobody else on. */
-function duel(otherDef: PlayerDef, carrierDef: PlayerDef, x: number, vx: number): Duel {
+/** Home C (carrier, `carrierDef`) at x -0.6 facing +x; away C (`otherDef`) at (x, 0) moving (vx, 0); nobody else on. `seed`: its Rng (else the next of a counter). */
+export function duel(otherDef: PlayerDef, carrierDef: PlayerDef, x: number, vx: number, seed?: number): Duel {
   const state = stateWith({ carrier: 'home', puckX: 0, carrierSlot: 'C' });
   for (const s of state.skaters) if (s.slot !== 'C') s.onIce = false;
   state.onIce = { home: ['home-C'], away: ['away-C'] };
@@ -609,13 +609,13 @@ function duel(otherDef: PlayerDef, carrierDef: PlayerDef, x: number, vx: number)
   ds.set('home-C', { ...carrierDef, id: 'home-C', position: 'C' });
   ds.set('away-C', { ...otherDef, id: 'away-C', position: 'C' });
   const moves = new Map([...ds].map(([id, p]) => [id, movementOf(p, 1)]));
-  const h: Duel = { st: state, ds, rng: createRng(++duelSeed), events: [], moves };
+  const h: Duel = { st: state, ds, rng: createRng(seed ?? ++duelSeed), events: [], moves };
   duels.set(state, h);
   return h;
 }
 
 /** One tick of the contest harness. */
-function duelStep(h: Duel): void {
+export function duelStep(h: Duel): void {
   const s = h.st;
   s.tick++;
   contestTick(s, h.ds, h.rng, DT, h.events);
@@ -640,14 +640,14 @@ function duelToEnd(h: Duel): void {
   throw new Error('no contest started and finished within 6 s');
 }
 
-/** `defender` (away C) standing 1.2 m in front of the still carrier `carrier` (home C), with a poke check started on him (startContest, not the trigger's draw). */
+/** `defender` (away C) standing a stick length (1.5 m) from the puck in front of the still carrier `carrier` (home C), with a poke check started on him (startContest, not the trigger's draw). */
 function pokeDuel(defender: PlayerDef, carrier: PlayerDef): Duel {
-  const h = duel(defender, carrier, 0.6, 0);
+  const h = duel(defender, carrier, 1.5, 0);
   startContest(h.st, h.ds, h.rng, pokeCheckContest, ['away-C', 'home-C'], h.events);
   return h;
 }
 
-/** A poke check by `defender` (standing 1.2 m in front of him) on the still carrier `carrier`: true when the defender wins it. */
+/** A poke check by `defender` (standing 1.5 m from the puck in front of him) on the still carrier `carrier`: true when the defender wins it. */
 export function runPoke(defender: PlayerDef, carrier: PlayerDef): boolean {
   const h = pokeDuel(defender, carrier);
   duelToEnd(h);
@@ -711,13 +711,13 @@ export function runHit(hitter: PlayerDef, tgt: PlayerDef, closing: number): bool
   return hitDuel(hitter, tgt, closing).events.some((e) => e.type === 'hit' && e.detail.result === 'landed');
 }
 
-/** A big hitter's check on a smaller carrier, stopped on the tick it lands (seeds tried in turn). */
+/** A big hitter's check on a smaller carrier, stopped on the tick it lands and knocks him down (seeds tried in turn). */
 export function hitThatLands(): GameState {
   for (let i = 0; i < 50; i++) {
     const h = hitDuelStart(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), def({ balance: 62, strength: 60, weightKg: 80 }), 6);
     for (let k = 0; k < 90; k++) {
       duelStep(h);
-      if (h.events.some((e) => e.type === 'hit' && e.detail.result === 'landed')) return h.st;
+      if (h.events.some((e) => e.type === 'hit' && e.detail.result === 'landed' && e.detail.degree === 'knockdown')) return h.st;
     }
   }
   throw new Error('no hit landed in 50 tries');
@@ -824,21 +824,21 @@ export function shareOf<T>(xs: T[], pred: (x: T) => boolean): number {
   return xs.length === 0 ? 0 : xs.filter(pred).length / xs.length;
 }
 
-type Harness = { st: GameState; ds: Map<string, PlayerDef>; rng: Rng; events: GameEvent[]; moves: Map<string, Movement> };
+export type Harness = { st: GameState; ds: Map<string, PlayerDef>; rng: Rng; events: GameEvent[]; moves: Map<string, Movement> };
 let harnessSeed = 0;
 
-/** A live state with only `on` (ids like 'home-C') on the ice; `with` gives the defs of some of them. */
-function harness(on: string[], withDefs: Record<string, PlayerDef>, o: { carrier?: Side | null; puckX?: number; puckY?: number; carrierSlot?: SkaterSlot } = {}): Harness {
+/** A live state with only `on` (ids like 'home-C') on the ice; `with` gives the defs of some of them; `seed` its Rng (else the next of a counter). */
+export function harness(on: string[], withDefs: Record<string, PlayerDef>, o: { carrier?: Side | null; puckX?: number; puckY?: number; carrierSlot?: SkaterSlot; seed?: number } = {}): Harness {
   const state = stateWith({ carrier: o.carrier ?? null, puckX: o.puckX ?? 0, puckY: o.puckY ?? 0, carrierSlot: o.carrierSlot });
   for (const s of state.skaters) if (!on.includes(s.id)) s.onIce = false;
   state.onIce = { home: on.filter((id) => id.startsWith('home')), away: on.filter((id) => id.startsWith('away')) };
   const ds = new Map(defs);
   for (const [id, p] of Object.entries(withDefs)) ds.set(id, { ...p, id, position: ds.get(id)!.position });
   const moves = new Map([...ds].map(([id, p]) => [id, movementOf(p, 1)]));
-  return { st: state, ds, rng: createRng(++harnessSeed), events: [], moves };
+  return { st: state, ds, rng: createRng(o.seed ?? ++harnessSeed), events: [], moves };
 }
 
-function harnessStep(h: Harness, beforeContests?: () => void): void {
+export function harnessStep(h: Harness, beforeContests?: () => void): void {
   const s = h.st;
   s.tick++;
   beforeContests?.();
@@ -853,13 +853,13 @@ function harnessStep(h: Harness, beforeContests?: () => void): void {
   } else if (s.phase === 'live') stepPuck(s.puck, DT);
 }
 
-const place2 = (st: GameState, id: string, x: number, y: number, facing: number): void => {
+export const place2 = (st: GameState, id: string, x: number, y: number, facing: number): void => {
   const s = st.skaters.find((k) => k.id === id)!;
   s.pos = { x, y }; s.target = { x, y }; s.vel = { x: 0, y: 0 }; s.facing = facing;
 };
 
 /** Where the harness board battles happen: 0.95 m off the +y side boards, inside home's attacking blue line. */
-const BATTLE_SPOT = { x: 12, y: 12 };
+export const BATTLE_SPOT = { x: 12, y: 12 };
 
 export type BattleOpts = { supportFor?: 'a' | 'b'; firstIn?: 'a' | 'b' };
 export type BattleTick = { stage: string; stageT: number; leader: string | null; pinned: string | null };
@@ -999,14 +999,16 @@ export function heldPuckInGame(s: GameSetup): { ticks: number; carried: number; 
 /** The net-front attacker in the net-front helpers. */
 export const attackerId = 'home-C';
 
-type NetFront = { h: Harness; c: ContestStateOf<'netFront'> };
-function netFrontStart(att: PlayerDef = even, dfn: PlayerDef = even): NetFront {
-  const h = harness(['home-LD', 'home-C', 'away-LD'], { 'home-C': att, 'away-LD': dfn }, { carrier: 'home', puckX: 9.8, puckY: 8.5, carrierSlot: 'LD' });
+export type NetFront = { h: Harness; c: ContestStateOf<'netFront'> };
+/** `seed`: the harness's Rng; `place` moves the defender before the battle starts (it starts 0.8 m from the attacker, net side). */
+export function netFrontStart(att: PlayerDef = even, dfn: PlayerDef = even, o: { seed?: number; place?: (st: GameState, spot: { x: number; y: number }) => void } = {}): NetFront {
+  const h = harness(['home-LD', 'home-C', 'away-LD'], { 'home-C': att, 'away-LD': dfn }, { carrier: 'home', puckX: 9.8, puckY: 8.5, carrierSlot: 'LD', seed: o.seed });
   const st = h.st;
   place2(st, 'home-LD', 9.2, 8.5, 0);
   const spot = netFrontSpot(st, 'home', { x: 0, y: 0 });
   place2(st, 'home-C', spot.x, spot.y, Math.PI);
   place2(st, 'away-LD', spot.x + 0.8, spot.y, Math.PI);
+  o.place?.(st, spot);
   const c = startContest(st, h.ds, h.rng, netFrontContest, ['home-C', 'away-LD'], h.events);
   return { h, c };
 }
@@ -1150,11 +1152,11 @@ export function shieldAlongBoards(carrier: PlayerDef, opp: PlayerDef): 'kept' | 
   return h.events.some((e) => e.type === 'battle' && e.detail.how === 'protect') ? 'kept' : 'none';
 }
 
-/** The events of the first hit (of up to 50, as in hitThatLands) that lands on the carrier. */
+/** The events of the first hit (of up to 50, as in hitThatLands) that lands on the carrier and knocks him down. */
 export function landedHitEvents(): GameEvent[] {
   for (let i = 0; i < 50; i++) {
     const h = hitDuel(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), def({ balance: 62, strength: 60, weightKg: 80 }), 6);
-    if (h.events.some((e) => e.type === 'hit' && e.detail.result === 'landed')) return h.events;
+    if (h.events.some((e) => e.type === 'hit' && e.detail.result === 'landed' && e.detail.degree === 'knockdown')) return h.events;
   }
   throw new Error('no hit landed in 50 tries');
 }

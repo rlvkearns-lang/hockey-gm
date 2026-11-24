@@ -20,6 +20,7 @@ const TURNOVER_HOW = {
   battleLoose: 'in a battle, the puck squirting loose', intercepted: 'by intercepting a pass', deflected: 'by deflecting a pass',
 } as const;
 const BATTLE_HOW = { protect: 'He kept the puck', pinned: 'He pinned him on the boards', stick: 'He won it with his stick', scramble: 'In the scramble', support: 'His teammate came to help', netFront: '' } as const;
+const HIT_DEGREE = { knockdown: ' and put him down', stagger: ' and staggered him', bump: ' (a bump)' } as const;
 const SAVE_HOW = { pad: 'with the pad', glove: 'with the glove', blocker: 'with the blocker', butterfly: 'in the butterfly' } as const;
 
 const metres = (d: number): string => ` from ${d.toFixed(1)} m`;
@@ -45,7 +46,7 @@ export function describe(e: GameEvent, defs: Map<string, PlayerDef>, abbr: Recor
       case 'block': return `${me} blocked ${other}'s shot`;
       case 'tip': return `Tip: ${me} deflected ${other}'s shot`;
       case 'hit': return e.detail.result === 'absorbed' ? `Hit: ${other} took a hit from ${me} and stayed on his feet`
-        : e.detail.result === 'bounced' ? `Hit: ${me} bounced off ${other}` : `Hit: ${me} hit ${other}`;
+        : e.detail.result === 'bounced' ? `Hit: ${me} bounced off ${other}` : `Hit: ${me} hit ${other}${HIT_DEGREE[e.detail.degree ?? 'knockdown']}`;
       case 'turnover': return `Turnover: ${me} won the puck off ${other} ${TURNOVER_HOW[e.detail.how]}`;
       case 'takeaway': return `Takeaway: ${me} took the puck from ${other} ${TAKEAWAY_HOW[e.detail.how]}`;
       case 'giveaway': return `Giveaway: ${me} lost the puck (${other} picked off his pass)`;

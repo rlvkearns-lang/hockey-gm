@@ -126,6 +126,45 @@ describe('play measures: definitions', () => {
     expect(obs.counters().puckJumpTicks).toBe(1);
   });
 
+  // Task 9: the teleport check (Review Focus 4).
+  it('a loose puck at rest that moves 0.1 m in a tick is a jump; one moving at its speed is not', () => {
+    const st = stateWith({ carrier: null, puckX: 0 }); const obs = createObserver(gameSetupOf(st));
+    feed(obs, st, 1);
+    st.puck.pos.x += 0.1;
+    feed(obs, st, 1);
+    expect(obs.counters().puckJumpTicks).toBe(1);
+    st.puck.vel = { x: 6, y: 0 }; st.puck.pos.x += 0.2;
+    feed(obs, st, 1);
+    expect(obs.counters().puckJumpTicks).toBe(1);
+  });
+  it('a carried puck may swing with his blade (0.2 m beyond his travel a tick), no more', () => {
+    const st = stateWith({ carrier: 'home', puckX: 0 }); const obs = createObserver(gameSetupOf(st));
+    const c = skater(st, 'home', 'RW'); c.vel = { x: 3, y: 0 };  // 0.1 m a tick
+    feed(obs, st, 1);
+    c.pos.x += 0.1; st.puck.pos.y += 0.25;                    // the puck 0.27 m: within 0.3 (and 0.05 of slack)
+    feed(obs, st, 1);
+    expect(obs.counters().puckJumpTicks).toBe(0);
+    c.pos.x += 0.1; st.puck.pos.y += 0.45;                    // 0.46 m against 0.35: a jump
+    feed(obs, st, 1);
+    expect(obs.counters().puckJumpTicks).toBe(1);
+  });
+  it('a hand-over is a jump when the new carrier\'s blade is more than 1.2 m from the puck', () => {
+    const st = stateWith({ carrier: null, puckX: 0 }); const obs = createObserver(gameSetupOf(st));
+    const c = skater(st, 'home', 'C'); c.facing = 0;
+    // His blade (0.9 m ahead, 0.4 m to the side) 1.0 m from the puck: a pickup.
+    c.pos = { x: -1.9, y: st.puck.pos.y + (defs.get(c.id)!.shoots === 'L' ? -0.4 : 0.4) };
+    feed(obs, st, 1);
+    st.carrierId = c.id;
+    feed(obs, st, 1);
+    expect(obs.counters().puckJumpTicks).toBe(0);
+    expect(obs.maxPuckJump()).toBeGreaterThan(0.9); expect(obs.maxPuckJump()).toBeLessThan(1.1);
+    st.carrierId = null; feed(obs, st, 1);
+    c.pos.x -= 1;                                            // now 2 m away
+    st.carrierId = c.id;
+    feed(obs, st, 1);
+    expect(obs.counters().puckJumpTicks).toBe(1); expect(obs.maxPuckJump()).toBeGreaterThan(1.9);
+  });
+
   it('two opponents in contact for 10 ticks in a row count once', () => {
     const st = stateWith({ carrier: null, puckX: 0 }); const obs = createObserver(gameSetupOf(st));
     for (const s of st.skaters) if (s.slot !== 'C') s.onIce = false;
@@ -138,17 +177,17 @@ describe('play measures: definitions', () => {
 
   it('a battle winner comes away when he is the next carrier within 1.5 s; toWinner checks the man who won it', () => {
     const st = stateWith({ carrier: null, puckX: 20 }); const obs = createObserver(gameSetupOf(st));
-    const battle = ev(st, 'battle', { side: 'home', playerId: 'home-LW', otherId: 'away-RD', detail: { how: 'pinned', contestId: 3 } });
-    const end = ev(st, 'contestEnd', { side: null, playerId: 'home-C', detail: { contestId: 3, kind: 'boardBattle', result: 'pinned', winnerId: 'home-C', puck: 'toWinner' } });
+    const battle = ev(st, 'battle', { side: 'home', playerId: 'home-LW', otherId: 'away-RD', detail: { how: 'pinned', contestId: 3, winnerSupportId: null, loserSupportId: null } });
+    const end = ev(st, 'contestEnd', { side: null, playerId: 'home-C', detail: { contestId: 3, kind: 'boardBattle', result: 'pinned', winnerId: 'home-C', puck: 'toWinner', puckTo: 'home-C' } });
     st.carrierId = 'home-C';
     feed(obs, st, 1, [battle, end]);
     let c = obs.counters();
     expect(c.battlesDecided).toBe(1); expect(c.battleWinnerCameAway).toBe(0);
     expect(c.battleToWinner).toBe(1); expect(c.battleToWinnerIsWinner).toBe(0);
     st.carrierId = null;
-    feed(obs, st, 1, [ev(st, 'battle', { side: 'home', playerId: 'home-LW', otherId: 'away-RD', detail: { how: 'stick', contestId: 4 } })]);
+    feed(obs, st, 1, [ev(st, 'battle', { side: 'home', playerId: 'home-LW', otherId: 'away-RD', detail: { how: 'stick', contestId: 4, winnerSupportId: null, loserSupportId: null } })]);
     feed(obs, st, 20); st.carrierId = 'home-LW'; feed(obs, st, 1);
-    feed(obs, st, 1, [ev(st, 'contestEnd', { side: null, playerId: null, detail: { contestId: 5, kind: 'boardBattle', result: 'lostTouch', winnerId: null, puck: 'unchanged' } })]);
+    feed(obs, st, 1, [ev(st, 'contestEnd', { side: null, playerId: null, detail: { contestId: 5, kind: 'boardBattle', result: 'lostTouch', winnerId: null, puck: 'unchanged', puckTo: null } })]);
     c = obs.counters();
     expect(c.battlesDecided).toBe(2); expect(c.battleWinnerCameAway).toBe(1); expect(c.battlesNoWinner).toBe(1);
   });

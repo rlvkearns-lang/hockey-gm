@@ -1,12 +1,14 @@
-import { blockPickup, recordTouch } from '../actions';
+import { blockPickup, passFromFeet, recordTouch } from '../actions';
+import { bladePos } from '../blade';
+import { DT } from '../constants';
 import { stopPlay } from '../faceoff';
-import { boardsNormal, distToBoards, FACEOFF_DOTS, resolveBoards, resolveNets, RINK } from '../rink';
+import { boardsNormal, distToBoards, FACEOFF_DOTS, resolveBoards, resolveNets, RINK, supportSpot } from '../rink';
 import { crossesNet } from '../lanes';
 import { movementOf } from '../skating';
 import { TUNING } from '../tuning';
 import { heldSeconds, watchTurnover } from '../turnovers';
 import { PUCK_RADIUS } from '../util';
-import type { ContestStateOf, GameState, SkaterState } from '../types';
+import type { ContestStateOf, GameEvent, GameState, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
 import {
   carrierNow, contestEvent, contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
@@ -42,8 +44,9 @@ const DIG_ROUND: [number, number] = [0.5, 0.62];
 const DIG_MIN = 1;
 /** `resolve` shows the winner this long (s) before the puck moves. */
 const RESOLVE_SECONDS = 0.3;
-/** A supporting player stands this far (m) off the boards. */
-const SUPPORT_OFF_BOARDS = 2;
+/** The puck on the winner's blade as he comes away moves at most his own travel plus BLADE_TURN (m) a tick, at most BLADE_STEP (as a carried puck: game.ts carryPuck). */
+const BLADE_TURN = 0.2;
+const BLADE_STEP = 0.4;
 /** How hard they skate (fraction of top speed) while shoving and digging. */
 const PIN_SPEED_CAP = 0.4;
 const DIG_SPEED_CAP = 0.3;
@@ -76,14 +79,21 @@ const other = (i: number): number => 1 - i;
  *   rounds in a row to dig it out. With nobody pinned either side needs two in a row, and four rounds without that
  *   trap the puck: `freeze` (detail `trapped`) and a faceoff at the nearest end-zone dot inside a blue line, else the
  *   nearest neutral-zone dot. `leader`: whoever is ahead in the dig.
- * - `resolve` (0.3 s): `leader` is the winner. Then 60% of the time his side comes away with it clean (`toWinner`: to
- *   his supporting player if he has one, else to him), else it squirts loose along the boards.
+ * - `resolve` (0.3 s): `leader` is the winner. T.cleanShare (0.75) of the time he comes away with it clean: steered
+ *   T.comeAway off the boards with the puck riding his blade, it ends `toWinner` with the puck on his stick (Task 9:
+ *   whatever support he had). Won by support (his side had a supporter and the other did not), a clean win is passed
+ *   instead: he stays on it, facing his supporter, and at the end passes it to him (6 to 8 m/s, `pass` and `release`
+ *   events, the pass pending to him; `puck: 'loose'`, `puckTo` the supporter). Otherwise it squirts loose along the
+ *   boards. Through a net frame there is no hand-over: then it squirts loose (Task 8b close-out).
  * Any time after `arrive`, the first free teammate of either side within 2.5 m joins as that side's support
- * (`roles.supportA` / `roles.supportB`): +8 for his side. One `battle` event at the end: the dig
- * winner over the loser, detail `support` (his side had support and the other did not: the numbers won it), else
- * `pinned` (the winner had pinned him), `stick` (he dug it out while pinned) or `scramble` (nobody was pinned). From
- * `arrive` on the puck is in their feet (`data.holdsPuck`): it slides on to `spot` over a few ticks and stays there
- * with nobody carrying it until the end; every participant but a shielding carrier is steered by it.
+ * (`roles.supportA` / `roles.supportB`): +8 for his side. He stands on his own side of it: T.supportOff from the spot
+ * toward the net his side defends (rink.ts supportSpot). A supporter who leaves the ice or heads off drops out; the battle
+ * goes on. One `battle` event at the end: the dig winner over the loser, detail `support` (the numbers won it), else
+ * `pinned` (the winner had pinned him), `stick` (he dug it out while pinned) or `scramble` (nobody was pinned), naming
+ * each side's supporter (`winnerSupportId`, `loserSupportId`). From `arrive` on the puck is in their feet
+ * (`data.holdsPuck`): it slides on to `spot` over a few ticks (moving at its speed: its velocity says so) and stays there
+ * with nobody carrying it until the end; every participant but a shielding carrier is steered by it. The contest's
+ * `winnerId` is always the man who won it.
  */
 export const boardBattleContest: Contest<'boardBattle'> = {
   kind: KIND,
@@ -136,7 +146,7 @@ export const boardBattleContest: Contest<'boardBattle'> = {
       if (r === null) steer(c, ctx);
       return r;
     }
-    holdPuck(state, c);
+    holdPuck(ctx, c);
     if (c.stage !== 'arrive' && c.stage !== 'resolve') joinSupport(c, ctx);
     let r: ContestResult | null = null;
     switch (c.stage) {
@@ -203,22 +213,77 @@ function intoFeet(c: Battle, ctx: ContestCtx): void {
   c.data.slide = SLIDE_TICKS;
 }
 
-/** The puck in their feet: still at the spot, or still sliding there. */
-function holdPuck(state: GameState, c: Battle): void {
+const bladeScratch: Vec2 = { x: 0, y: 0 };
+const zeroVel: Vec2 = { x: 0, y: 0 };
+
+/**
+ * The puck in their feet: sliding on to the spot, still at it, or (a clean win, while it resolves) riding the winner's
+ * blade as he comes away with it. A moving puck moves by its velocity (Task 9: it moved at a speed of 0 before): the
+ * puck's own step (game.ts moveLoosePuck, after the skaters) takes it where this sets it going.
+ */
+function holdPuck(ctx: ContestCtx, c: Battle): void {
+  const state = ctx.state;
   const p = state.puck;
   const d = c.data;
-  if (d.slide > 0) {
-    p.pos.x += (c.spot.x - p.pos.x) / d.slide;
-    p.pos.y += (c.spot.y - p.pos.y) / d.slide;
-    d.slide--;
-  } else {
-    p.pos.x = c.spot.x;
-    p.pos.y = c.spot.y;
-  }
-  p.vel.x = 0;
-  p.vel.y = 0;
   p.z = 0;
   p.vz = 0;
+  let tx: number, ty: number;
+  if (d.slide > 0) {
+    tx = p.pos.x + (c.spot.x - p.pos.x) / d.slide;
+    ty = p.pos.y + (c.spot.y - p.pos.y) / d.slide;
+    d.slide--;
+  } else if (comesAway(c)) {
+    // On his blade (inside the boards, out of a net frame), a carried puck's step at a time.
+    const w = skaterById(state, c.roles.winner!);
+    const b = bladePos(w.pos, w.facing, ctx.defs.get(w.id)!.shoots, bladeScratch);
+    zeroVel.x = 0; zeroVel.y = 0;
+    resolveBoards(b, zeroVel, PUCK_RADIUS, 0);
+    resolveNets(b, zeroVel, PUCK_RADIUS);
+    const dx = b.x - p.pos.x, dy = b.y - p.pos.y, l = hypot2(dx, dy);
+    const step = Math.min(BLADE_STEP, hypot2(w.vel.x, w.vel.y) * DT + BLADE_TURN);
+    tx = l > step ? p.pos.x + (dx / l) * step : b.x;
+    ty = l > step ? p.pos.y + (dy / l) * step : b.y;
+  } else {
+    // Still at the spot (any drift left by the slide is settled here, in a tick of a few hundredths of a millimetre).
+    // While it resolves it stays where it is: a winner who was coming away with it and now passes it on (his side's
+    // supporter has gone) plays it from there.
+    if (c.stage === 'resolve') { c.spot.x = p.pos.x; c.spot.y = p.pos.y; }
+    p.pos.x = c.spot.x;
+    p.pos.y = c.spot.y;
+    p.vel.x = 0;
+    p.vel.y = 0;
+    return;
+  }
+  p.vel.x = (tx - p.pos.x) / DT;
+  p.vel.y = (ty - p.pos.y) / DT;
+}
+
+/** How the battle was won (once there is a winner): by support, a pin, the stick or in a scramble. */
+function howOf(c: Battle): 'support' | 'pinned' | 'stick' | 'scramble' {
+  const r = c.roles;
+  const w = ix(c, r.winner), l = other(w);
+  const support = w === 0 ? r.supportA : r.supportB;
+  const outnumbered = (l === 0 ? r.supportA : r.supportB) === null;
+  return support !== null && outnumbered ? 'support' : r.pinned === null ? 'scramble' : r.pinned === idOf(c, l) ? 'pinned' : 'stick';
+}
+
+/** While it resolves: a clean win the winner comes away with himself (not a win by support, which he passes on). */
+function comesAway(c: Battle): boolean {
+  return c.stage === 'resolve' && c.data.clean && c.roles.winner !== null && howOf(c) !== 'support';
+}
+
+/** Supporting players who have left the ice or are heading off drop out of `c`; the battle goes on without them. */
+export function dropGoneSupport(state: GameState, c: Battle): void {
+  for (const key of ['supportA', 'supportB'] as const) {
+    const id = c.roles[key];
+    if (id === null) continue;
+    const s = skaterById(state, id);
+    if (s.onIce && !s.leaving) continue;
+    c.roles[key] = null;
+    const i = c.participants.indexOf(id);
+    if (i >= 0) c.participants.splice(i, 1);
+    if (s.contestId === c.id) s.contestId = null;
+  }
 }
 
 /** Each side without support takes the first free teammate (skater order) within T.supportRange of the spot. */
@@ -265,7 +330,7 @@ function protect(c: Battle, ctx: ContestCtx): ContestResult | null {
   const mc = movementOf(ctx.defs.get(carrier.id)!, 1).mass, mo = movementOf(ctx.defs.get(opp.id)!, 1).mass;
   const edge = contestRating(ctx, c, carrier.id, T.protect) - contestRating(ctx, c, opp.id, T.strip) + (mc - mo) / T.massPerPoint + T.protectEdge;
   if (ctx.rng.next() < winProb(edge)) {
-    ctx.emit(contestEvent(state, { type: 'battle', side: carrier.side, playerId: carrier.id, otherId: opp.id, pos: c.spot, detail: { how: 'protect', contestId: c.id } }));
+    ctx.emit(contestEvent(state, { type: 'battle', side: carrier.side, playerId: carrier.id, otherId: opp.id, pos: c.spot, detail: { how: 'protect', contestId: c.id, winnerSupportId: null, loserSupportId: null } }));
     setCooldown(state, opp.id, 'pokeCheck', T.loserPokeCooldown);
     return cooledOff(c, ctx, carrier.id, 'protected');
   }
@@ -367,30 +432,44 @@ function trapped(c: Battle, ctx: ContestCtx): ContestResult {
   return { winnerId: null, puck: 'unchanged', outcome: 'trapped' };
 }
 
-/** The battle is decided: the event, cooldowns, and the puck to the winner (or his support) or squirting loose. */
+const passScratch: GameEvent[] = [];
+
+/**
+ * The battle is decided: the event, cooldowns, and the puck: on the winner's stick (a clean win), passed to his supporter
+ * (a clean win by support), or squirting loose. The result's `winnerId` is the man who won it.
+ */
 function finish(c: Battle, ctx: ContestCtx): ContestResult {
   const state = ctx.state;
   const d = c.data, r = c.roles;
   const w = ix(c, r.winner), l = other(w);
   const winner = skaterById(state, idOf(c, w)), loserId = idOf(c, l);
-  const support = w === 0 ? r.supportA : r.supportB;
-  const outnumbered = (l === 0 ? r.supportA : r.supportB) === null;
-  const how = support !== null && outnumbered ? 'support' : r.pinned === null ? 'scramble' : r.pinned === loserId ? 'pinned' : 'stick';
-  // No hand-over through a net (Task 8b close-out: a man in the crease won a battle for a puck pinned against the back of
-  // the net and had it 2.4 m from his blade, the frame between them): then it squirts loose instead.
-  const taker = support !== null ? support : winner.id;
-  const clean = d.clean && !crossesNet(skaterById(state, taker).pos, state.puck.pos);
-  ctx.emit(contestEvent(state, { type: 'battle', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot, detail: { how, contestId: c.id } }));
+  const support = w === 0 ? r.supportA : r.supportB, loserSupport = l === 0 ? r.supportA : r.supportB;
+  const how = howOf(c);
+  // A clean win by support goes to the supporter by a pass; any other clean win stays with the winner. No hand-over
+  // through a net (Task 8b close-out: the frame between the puck and the blade): then it squirts loose instead.
+  const p = state.puck.pos;
+  const sup = how === 'support' && support !== null ? skaterById(state, support) : null;
+  const toSupport = d.clean && sup !== null && sup.onIce && !sup.leaving && sup.downT === 0
+    && !crossesNet(p, bladePos(sup.pos, sup.facing, ctx.defs.get(sup.id)!.shoots, bladeScratch));
+  const toWinner = d.clean && !toSupport && !crossesNet(p, bladePos(winner.pos, winner.facing, ctx.defs.get(winner.id)!.shoots, bladeScratch));
+  const clean = toSupport || toWinner;
+  ctx.emit(contestEvent(state, {
+    type: 'battle', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot,
+    detail: { how, contestId: c.id, winnerSupportId: support, loserSupportId: loserSupport },
+  }));
   // Won off the man who was carrying it: a turnover, clean (`battle`) or squirting loose (`battleLoose`).
   const stripped = r.stripped === loserId;
   if (stripped) ctx.emit(contestEvent(state, { type: 'turnover', side: winner.side, playerId: winner.id, otherId: loserId, pos: c.spot, detail: { how: clean ? 'battle' : 'battleLoose' } }));
   for (const id of c.participants) setCooldown(state, id, KIND, T.cooldownSeconds);
   setCooldown(state, loserId, 'pokeCheck', T.loserPokeCooldown);
-  if (clean) {
-    const to = taker;
-    if (stripped) watchTurnover(state, winner.side, winner.id, loserId, 'battle', { held: d.held });
-    return { winnerId: to, puck: 'toWinner', outcome: how };
+  if (clean && stripped) watchTurnover(state, winner.side, winner.id, loserId, 'battle', { held: d.held });
+  if (toSupport) {
+    passScratch.length = 0;
+    passFromFeet(state, winner.id, sup!.id, ctx.rng.range(T.passSpeed[0], T.passSpeed[1]), ctx.defs, ctx.rng, passScratch);
+    for (const e of passScratch) ctx.emit(e);
+    return { winnerId: winner.id, puck: 'loose', outcome: how, puckTo: sup!.id };
   }
+  if (toWinner) return { winnerId: winner.id, puck: 'toWinner', outcome: how };
   // He gets a piece of it, but it squirts along the boards.
   state.lastTouch = { id: winner.id, side: winner.side };
   state.possession = winner.side;
@@ -401,7 +480,7 @@ function finish(c: Battle, ctx: ContestCtx): ContestResult {
   state.puck.vel.x = -n.y * dirAlong * v - n.x * 0.5;
   state.puck.vel.y = n.x * dirAlong * v - n.y * 0.5;
   blockPickup(state, c.participants.slice());
-  return { winnerId: winner.id, puck: 'unchanged', outcome: how };
+  return { winnerId: winner.id, puck: 'unchanged', outcome: how, puckTo: null };
 }
 
 const scratchN: Vec2 = { x: 0, y: 0 };
@@ -413,7 +492,8 @@ function setFace(s: SkaterState, x: number, y: number): void {
 /**
  * Everyone in it, every tick: to the puck while arriving; shoving at it (the man ahead leaning into the other) in the
  * pin; once one is pinned, he is held on the boards with the pinner on his back, both at the puck; supporting players
- * wait on the ice side.
+ * wait on their own side of it (supportSpot). While it resolves a clean win: the winner comes T.comeAway off the boards
+ * with it, facing the ice (won by support: he stays on it, facing his supporter); the loser stays where he is.
  */
 function steer(c: Battle, ctx: ContestCtx): void {
   const state = ctx.state;
@@ -421,16 +501,36 @@ function steer(c: Battle, ctx: ContestCtx): void {
   const n = boardsNormal(c.spot, scratchN);
   const toBoards = distToBoards(c.spot);
   const bx = c.spot.x + n.x * toBoards, by = c.spot.y + n.y * toBoards;
+  const resolving = c.stage === 'resolve' && c.data.clean && d.winner !== null;
+  const passOn = resolving && howOf(c) === 'support';
   for (let i = 0; i < c.participants.length; i++) {
     const s = skaterById(state, c.participants[i]!);
     if (s.id === d.supportA || s.id === d.supportB) {
-      s.target.x = c.spot.x - n.x * SUPPORT_OFF_BOARDS;
-      s.target.y = c.spot.y - n.y * SUPPORT_OFF_BOARDS;
+      supportSpot(c.spot, -state.attackDir[s.side] * RINK.goalLineX, T.supportOff, T.supportBoards, s.target);
       setFace(s, c.spot.x, c.spot.y);
       s.speedCap = 1;
       continue;
     }
     const r = movementOf(ctx.defs.get(s.id)!, 1).radius;
+    if (resolving) {
+      if (s.id === d.winner && !passOn) {
+        s.target.x = c.spot.x - n.x * T.comeAway;
+        s.target.y = c.spot.y - n.y * T.comeAway;
+        setFace(s, c.spot.x - n.x * 6, c.spot.y - n.y * 6);
+        s.speedCap = 1;
+      } else if (s.id === d.winner) {
+        const sup = skaterById(state, (i === 0 ? d.supportA : d.supportB)!);
+        s.target.x = s.pos.x;
+        s.target.y = s.pos.y;
+        setFace(s, sup.pos.x, sup.pos.y);
+        s.speedCap = DIG_SPEED_CAP;
+      } else {
+        s.target.x = s.pos.x;
+        s.target.y = s.pos.y;
+        s.speedCap = DIG_SPEED_CAP;
+      }
+      continue;
+    }
     if (c.stage === 'protect') {
       if (s.id === d.carrier) continue; // he keeps skating his own way, the puck on his stick
       const o = skaterById(state, idOf(c, other(i)));

@@ -268,3 +268,16 @@ describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
     expect(c.attemptsOddManFar + c.attemptsOddManClose + c.attemptsLowClose + c.attemptsLowFar + c.attemptsNormalFar + c.attemptsNormalClose + c.attemptsBreakaway + c.attemptsOther).toBe(c.attempts);
   }, 240_000);
 });
+
+describe('A5: battles the winner wins (Task 9)', () => {
+  it('A5: the battle winner comes away with it in over 60% of decided battles (was 23%)', () => { expect(m().battleWinnerCameAwayShare).toBeGreaterThan(0.60); }, 60_000);
+  it('A5: when a battle gives the puck to someone, it is the winner in over 85% (was 4%)', () => { expect(m().battleToWinnerIsWinnerShare).toBeGreaterThan(0.85); }, 60_000);
+  it('A5: fewer battles end with nobody winning: under 14 a game (was 36)', () => { expect(m().battlesNoWinnerPerGame).toBeLessThan(14); }, 60_000);
+  it('A5: 30% to 70% of landed hits put the man down (was 100%)', () => { expect(m().knockdownShare).toBeGreaterThan(0.30); expect(m().knockdownShare).toBeLessThan(0.70); }, 60_000);
+  // Review Focus 4 for the whole game, on seeds 1-16 (controller): measures.ts puckJumpTicks counts live ticks on which the
+  // puck moves further than its speed allows (0.05 m of slack; a carried puck may swing with the blade, 0.2 m a tick
+  // beyond his travel), or goes to a new carrier's blade from more than 1.2 m.
+  it('no teleport: on a live tick the puck never moves further than its speed allows, 1.2 m when it changes hands (seeds 1-16)', () => {
+    expect(countGames(Array.from({ length: 16 }, (_, i) => i + 1)).puckJumpTicks).toBe(0); expect(m16().maxPuckJump).toBeLessThanOrEqual(1.2);
+  }, 240_000);
+});

@@ -8,7 +8,7 @@ import type {
   SkaterState,
 } from '../types';
 import type { Vec2 } from '../vec';
-import { boardBattleContest } from './board-battle';
+import { boardBattleContest, dropGoneSupport } from './board-battle';
 import { hitContest } from './hit';
 import { looseRaceContest } from './loose-race';
 import { netFrontContest } from './net-front';
@@ -37,9 +37,25 @@ export type ContestCtx = {
 /**
  * What a finished contest does to the puck: `toWinner` gives it to `winnerId`; `loose` knocks it off the carrier
  * (who must be a participant) with `looseVel`; `unchanged` leaves it be. `outcome` says how it ended (the
- * `contestEnd` event).
+ * `contestEnd` event). `puckTo` (Task 9): who has or is being passed the puck as a result, when the kind says so (a
+ * board battle won by support passes it to the supporter); else contestTick works it out (puckToOf). For a board battle
+ * `winnerId` is always the man who won it.
  */
-export type ContestResult = { winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged'; looseVel?: Vec2; outcome: ContestOutcome };
+export type ContestResult = { winnerId: string | null; puck: 'toWinner' | 'loose' | 'unchanged'; looseVel?: Vec2; outcome: ContestOutcome; puckTo?: string | null };
+
+/**
+ * Who has the puck as a result of `r` (after applyResult): `r.puckTo` when given; for `toWinner` the winner; for
+ * `unchanged` the carrier when he took part in it (he kept it); else nobody.
+ */
+function puckToOf(state: GameState, c: ContestState, r: ContestResult): string | null {
+  if (r.puckTo !== undefined) return r.puckTo;
+  if (r.puck === 'toWinner') return r.winnerId;
+  if (r.puck === 'unchanged' && state.carrierId !== null) {
+    if (c.participants.includes(state.carrierId)) return state.carrierId;
+    for (const v of Object.values(c.roles)) if (v === state.carrierId) return state.carrierId;
+  }
+  return null;
+}
 
 /**
  * One kind of staged contest. Its state's `freeIds` name the participants who keep their normal steering; the
@@ -226,6 +242,8 @@ export function contestTick(
   for (let i = 0; i < state.contests.length;) {
     const c = state.contests[i]!;
     let r: ContestResult | null;
+    // A board battle's supporter who leaves drops out; the battle goes on (Task 9: it was abandoned).
+    if (c.kind === 'boardBattle' && (c.roles.supportA !== null || c.roles.supportB !== null)) dropGoneSupport(state, c);
     if (anyGone(state, c)) r = { winnerId: null, puck: 'unchanged', outcome: 'abandoned' };
     else {
       c.stageT += dt;
@@ -233,7 +251,7 @@ export function contestTick(
     }
     if (r === null) { i++; continue; }
     applyResult(ctx, c, r);
-    ctx.emit(contestEndEvent(state, c, r.outcome, r.winnerId, r.puck));
+    ctx.emit(contestEndEvent(state, c, r.outcome, r.winnerId, r.puck, puckToOf(state, c, r)));
     for (const id of c.participants) { const s = skaterById(state, id); if (s.contestId === c.id) s.contestId = null; }
     state.contests.splice(i, 1);
   }
@@ -305,11 +323,11 @@ export type ContestRef = Pick<ContestState, 'id' | 'kind' | 'spot'>;
 
 /** The `contestEnd` event of `c` (pos: its spot). */
 export function contestEndEvent(
-  state: GameState, c: ContestRef, result: ContestOutcome, winnerId: string | null, puck: ContestResult['puck'],
+  state: GameState, c: ContestRef, result: ContestOutcome, winnerId: string | null, puck: ContestResult['puck'], puckTo: string | null = null,
 ): GameEventOf<'contestEnd'> {
   return gameEvent(state, {
     type: 'contestEnd', side: null, playerId: winnerId, otherId: null, pos: c.spot,
-    detail: { contestId: c.id, kind: c.kind, result, winnerId, puck },
+    detail: { contestId: c.id, kind: c.kind, result, winnerId, puck, puckTo },
   });
 }
 

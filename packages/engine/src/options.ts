@@ -304,13 +304,18 @@ const tw: Vec2 = { x: 0, y: 0 };
 /**
  * Every option he has, each with value = chance it works * (threat it leads to - threat here) - (1 - that chance) *
  * what losing it here costs. Refills and returns `out`, and writes his situation into `situation`. (Tactics, Task 11,
- * will come in as a parameter when they shade an option.)
+ * will come in as a parameter when they shade an option.) A carrier shielding the puck in a board battle (`roles.carrier`
+ * of one in `protect`) has only `protect` (Task 9).
  */
 export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, PlayerDef>, out: Option[], situation: Situation = ownSituation): Option[] {
   out.length = 0;
   const s = findSkater(state, me.id);
   if (s === null) { out.push({ kind: 'protect', value: 0 }); return out; }
   const sit = readInto(state, s, situation);
+  // Shielding it along the boards (Task 9): for that half second he holds it; the battle decides what happens to it.
+  if (s.contestId !== null) {
+    for (const c of state.contests) if (c.id === s.contestId && c.kind === 'boardBattle' && c.stage === 'protect' && c.roles.carrier === s.id) { out.push({ kind: 'protect', value: 0 }); return out; }
+  }
   const a = me.attrs, tend = me.tendencies;
   const side = s.side, dir = state.attackDir[side];
   const p = state.puck.pos;

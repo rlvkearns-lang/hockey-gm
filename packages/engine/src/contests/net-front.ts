@@ -5,7 +5,9 @@ import { planOf } from '../commit';
 import { netFrontSpot } from '../job-targets';
 import { TUNING } from '../tuning';
 import type { ContestStateOf, GameState, SkaterState } from '../types';
-import { dist, hypot2, type Vec2 } from '../vec';
+import { dist, hypot2, segDistXY, type Vec2 } from '../vec';
+import { datan2, dcos, dsin } from '../dmath';
+import { wrapAngle } from '../skating';
 import {
   carrierNow, carrierOf, contestEvent, contestRating, enterStage, isFree, onCooldown, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx,
@@ -26,6 +28,11 @@ const LEAVE_RANGE = 2.5;
 const DEFENDER_SPEED_CAP = 0.7;
 const PUSHED_SPEED_CAP = 0.5;
 const FORWARDS = ['LW', 'C', 'RW'];
+/** A round is drawn only with the defender within BETWEEN (m) of the segment from the attacker to the net centre (Task 9). */
+const BETWEEN = 0.8;
+/** Further round the attacker than ORBIT (rad) from that line, the defender works round him a step at a time, ORBIT_OUT (m) wider. */
+const ORBIT = Math.PI / 3;
+const ORBIT_OUT = 0.25;
 
 const spotScratch: Vec2 = { x: 0, y: 0 };
 
@@ -93,11 +100,12 @@ export const netFrontContest: Contest<'netFront'> = {
       if (c.leader !== null) {
         // Whoever won the last round won the battle for the net front.
         const w = c.leader === att.id ? att : def, l = w === att ? def : att;
-        ctx.emit(contestEvent(state, { type: 'battle', side: w.side, playerId: w.id, otherId: l.id, pos: c.spot, detail: { how: 'netFront', contestId: c.id } }));
+        ctx.emit(contestEvent(state, { type: 'battle', side: w.side, playerId: w.id, otherId: l.id, pos: c.spot, detail: { how: 'netFront', contestId: c.id, winnerSupportId: null, loserSupportId: null } }));
       }
       return { winnerId: c.leader, puck: 'unchanged', outcome: c.leader === null ? 'noRound' : c.leader === att.id ? 'attacker' : 'defender' };
     }
-    if (c.stageT >= ROUND_SECONDS - STAGE_EPS) round(c, ctx, att, def);
+    // A round is drawn once he is between his man and the net (until then it waits).
+    if (c.stageT >= ROUND_SECONDS - STAGE_EPS && between(state, att, def)) round(c, ctx, att, def);
     c.spot.x = att.pos.x;
     c.spot.y = att.pos.y;
     steer(c, ctx);
@@ -133,16 +141,28 @@ function round(c: ContestStateOf<'netFront'>, ctx: ContestCtx, att: SkaterState,
   enterStage(c, 'tied');
 }
 
-/** The defender stays goal-side of the attacker, leaning on him; a tied-up attacker is moved out. */
+/** The defender is within BETWEEN of the segment from the attacker to the centre of the net. */
+function between(state: GameState, att: SkaterState, def: SkaterState): boolean {
+  const net = netOf(state, att);
+  return segDistXY(def.pos.x, def.pos.y, att.pos.x, att.pos.y, net.x, net.y) <= BETWEEN;
+}
+
+/**
+ * The defender plays between the attacker and the net, leaning on him: his target is on the segment from the attacker to
+ * the net centre, the sum of their radii from the attacker (Task 9: from beside or in front of him, he works round him
+ * first, at most ORBIT a step); he faces the attacker. A tied-up attacker is moved out.
+ */
 function steer(c: ContestStateOf<'netFront'>, ctx: ContestCtx): void {
   const state = ctx.state;
   const att = skaterById(state, c.roles.attacker), def = skaterById(state, c.roles.defender);
   const net = netOf(state, att);
-  const dx = net.x - att.pos.x, dy = net.y - att.pos.y;
-  const d = hypot2(dx, dy) || 1;
   const gap = movementOf(ctx.defs.get(att.id)!, 1).radius + movementOf(ctx.defs.get(def.id)!, 1).radius;
-  def.target.x = att.pos.x + (dx / d) * gap;
-  def.target.y = att.pos.y + (dy / d) * gap;
+  const toNet = datan2(net.y - att.pos.y, net.x - att.pos.x), now = datan2(def.pos.y - att.pos.y, def.pos.x - att.pos.x);
+  const off = wrapAngle(toNet - now);
+  const a = Math.abs(off) <= ORBIT ? toNet : now + Math.sign(off) * ORBIT;
+  const r = Math.abs(off) <= ORBIT ? gap : gap + ORBIT_OUT;
+  def.target.x = att.pos.x + dcos(a) * r;
+  def.target.y = att.pos.y + dsin(a) * r;
   if (def.faceTarget) { def.faceTarget.x = att.pos.x; def.faceTarget.y = att.pos.y; } else def.faceTarget = { x: att.pos.x, y: att.pos.y };
   def.speedCap = DEFENDER_SPEED_CAP;
   if (c.stage === 'tied') {

@@ -8,6 +8,7 @@ import { BRAIN_INTERVAL_TICKS, DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PER
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
 import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
+import { staggerCap as staggerCap_ } from './contests/hit';
 import { goaliePlaysPass as goaliePlaysPass_, goalieTick as goalieTick_, scoreFacedShot as scoreFacedShot_, whistleFacedShot as whistleFacedShot_ } from './goalie';
 import { moveLoosePuck as moveLoosePuck_, trackShot as trackShot_ } from './shots';
 import type { PuckEvent } from './puck';
@@ -60,6 +61,7 @@ const setupFaceoff = setupFaceoff_;
 const snapToLineup = snapToLineup_;
 const goalieTick = goalieTick_;
 const goaliePlaysPass = goaliePlaysPass_;
+const staggerCap = staggerCap_;
 const scoreFacedShot = scoreFacedShot_;
 const whistleFacedShot = whistleFacedShot_;
 const trackShot = trackShot_;
@@ -175,7 +177,7 @@ function initialState(setup: GameSetup): GameState {
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
     lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
-    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
+    lastRelease: null, contestCooldowns: [], tiedUpUntil: [], staggered: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
     bench: initialBench(setup),
     plans: initialPlans(skaters.length),
     carrierPlan: null,
@@ -328,6 +330,9 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
           routeAroundGoalies(s.pos, t, onIceMoves[i]!.radius, goaliePair, waypoint);
         }
       }
+      // Staggered by a hit (Task 9): he skates at most staggerCap of his top speed for a moment, whatever drives him.
+      const cap = s.speedCap, stag = state.staggered.length > 0 ? staggerCap(state, s.id) : 1;
+      if (stag < cap) s.speedCap = stag;
       if (!nearNet || (waypoint.x === t.x && waypoint.y === t.y)) stepSkater(s, onIceMoves[i]!, DT, driveOf(state, s, onIceIdx[i]!));
       else {
         const tx = t.x, ty = t.y;
@@ -335,6 +340,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         stepSkater(s, onIceMoves[i]!, DT, routeDrive(driveOf(state, s, onIceIdx[i]!)));
         t.x = tx; t.y = ty;
       }
+      s.speedCap = cap;
     }
     resolveBodies(skaters, move, onIceMoves);
     for (let i = 0; i < skaters.length; i++) {
@@ -519,6 +525,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
     const prevPuckX = state.puck.pos.x;
     if (state.pickupBlock !== null && state.tick >= state.pickupBlock.untilTick) state.pickupBlock = null;
     if (state.pendingPass !== null && state.tick >= state.pendingPass.untilTick) state.pendingPass = null;
+    if (state.staggered.length > 0) state.staggered = state.staggered.filter((x) => state.tick < x.untilTick);
     benchTick(state, setup, DT, events);
     assignJobs(state, defs, tactics);
     brainTick(state, defs, rng, events, lookTicks);
@@ -588,6 +595,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
       state.shotInFlight = null;
       state.lastRelease = null;
       state.tiedUpUntil = [];
+      state.staggered = [];
       state.reboundEdge = null;
       state.turnoverWatch = null;
       state.lastSave = null;

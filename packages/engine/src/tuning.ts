@@ -556,7 +556,7 @@ export const TUNING = deepFreeze({
 
   /** Poke checks (contests/poke-check.ts). */
   poke: {
-    /** A defender this close (m) to the puck (on the carrier's blade), in front of the carrier or beside him, pokes at it... */
+    /** A defender this close (m) to the puck (on the carrier's blade) and at least minReach from it, in front of the carrier or beside him, pokes at it... */
     triggerRange: 1.6,
     /** ...where "beside" reaches this far behind square: the cosine of the angle off the carrier's facing is at least this... */
     frontCos: -0.2,
@@ -565,8 +565,14 @@ export const TUNING = deepFreeze({
     /** Attempt chance: attemptBase + attemptPerPoint * (stickChecking - 50), within [0.03, 0.97]. */
     attemptBase: 0.12,
     attemptPerPoint: 0.004,
-    /** Beyond this distance (m) from the puck at the end of the reach the stick cannot get there: the contest ends with no result. */
-    stickReach: 2.2,
+    /**
+     * Task 9: the checker reaches from a stick length: while the stick goes out he makes for the point standOff (m) from the
+     * puck on his side of it, facing it; at the end of the reach he pokes only from minReach to stickReach (m) from the puck
+     * (closer, he is on top of it; further, the stick cannot get there): else the contest ends with no result.
+     */
+    standOff: 1.5,
+    minReach: 0.9,
+    stickReach: 1.9,
     /** The carrier is favoured by this many rating points. */
     carrierEdge: 12,
     /** A won poke check gives the checker the puck this often; otherwise it is knocked loose. */
@@ -597,6 +603,19 @@ export const TUNING = deepFreeze({
     bounceChance: 0.1,
     hitter: { bodyChecking: 0.5, strength: 0.3, balance: 0.2 } as SkaterWeights,
     brace: { balance: 0.45, strength: 0.35, poise: 0.2 } as SkaterWeights,
+    /**
+     * How hard a landed hit is (Task 9, contests/hit.ts hitDegreeChances): x = (closing - closingFrom) * perClosing +
+     * (hitter mass - target mass) / kgPerPoint - (target balance - balanceFrom) / balancePer - (he saw it ? sawIt : 0) +
+     * margin; knockdown with chance logistic(x + knockdown), else stagger with chance logistic(x + stagger), else a bump.
+     * He saw it when the hitter is within sawAngle (rad) of his facing. A stagger cuts his speed to staggerKeep, caps it
+     * at staggerCap of top speed for staggerSeconds, and a carrier loses the puck with chance staggerLoose; a bump
+     * nudges him with bumpPush of the push, and a carrier loses it with chance bumpLoose.
+     */
+    degree: {
+      closingFrom: 6, perClosing: 0.25, kgPerPoint: 8, balanceFrom: 70, balancePer: 20, sawIt: 0.8, sawAngle: (100 * Math.PI) / 180,
+      knockdown: -0.2, stagger: 1.2,
+      staggerKeep: 0.6, staggerCap: 0.4, staggerSeconds: 0.5, staggerLoose: 0.5, bumpPush: 0.3, bumpLoose: 0.15,
+    },
   },
 
   /** Board battles (contests/board-battle.ts). */
@@ -614,8 +633,17 @@ export const TUNING = deepFreeze({
     massPerPoint: 4,
     /** A free teammate this close (m) to the spot joins as his side's support. */
     supportRange: 2.5,
+    /**
+     * Task 9: a supporting player stands supportOff (m) from the spot toward his own net, at least supportBoards (m) off the
+     * boards (rink.ts supportSpot); the winner of a clean win is steered comeAway (m) further off the boards with it while
+     * the battle resolves; a win by support is passed to the supporter at passSpeed (m/s).
+     */
+    supportOff: 2,
+    supportBoards: 1.2,
+    comeAway: 1.2,
+    passSpeed: [6, 8] as [number, number],
     /** The winner comes away with it clean this often; otherwise it squirts along the boards at squirtSpeed m/s. */
-    cleanShare: 0.6,
+    cleanShare: 0.75,
     squirtSpeed: [2, 4] as [number, number],
     /** Afterwards nobody in it starts another board battle for this long (s), and the loser does not poke at once. */
     cooldownSeconds: 2.5,

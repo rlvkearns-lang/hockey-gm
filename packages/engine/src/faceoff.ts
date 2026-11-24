@@ -65,6 +65,7 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.icingWatch = null;
   state.lastRelease = null;
   state.tiedUpUntil = [];
+  state.staggered = [];
   state.reboundEdge = null;
   state.lastSave = null;
   clearContests(state);

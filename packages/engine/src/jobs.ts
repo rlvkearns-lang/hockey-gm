@@ -5,7 +5,7 @@
  */
 import { committedPhase as committedPhase_, indexOf as indexOf_, inHold as inHold_, triggerFor as triggerFor_ } from './commit';
 import { jobAnchor as jobAnchor_ } from './job-targets';
-import { boardsNormal as boardsNormal_, RINK as RINK_ } from './rink';
+import { RINK as RINK_, supportSpot as supportSpot_ } from './rink';
 import { TUNING } from './tuning';
 import type { ContestStateOf, GameState, Job, PlayerDef, Side, SkaterState, Tactics } from './types';
 import { carrierOf as carrierOf_ } from './util';
@@ -13,7 +13,7 @@ import type { Vec2 } from './vec';
 // Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
 const carrierOf = carrierOf_;
 // Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
-const boardsNormal = boardsNormal_;
+const supportSpot = supportSpot_;
 const RINK = RINK_;
 // Local bindings of hot imports: a call through an imported binding costs more under the test runner's module wrapper.
 const jobAnchor = jobAnchor_;
@@ -50,8 +50,6 @@ const DEFENCE: ReadonlySet<Job> = new Set(DEFENCE_JOBS);
 const PUCK_JOBS: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'battleSupport']);
 /** A defenceman joins the rush (`dJoin`) only with this joinRush tendency or more. */
 const JOIN_RUSH_MIN = 0.6;
-/** A supporting player waits this far (m) off the boards, on the ice side of a board battle. */
-const SUPPORT_OFF_BOARDS = 2;
 
 const isDefenceman = (s: SkaterState): boolean => s.slot === 'LD' || s.slot === 'RD';
 
@@ -76,11 +74,12 @@ export function boardBattle(state: GameState): ContestStateOf<'boardBattle'> | n
   return null;
 }
 
-const normalScratch: Vec2 = { x: 0, y: 0 };
 
 /**
- * Where `side`'s nearest free skater should go to support the board battle running now: SUPPORT_OFF_BOARDS m off the
- * boards on the ice side of it, from where he joins it. Null when no battle runs, `side` has nobody in it, or it
+ * Where `side`'s nearest free skater should go to support the board battle running now: on his own side of it,
+ * TUNING.boardBattle.supportOff m from its spot toward the net his side defends and at least supportBoards m off the
+ * boards (rink.ts supportSpot, Task 9: both sides' supporters stood on one spot straight out from the scrum), from where
+ * he joins it. Null when no battle runs, `side` has nobody in it, or it
  * already has its supporting player.
  */
 export function supportTarget(state: GameState, side: Side): Vec2 | null {
@@ -92,8 +91,8 @@ export function supportTarget(state: GameState, side: Side): Vec2 | null {
     for (const s of state.skaters) if (s.id === id && s.side === side) slot = i;
   }
   if (slot < 0 || (slot === 0 ? c.roles.supportA : c.roles.supportB) !== null) return null;
-  const n = boardsNormal(c.spot, normalScratch);
-  return { x: c.spot.x - n.x * SUPPORT_OFF_BOARDS, y: c.spot.y - n.y * SUPPORT_OFF_BOARDS };
+  const BB = TUNING.boardBattle;
+  return supportSpot(c.spot, -state.attackDir[side] * RINK.goalLineX, BB.supportOff, BB.supportBoards, { x: 0, y: 0 });
 }
 
 /** The phase's job list, most important first (before the carrier's own job is taken out). */
