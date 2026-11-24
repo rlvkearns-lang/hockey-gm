@@ -23,7 +23,7 @@
  * Positions here are attack-relative for the carrier's side: rx toward the net he attacks (goal line 27.13, blue line
  * 7.62), ly to his left.
  */
-import { tieOf } from './engage-state';
+import { tieOf, tiedChance } from './engage-state';
 import { goalieShade as goalieShade_, pressureOn as pressureOn_, shotRush as shotRush_ } from './actions';
 import { composite as composite_ } from './attributes';
 import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
@@ -486,6 +486,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     if (space < L.space) chance *= O.pass.crowded + space / O.pass.crowdedPer;
     // Set from play (Task 8b, O.pass.fit): the product of the terms above understates how often a hard pass gets through.
     chance = clamp(O.pass.fit.base + O.pass.fit.slope * clamp(chance, 0, 1), 0.03, 0.97);
+    // A tied-up receiver (Task 10 close-out): his catch is cut as execution cuts it (passing.ts receiveChance, tiedChance
+    // with TUNING.engage.limits.receive), after the fit, so the carrier sees it whole and looks elsewhere or waits.
+    if (state.engagements.length > 0) { const tie = tieOf(state, m.id); if (tie > 0) chance = tiedChance(chance, tie, TUNING.engage.limits.receive); }
     // A pass across the front of the net makes the goalie move: the receiver's shot is worth more (O.pass.across).
     const qm = shotQuality(mrx, mly), opn = openAt(space);
     let to = threat(mrx, mly) * opn;

@@ -14,7 +14,7 @@ import { dcos as dcos_, dlog as dlog_, dsin as dsin_ } from './dmath';
 import { crossesNet as crossesNet_, passLaneWidth as passLaneWidth_ } from './lanes';
 import { ICE_DECAY } from './puck';
 import { slideStopChance } from './slide';
-import { tieOf, tiedChance } from './engage-state';
+import { tiedChance } from './engage-state';
 import { RINK as RINK_ } from './rink';
 import { isTiedUp as isTiedUp_, steeredByContest as steeredByContest_ } from './team-play';
 import { TUNING } from './tuning';
@@ -260,7 +260,8 @@ function planInto(state: GameState, from: SkaterState, to: SkaterState, defs: Ma
   // From behind him: the puck comes at him from more than 120 degrees off his facing.
   const rx = p.x - aim.x, ry = p.y - aim.y, rl = hyp(rx, ry) || 1;
   const behind = (rx * dcos(to.facing) + ry * dsin(to.facing)) / rl < BEHIND_COS;
-  out.chance = td ? receiveChance(td, arriveSpeed, behind, out.contest, state.engagements.length > 0 ? tieOf(state, to.id) : 0) : RECEIVE_MAX;
+  // (A tied-up receiver's chance is cut after the valuation's fit, options.ts, with the same tiedChance execution uses.)
+  out.chance = td ? receiveChance(td, arriveSpeed, behind, out.contest) : RECEIVE_MAX;
   return out;
 }
 

@@ -84,8 +84,9 @@ describe('A2: every player has a job (Task 4)', () => {
     const share = m16().dangerShadowedShare;
     expect(share).toBeGreaterThan(0.60); expect(share).toBeLessThan(0.90);
   }, 240_000);
-  // Task 10 (engagements, box-outs) tightens this from 50% to over 85%.
-  it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 85% of the time he has one', () => { const c = counters(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.85); }, 60_000);
+  // Task 10 close-out ruling 3: over 70%, pooled over seeds 1-8 (the design wanted 85%; forcing body contact at the net
+  // front cut attempts to 41 and goals to 1.1 a team). Task 14 tunes the balance between box-outs and offence.
+  it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 70% of the time he has one (seeds 1-8)', () => { const c = counters8(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.70); }, 240_000);
   // Close-out: pooled over seeds 1-8 (it read 0.030 to 0.033 on three seeds); the bar is unchanged.
   it('A2: the side with the puck skates forward: under 3% of its time backward (seeds 1-8)', () => { expect(m8().backwardShareWithPuck).toBeLessThan(0.03); }, 240_000);
   // Task 4 review, Important 1 (0.564 before the fix, 0.657 after it). The coordinator asked for 0.75; with the carrier's
@@ -122,7 +123,10 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   // be 0.72 to 0.85 (it read 0.745 on seeds 1-8 and 1-16); pooled over seeds 1-16.
   // After Task 9 the band was lowered to 0.70 by ruling (pokes took the puck off fewer carriers). The Task 9 review fix (a
   // won poke takes the puck where it is won) brought it back to 0.723, so the bar is 0.72 again.
-  it('A3: passes are completed 72% to 85% of the time (was 86.5%), seeds 1-16 pooled', () => { expect(m16().passCompletion).toBeGreaterThan(0.72); expect(m16().passCompletion).toBeLessThan(0.85); }, 240_000);
+  // Task 10 close-out ruling 1: a tied-up receiver catches less (about 0.42 of his passes are completed), and the carrier's
+  // valuation now sees it as execution does; completion still reads 0.701 pooled over seeds 1-16, so the bar is the
+  // earlier ruled 0.70.
+  it('A3: passes are completed 70% to 85% of the time (was 86.5%), seeds 1-16 pooled', () => { expect(m16().passCompletion).toBeGreaterThan(0.70); expect(m16().passCompletion).toBeLessThan(0.85); }, 240_000);
   it('A3: 600 to 900 passes a game', () => { expect(counters().passes / 3).toBeGreaterThan(600); expect(counters().passes / 3).toBeLessThan(900); }, 60_000);
   // A pickup: a loose puck or a pass taken (tryPickup) or a pass picked off; the move beyond the puck's own travel that
   // tick. Contest hand-overs (races, battles) have their own measures.
@@ -182,9 +186,10 @@ describe('A4: attempts (Task 7)', () => {
   }, 60_000);
   it('A4: defencemen shoot: at least 6 attempts a team a game from the defence (was 2)', () => { expect(m().defenceAttemptsPerTeam).toBeGreaterThanOrEqual(6); }, 60_000);
   it('A4: attempts are 45 to 75 a team a game and shots on goal 22 to 40 (guard rail, not the target)', () => {
-    expect(m().attemptsPerTeam).toBeGreaterThan(45); expect(m().attemptsPerTeam).toBeLessThan(75);
+    // Task 10 close-out ruling 6: attempts are read pooled over seeds 1-8 (51.0 on seeds 1-3 against 45); bars unchanged.
+    expect(m8().attemptsPerTeam).toBeGreaterThan(45); expect(m8().attemptsPerTeam).toBeLessThan(75);
     const sog = sum(games().map((r) => r.team.home.shots + r.team.away.shots)) / 6; expect(sog).toBeGreaterThan(22); expect(sog).toBeLessThan(40);
-  }, 60_000);
+  }, 240_000);
   // Task 8: backhands were 31% of attempts after Task 7 (a shooter facing across the ice or away from the net shot off the
   // backhand); roughly a tenth is realistic.
   // Task 9: pooled over seeds 1-16 (one game reads 1.9% to 11.6% by itself; seeds 1-3 read 4.5% after Task 9, 6.4% on
@@ -272,9 +277,11 @@ describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
   // Close-out ruling 1: under 35% for now, pooled over seeds 1-8. 47% of the decisions made in the zone are made with a
   // checker within 1.8 m, and a poor option still takes 3 to 7% of a draw, so the share of attempts follows the share of
   // decisions. Task 10 (engagements: a tied-up man cannot get a shot off) must bring it under 20%.
-  it('A4: a pressured shot is a poor shot: under 20% of attempts are let go with a checker in stick reach (was 49%; 35% until Task 10)', () => {
+  // Task 10 close-out ruling 4: the 20% target is dropped. Two thirds of these shots have the checker 1.0 to 1.8 m away
+  // with no body contact (no engagement): the rushed-shot rule (Task 8b) covers that case. It reads 0.31 after Task 10.
+  it('A4: a pressured shot is a poor shot: under 35% of attempts are let go with a checker in stick reach (was 49%)', () => {
     // Task 9 close-out ruling 5: pooled over seeds 1-16 (0.349 on seeds 1-8 and 0.302 on 9-16 after Task 9).
-    const c = counters16(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.20);
+    const c = counters16(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.35);
   }, 240_000);
   // Close-out ruling 2: the far shots of normal play that count are the UNSCREENED ones (no teammate at the net or in the
   // goalie's sight line: measures.ts attemptsNormalFarBare); the screened ones are what "long shots wait for traffic"
@@ -288,11 +295,14 @@ describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
 });
 
 describe('A5: battling for position (Task 10)', () => {
-  it('A5: battling is constant: some pair is engaged in over 30% of live time', () => { expect(counters().engagedTicks / counters().liveTicks).toBeGreaterThan(0.30); }, 60_000);
+  // Close-out ruling 6: the engaged share and the count are read pooled over seeds 1-8 (thin on three seeds); bars unchanged.
+  it('A5: battling is constant: some pair is engaged in over 30% of live time (seeds 1-8)', () => { expect(counters8().engagedTicks / counters8().liveTicks).toBeGreaterThan(0.30); }, 240_000);
+  // Close-out ruling 5: contacts where one man is already engaged with someone else or in a staged contest are left out
+  // (measures.ts): he cannot take this engagement.
   it('A5: opponents in contact for over 0.3 s are engaged, not separated, in over 80% of cases', () => {
     const c = counters(); expect(c.contactOver03Free).toBeGreaterThan(500); expect(c.contactOver03Engaged / c.contactOver03Free).toBeGreaterThan(0.80);
   }, 60_000);
-  it('A5: 250 to 1,500 engagements a game', () => { const n = sum(games().map((r) => r.events.filter((e) => e.type === 'engagement').length)) / 3; expect(n).toBeGreaterThan(250); expect(n).toBeLessThan(1500); }, 60_000);
+  it('A5: 250 to 1,500 engagements a game (seeds 1-8)', () => { const n = counters8().engagements / SEEDS8.length; expect(n).toBeGreaterThan(250); expect(n).toBeLessThan(1500); }, 240_000);
 });
 
 describe('A5: battles the winner wins (Task 9)', () => {

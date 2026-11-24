@@ -383,9 +383,13 @@ export function createObserver(setup: GameSetup): Observer {
         if (speed < STATIONARY_SPEED) c.stationaryTicks++;
         if (speed >= TOP_SPEED_SHARE * (topSpeed.get(s.id) ?? Infinity)) {
           c.topSpeedTicks++;
-          c.sprintRunTicks++;
-          if (lastTop.get(s.id) !== tick - 1) c.sprintRuns++;
-          lastTop.set(s.id, tick);
+          // Task 10 close-out ruling 2: a sprint run counts only free skating: not while he is in an engagement or a
+          // contest (a tick there ends the run).
+          if (s.contestId === null && !st.engagements.some((e) => e.a === s.id || e.b === s.id)) {
+            c.sprintRunTicks++;
+            if (lastTop.get(s.id) !== tick - 1) c.sprintRuns++;
+            lastTop.set(s.id, tick);
+          }
         }
         if (before !== null) {
           if (speed >= GLIDE_MIN_SPEED && Math.abs(speed - before.speed) < GLIDE_MAX_ACCEL * DT) c.glideTicks++;
@@ -527,8 +531,11 @@ export function createObserver(setup: GameSetup): Observer {
         // tick, the two are engaged with each other.
         const freeRun = !steered(st, a) && !steered(st, b) ? (freeContacts.get(key) ?? 0) + 1 : 0;
         if (freeRun === CONTACT_TICKS) {
-          c.contactOver03Free++;
-          if (st.engagements.some((e) => (e.a === a.id && e.b === b.id) || (e.a === b.id && e.b === a.id))) c.contactOver03Engaged++;
+          // Task 10 close-out ruling 5: a man already engaged with someone else, or in a staged contest, cannot take this
+          // engagement: such a contact is left out.
+          const withEach = st.engagements.some((e) => (e.a === a.id && e.b === b.id) || (e.a === b.id && e.b === a.id));
+          const taken = !withEach && (a.contestId !== null || b.contestId !== null || st.engagements.some((e) => e.a === a.id || e.b === a.id || e.a === b.id || e.b === b.id));
+          if (!taken) { c.contactOver03Free++; if (withEach) c.contactOver03Engaged++; }
         }
         if (freeRun > 0) nextFree.set(key, freeRun);
       }
