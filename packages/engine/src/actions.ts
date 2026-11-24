@@ -184,11 +184,17 @@ const RIM = TUNING.rim;
 const aimScratch: Vec2 = { x: 0, y: 0 };
 const normScratch: Vec2 = { x: 0, y: 0 };
 
-/** The point of the boards nearest the spot `ahead` m from `from` toward `to` (written into `out`). */
+/**
+ * Where a rim is aimed (written into `out`): `ahead` m along the boards nearest `from` (the way round toward `to`),
+ * out onto the boards, so the puck meets them at a shallow angle and rides round them.
+ */
 function boardsAhead(from: Vec2, to: Vec2, ahead: number, out: Vec2): Vec2 {
-  const dx = to.x - from.x, dy = to.y - from.y, l = hypot2(dx, dy) || 1;
-  out.x = from.x + (dx / l) * ahead;
-  out.y = from.y + (dy / l) * ahead;
+  const n0 = boardsNormal(from, normScratch);
+  // The tangent of the boards there that points round toward the target.
+  let tx = -n0.y, ty = n0.x;
+  if (tx * (to.x - from.x) + ty * (to.y - from.y) < 0) { tx = -tx; ty = -ty; }
+  out.x = from.x + tx * ahead;
+  out.y = from.y + ty * ahead;
   const n = boardsNormal(out, normScratch), d = distToBoards(out);
   out.x += n.x * d;
   out.y += n.y * d;
@@ -196,8 +202,8 @@ function boardsAhead(from: Vec2, to: Vec2, ahead: number, out: Vec2): Vec2 {
 }
 
 /**
- * Rim it: hard along the boards (TUNING.rim.speed, 16 to 20 m/s by passing), aimed at the boards RIM.ahead m ahead
- * toward the man named (`toId`, who then has it as a pass on its way to him) or, with nobody named, the far low
+ * Rim it: hard along the boards (TUNING.rim.speed, 16 to 20 m/s by passing), aimed at the boards RIM.ahead m along
+ * them (the way round toward its target) so it rides round them, toward the man named (`toId`, who then has it as a pass on its way to him) or, with nobody named, the far low
  * corner, so it rings round the boards. Its `pass` event (kind `rim`) and `release` event (kind `dump`: the viewer's
  * release kinds are pass, shot and dump) go into `out`.
  */
@@ -207,9 +213,7 @@ export function executeRim(state: GameState, fromId: string, toId: string | null
   const dir = state.attackDir[s.side];
   const p = state.puck.pos;
   const to = toId !== null ? skaterById(state, toId).pos : { x: dir * (RINK.goalLineX - RIM.corner.back), y: -(p.y * dir >= 0 ? 1 : -1) * RIM.corner.y * dir };
-  // From behind the net the boards straight ahead are the end boards: aim at the corner on the target's side instead.
-  const behind = p.x * dir > RINK.goalLineX;
-  const aim = behind ? boardsAhead(p, { x: dir * RINK.goalLineX, y: (to.y >= 0 ? 1 : -1) * RINK.halfWidth }, RIM.ahead * 2, aimScratch) : boardsAhead(p, to, RIM.ahead, aimScratch);
+  const aim = boardsAhead(p, to, RIM.ahead, aimScratch);
   const speed = RIM.speed.base + passing * RIM.speed.perPoint;
   const pressure = pressureOn(state, s);
   const sigma = PASS.error.base + (100 - passing) * PASS.error.perPoint + pressure * PASS.error.pressure;

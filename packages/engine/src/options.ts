@@ -138,6 +138,8 @@ const PROTECT_IDLE = 0.01;
 /** A shooting lane narrower than these (m) scales the shot's chance by these. */
 const SHOT_LANE = [0.5, 1.0] as const;
 const SHOT_BLOCKED = [0.3, 0.6] as const;
+/** The share of TUNING.scoreEffects' shot factor applied to a shot's value. */
+const SCORE_SOFT = 0.5;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
 const PROTECTING = { puckHandling: 0.5, strength: 0.5 };
 
@@ -256,15 +258,13 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const settled = SETTLE_MIN + (1 - SETTLE_MIN) * clamp(held / PASS_SETTLE, 0, 1);
 
   // Offside: with the puck outside the zone, any teammate wholly in it (or about to be) puts his team offside if the
-  // puck goes in now. With it inside, a teammate in there makes a pass out to a man who will carry it back in costly.
-  let mateOffside = false, mateIn = false;
+  // puck goes in now.
+  let mateOffside = false;
   for (const m of state.skaters) {
-    if (!m.onIce || m.side !== side || m === s) continue;
+    if (!outside || !m.onIce || m.side !== side || m === s) continue;
     const mx = (m.pos.x + Math.max(0, m.vel.x * dir) * dir * B.offsideLookahead) * dir;
     const def = defs.get(m.id);
-    const r = def ? bodyRadius(def.weightKg) : 0.4;
-    if (outside && mx > BLUE + r) mateOffside = true;
-    if (!outside && m.pos.x * dir > BLUE + r) mateIn = true;
+    if (mx > BLUE + (def ? bodyRadius(def.weightKg) : 0.4)) mateOffside = true;
   }
 
   // ---- shoot ----
@@ -288,7 +288,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       tw.x = GOAL * dir; tw.y = 0;
       const sw = laneWidth(state, side, p, tw);
       if (sw < SHOT_LANE[0]) g *= SHOT_BLOCKED[0]; else if (sw < SHOT_LANE[1]) g *= SHOT_BLOCKED[1];
-      shootScore = scoreShoot;
+      // Half the score effect's size: on a value near zero its full size would swing shooting by far more than real
+      // teams change.
+      shootScore = 1 + (scoreShoot - 1) * SCORE_SOFT;
     }
     // Near a post (a wraparound's end): the chance comes from how far the goalie is from that post.
     const postLy = sgn(sly) * RINK.netHalfWidth;
@@ -297,10 +299,14 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       const gd = hyp(gl.x * dir - GOAL, gl.y * dir - postLy);
       g = Math.max(g, V.goal * WRAP_GOAL * clamp(gd / WRAP_OPEN, 0.1, 1) * shootSkill);
     }
-    // Score effects scale the shot's value as a habit does (more eager when behind, less when comfortably ahead).
     // A shot scores with chance g; one that does not leaves his team the puck TUNING.value.shotKeep of the time, down
-    // low on the boards (worth threat there), and otherwise loses what he has here.
-    if (g > 0) { const gc = clamp(g, 0, 0.97); const v = habit(gc * (1 - here) + (1 - gc) * (V.shotKeep * threat(GOAL - 2, sgn(ly) * 8) - here), tend.shoot); out.push({ kind: 'shoot', value: (v >= 0 ? v * shootScore : v / shootScore) + shootOn }); }
+    // low on the boards (worth threat there), and otherwise loses what he has here. Score effects then scale its
+    // value as a habit does (more eager when behind, less when comfortably ahead).
+    if (g > 0) {
+      const gc = clamp(g, 0, 0.97);
+      const v = habit(gc * (1 - here) + (1 - gc) * (V.shotKeep * threat(GOAL - 2, sgn(ly) * 8) - here), tend.shoot);
+      out.push({ kind: 'shoot', value: (v >= 0 ? v * shootScore : v / shootScore) + shootOn });
+    }
   }
 
   // ---- passes ----
@@ -340,8 +346,9 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
       to += V.goal * PASS_ACROSS * qm * clamp(Math.abs(mly - ly) / ACROSS_FULL, 0, 1) * (rd ? B.shootSkill.base + composite(rd.attrs, SHOOTING) * B.shootSkill.perPoint : 1);
     }
     let v = valueOf(chance, to);
-    // A pass out to a man who will carry it back in while a teammate is still inside puts them offside.
-    if (!outside && mrx < BLUE + 1 && mateIn) v -= V.offside;
+    // From inside the zone, a pass out to a man at or outside the line, who will carry it back in while the passer
+    // (and whoever else) is still inside, puts them offside.
+    if (!outside && mrx < BLUE + 1) v -= V.offside;
     v = habit(v, tend.pass) + passOn;
     let i = passValues.length;
     while (i > 0 && passValues[i - 1]! < v) i--;
@@ -354,7 +361,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
 
   // ---- carry lanes ----
   const ph = a.puckHandling;
-  const carry = (lane: CarryLane, trx: number, tly: number, safe = 0): void => {
+  const carry = (lane: CarryLane, trx: number, tly: number): void => {
     trx = clamp(trx, -GOAL, GOAL + 2.2);
     tly = clamp(tly, -RINK.halfWidth + 1.5, RINK.halfWidth - 1.5);
     // Never carry the puck in while a teammate is still in the zone.
@@ -362,7 +369,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     tw.x = trx * dir; tw.y = tly * dir;
     const w = laneWidth(state, side, s.pos, tw);
     const block = w < 2.5 ? ((2.5 - w) / 2.5) * 0.5 : 0;
-    const chance = clamp(0.95 - (pressure * (0.35 - 0.002 * ph)) * (1 - safe) - block * (1 - safe), 0.03, 0.97);
+    const chance = clamp(0.95 - pressure * (0.35 - 0.002 * ph) - block, 0.03, 0.97);
     let v = valueOf(chance, threat(trx, tly) * openAt(spaceAt(state, side, tw)));
     v = habit(v, tend.carry) - moveOn;
     out.push({ kind: 'carry', lane, to: { x: tw.x + 0, y: tw.y + 0 }, value: v });

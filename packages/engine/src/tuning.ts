@@ -152,7 +152,7 @@ export const TUNING = deepFreeze({
   value: {
     noise: { base: 0.004, perPoint: 0.0002, pressure: 0.006, perPoise: 0.00004, persist: 0.85 },
     stick: 0.004, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
-    goal: 0.15, shotKeep: 0.05, habitShift: 0.03, offside: 0.03, icing: 0.03, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
+    goal: 0.13, shotKeep: 0.05, habitShift: 0.03, offside: 0.03, icing: 0.03, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
 
   /**
@@ -212,7 +212,7 @@ export const TUNING = deepFreeze({
    * m out from the goal line and `y` m across); a rim to a man is his pass for `path` times the straight-line time. A
    * clear goes at clearSpeed toward the boards at rx `clear.x` (out past his own blue line) on his side.
    */
-  rim: { speed: { base: 16, perPoint: 0.04 }, ahead: 3, corner: { back: 1, y: 8 }, path: 1.8, clearSpeed: { base: 14, perPoint: 0.04 }, clear: { x: -3 } },
+  rim: { speed: { base: 16, perPoint: 0.04 }, ahead: 4, corner: { back: 1, y: 8 }, path: 1.8, clearSpeed: { base: 14, perPoint: 0.04 }, clear: { x: -3 } },
   /** Dumps (actions.ts): to a spot this deep and wide (attack-relative m), chipped up at vz m/s; speed base + perPoint * passing. */
   dump: { spot: { x: 25.5, y: 8 }, vz: 2, speed: { base: 16, perPoint: 0.05 }, errorFactor: 1.5 },
 

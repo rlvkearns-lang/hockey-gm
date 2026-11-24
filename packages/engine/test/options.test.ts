@@ -27,12 +27,12 @@ const breakaway = (x: number): GameState => {
 };
 
 /**
- * Home RW carries at (17.4, 10) in the zone: home C open at (20, 6) is the best option; home LW at (24, 8) is covered;
+ * Home RW carries at (17.4, 10) in the zone: home C open at (20, 5) is the best option; home LW at (24, 8) is covered;
  * three defenders are goal-side (no breakaway, no odd-man rush) and the other two far up ice.
  */
 const oneBestPass = (): GameState => {
   const st = stateWith({ carrier: 'home', puckX: 18, puckY: 10 });
-  place(st, 'home:C', 20, 6); place(st, 'home:LW', 24, 8);
+  place(st, 'home:C', 20, 5); place(st, 'home:LW', 24, 8);
   for (const s of st.skaters) if (s.side === 'away') s.pos = { x: 5, y: s.pos.y };
   place(st, 'away:RD', 24.6, 8.4); place(st, 'away:LD', 24.5, 1); place(st, 'away:C', 23.5, 4);
   return st;
