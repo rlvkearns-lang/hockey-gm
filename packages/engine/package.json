@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --exclude test/perf.test.ts && vitest run test/perf.test.ts",
     "test:calibration": "vitest run --config vitest.calibration.config.ts",
     "golden:update": "tsx scripts/golden-update.ts",
     "test:browser": "tsx scripts/test-browser.ts"
