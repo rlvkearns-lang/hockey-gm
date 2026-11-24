@@ -12,7 +12,7 @@ import { refereeTick } from './referee';
 import { clipToNets, FACEOFF_DOTS, RINK, resolveBoards, resolveNets } from './rink';
 import { createRng, restoreRng, type Rng } from './rng';
 import { TUNING } from './tuning';
-import { movementOf, stepSkater, type Movement } from './skating';
+import { DEFAULT_DRIVE, movementOf, stepSkater, type Movement } from './skating';
 import { buildResult } from './stats';
 import { confirmTurnover } from './turnovers';
 import { assignJobs, isTiedUp, steeredByContest } from './team-play';
@@ -205,7 +205,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     for (let i = 0; i < skaters.length; i++) {
       const s = skaters[i]!;
       if (s.downT > 0) s.downT = Math.max(0, s.downT - DT);
-      stepSkater(s, onIceMoves[i]!, DT);
+      stepSkater(s, onIceMoves[i]!, DT, DEFAULT_DRIVE);
     }
     resolveBodies(skaters, move, onIceMoves);
     for (let i = 0; i < skaters.length; i++) {

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { len } from '../src/vec';
+import { len, type Vec2 } from '../src/vec';
 import { movementOf } from '../src/skating';
+import { DT } from '../src/constants';
+import type { SlowMode } from '../src/types';
 import { at, backwardSpeedAfter, def, movingAt, retreatMeasure, speedAfter, stepFor } from './helpers';
 
 describe('skating', () => {
@@ -44,6 +46,43 @@ describe('skating', () => {
     const f = at(0, 0); f.target = { x: 20, y: 0 }; f.faceTarget = { x: 10 * Math.cos(55 * Math.PI / 180), y: 10 * Math.sin(55 * Math.PI / 180) }; stepFor(f, 0.2);
     expect(f.mode).toBe('forward');
   });
+  const fresh = movementOf(def({}), 1);
+  const slowing = (slow: SlowMode): number => { const s = movingAt(8, 0); s.target = { x: 200, y: 0 }; s.speedCap = 0; stepFor(s, 1, fresh, { slow, through: true }); return len(s.vel); };
+  it('three ways to slow down: coasting barely slows, easing is light braking, stopping is hard', () => {
+    expect(slowing('coast')).toBeGreaterThan(7.0); expect(slowing('coast')).toBeLessThan(7.7);
+    expect(slowing('ease')).toBeGreaterThan(5.0); expect(slowing('ease')).toBeLessThan(6.0);
+    expect(slowing('stop')).toBeLessThan(1.5);
+  });
+  it('coasting is the default', () => { const s = movingAt(8, 0); s.target = { x: 200, y: 0 }; s.speedCap = 0; stepFor(s, 1); expect(len(s.vel)).toBeGreaterThan(7.0); });
+  it('told to stop at a spot, he stops on it', () => {
+    const s = movingAt(8, 0); s.target = { x: 6, y: 0 }; stepFor(s, 2.5, fresh, { slow: 'stop', through: false });
+    expect(Math.hypot(s.pos.x - 6, s.pos.y)).toBeLessThan(0.5); expect(len(s.vel)).toBeLessThan(0.5);
+  });
+  it('skating through a target, he does not ease off toward it', () => {
+    const s = movingAt(8, 0); s.target = { x: 4, y: 0 }; let atTarget = 0;
+    for (let t = 0; t < 30 && s.pos.x < 4; t++) { stepFor(s, DT, fresh, { slow: 'coast', through: true }); atTarget = len(s.vel); }
+    expect(atTarget).toBeGreaterThan(8 * 0.9);
+  });
+  /** From the origin at 8 m/s along +x toward `target`; the whole scene is moved 10 m toward the right-hand boards (y - 10) so the turn has room before the far boards (12.955 m out). */
+  const minSpeedTo = (to: Vec2, d = def({})): { min: number; widest: number } => {
+    const target = { x: to.x, y: to.y - 10 };
+    const s = movingAt(8, 0); s.pos.y = -10; s.target = target; let min = 8, widest = 0; const m = movementOf(d, 1);
+    for (let t = 0; t < 30 * 6 && Math.hypot(s.pos.x - target.x, s.pos.y - target.y) > 1; t++) { stepFor(s, DT, m, { slow: 'coast', through: true }); min = Math.min(min, len(s.vel)); widest = Math.max(widest, s.pos.x); }
+    return { min, widest };
+  };
+  it('a turn is carved: speed is mostly kept', () => {
+    expect(minSpeedTo({ x: 12, y: 14 }).min).toBeGreaterThan(8 * 0.8);   // a quarter turn
+    expect(minSpeedTo({ x: -15, y: 12 }).min).toBeGreaterThan(8 * 0.6);  // back the way he came
+  });
+  it('the turn radius comes from speed and agility: 4 to 10 m at 8 m/s, tighter for the agile', () => {
+    const r = (agility: number): number => minSpeedTo({ x: -15, y: 12 }, def({ agility })).widest; // how far he runs on before he is round
+    expect(r(70)).toBeGreaterThan(4); expect(r(70)).toBeLessThan(10);
+    expect(r(95)).toBeLessThan(r(45) * 0.85);
+  });
+  it('backward is clearly slower than forward and under 6.6 m/s', () => {
+    expect(backwardSpeedAfter(4)).toBeLessThan(speedAfter(def({}), 4) * 0.75); expect(backwardSpeedAfter(4)).toBeLessThan(6.6);
+  });
+  it('never NaN: on his target, at rest, with no speed cap', () => { const s = at(0, 0); s.speedCap = 0; stepFor(s, 1); expect(Number.isFinite(s.pos.x + s.vel.x + s.facing)).toBe(true); });
   it('retreating defencemen face the puck (final review measure, two whole games)', () => {
     const m = retreatMeasure([1, 2]);
     expect(m.samples).toBeGreaterThan(10_000);

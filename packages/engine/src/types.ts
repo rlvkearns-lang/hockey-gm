@@ -72,6 +72,8 @@ export type GameSetup = {
 
 /** See SkaterState.mode. */
 export type SkatingMode = 'forward' | 'backward' | 'crossover';
+/** How a skater slows when he is going faster than he wants: glide on (`coast`), light braking (`ease`) or a hard stop (`stop`). */
+export type SlowMode = 'coast' | 'ease' | 'stop';
 
 export type SkaterState = {
   id: string;

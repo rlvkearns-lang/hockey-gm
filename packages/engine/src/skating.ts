@@ -1,7 +1,7 @@
 import { resolveBoards } from './rink';
 import { TUNING } from './tuning';
 import { hypot2 } from './vec';
-import type { PlayerDef, SkaterState } from './types';
+import type { PlayerDef, SkaterState, SlowMode } from './types';
 import { datan2, dcos, dexp, dsin } from './dmath';
 
 export type Movement = {
@@ -11,11 +11,27 @@ export type Movement = {
   backwardFactor: number;
   mass: number;
   radius: number;
+  /** Hard-stop deceleration and the largest sideways acceleration his edges hold in a turn (m/s^2). */
+  brake: number;
+  carve: number;
 };
 
+/** How he slows when he is going faster than he wants, and whether he means to stop at his target or skate through it. */
+export type Drive = { slow: SlowMode; through: boolean };
+export const DEFAULT_DRIVE: Drive = { slow: 'coast', through: false };
+
 const S = TUNING.skating;
-/** Distance from the target (m) inside which a skater eases off. */
-const ARRIVE_RADIUS = 2;
+/** He means to come to rest this far (m) short of his target, so that braking onto it does not overshoot. */
+const ARRIVE_SHORT = 0.3;
+/**
+ * Inside the last stretch he still closes on his target at this rate (m/s per m of distance left), so a target he is
+ * held to (a corner on his route round the net) is reached, not stopped ARRIVE_SHORT short of for good.
+ */
+const ARRIVE_CREEP = 2;
+/** Below this speed (m/s) his turn is no longer limited by how hard his edges hold (he turns at turnRate). */
+const CARVE_MIN_SPEED = 1.5;
+/** The smallest sine of the angle to his target used for the turn-reach limit (avoids dividing by zero dead ahead). */
+const MIN_REACH_SIN = 0.05;
 /** Sideways velocity shed per second (skate edges). */
 const EDGE_GRIP = 6;
 /** Speed lost per second while down. */
@@ -43,9 +59,11 @@ export function movementOf(def: PlayerDef, energy: number): Movement {
     topSpeed: (S.topSpeed.base + a.speed * S.topSpeed.perPoint) * tired,
     accel: (S.accel.base + a.acceleration * S.accel.perPoint) * tired,
     turnRate: 2.2 + a.agility * 0.03,
-    backwardFactor: 0.72 + a.agility * 0.0012,
+    backwardFactor: S.backward.base + a.agility * S.backward.perPoint,
     mass: def.weightKg + 9,
     radius: bodyRadius(def.weightKg),
+    brake: S.brake.base + a.agility * S.brake.perPoint,
+    carve: S.carve.base + a.agility * S.carve.perPoint,
   };
 }
 
@@ -71,7 +89,14 @@ function clampedTurn(a: number, max: number): number {
 
 let gripDt = NaN, gripFactor = 1;
 
-export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
+/** The new speed along one axis: toward `want` at `up` (m/s per tick) when speeding up or reversing, at `down` when slowing. */
+function approach(cur: number, want: number, up: number, down: number): number {
+  if (cur > 0 && want >= 0 && want < cur) return Math.max(want, cur - down);
+  if (cur < 0 && want <= 0 && want > cur) return Math.min(want, cur + down);
+  return cur + Math.max(-up, Math.min(up, want - cur));
+}
+
+export function stepSkater(s: SkaterState, m: Movement, dt: number, drive: Drive = DEFAULT_DRIVE): void {
   if (s.downT > 0) {
     const f = Math.max(0, 1 - DOWN_FRICTION * dt);
     s.vel.x *= f;
@@ -99,26 +124,47 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
       }
     }
 
-    // Turn, slower at speed going forward (his momentum is along his blades); squared up he pivots his upper body and
-    // hips freely, since his travel no longer follows his facing.
-    const maxTurn = (squared ? m.turnRate : m.turnRate / (1 + speed / 6)) * dt;
-    s.facing = wrapAngle(s.facing + clampedTurn(wantFacing - s.facing, maxTurn));
-
+    // Turn. Going forward his edges hold at most m.carve sideways, so at speed he carves a circle of radius
+    // speed^2 / carve; squared up he pivots his upper body and hips freely, since his travel no longer follows his facing.
+    const ox = dcos(s.facing), oy = dsin(s.facing);
+    const maxTurn = (squared ? m.turnRate : Math.min(m.turnRate, m.carve / Math.max(speed, CARVE_MIN_SPEED))) * dt;
+    const turn = clampedTurn(wantFacing - s.facing, maxTurn);
+    s.facing = wrapAngle(s.facing + turn);
     const fx = dcos(s.facing), fy = dsin(s.facing);
+
+    if (!squared) {
+      // Carving: the speed he carries along his blades turns with them, less a little per radian turned.
+      const carried = Math.max(0, s.vel.x * ox + s.vel.y * oy);
+      const kept = carried * dexp(-S.carveLoss * Math.abs(turn));
+      s.vel.x += fx * kept - ox * carried;
+      s.vel.y += fy * kept - oy * carried;
+    }
+
     const along = s.vel.x * fx + s.vel.y * fy;
     const latX = s.vel.x - fx * along, latY = s.vel.y - fy * along;
     const step = m.accel * dt;
-    const arrive = Math.min(1, dist / ARRIVE_RADIUS);
     const cap = Math.max(0, Math.min(1, s.speedCap));
     if (dt !== gripDt) { gripDt = dt; gripFactor = dexp(-EDGE_GRIP * dt); }
     const grip = gripFactor;
+    // Arrival: the fastest speed from which he can still stop ARRIVE_SHORT short of his target.
+    const arrival = drive.through ? Infinity
+      : Math.max(Math.sqrt(2 * (drive.slow === 'stop' ? m.brake : S.easeDecel) * Math.max(0, dist - ARRIVE_SHORT)), ARRIVE_CREEP * dist);
+    // Slowing: for a limit (arrival, turn reach) he brakes lightly, or hard when stopping; otherwise as his drive says.
+    const limitDecel = (drive.slow === 'stop' ? m.brake : S.easeDecel) * dt;
+    const freeDecel = (drive.slow === 'stop' ? m.brake : drive.slow === 'ease' ? S.easeDecel : S.glideDecel) * dt;
 
     if (!squared) {
       s.mode = 'forward';
-      // Only effort along the facing counts; scale by how well it points at the goal.
-      const align = hasGoal ? Math.max(0, (fx * dx + fy * dy) / dist) : 0;
-      const wantAlong = m.topSpeed * cap * arrive * align;
-      const newAlong = along + Math.max(-step, Math.min(step, wantAlong - along));
+      const free = m.topSpeed * cap;
+      let limit = arrival;
+      if (hasGoal) {
+        // Reach: the fastest speed whose turning circle (tangent to his blades) passes through the target.
+        const off = Math.min(Math.abs(wrapAngle(travel - s.facing)), Math.PI / 2);
+        const reach = Math.sqrt((m.carve * dist) / (2 * Math.max(MIN_REACH_SIN, dsin(off))));
+        if (reach < limit) limit = reach;
+      }
+      const want = Math.min(free, limit);
+      const newAlong = approach(along, want, step, limit < free ? limitDecel : freeDecel);
       s.vel.x = fx * newAlong + latX * grip;
       s.vel.y = fy * newAlong + latY * grip;
     } else {
@@ -128,9 +174,10 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number): void {
       const a = ux * fx + uy * fy, l = uy * fx - ux * fy;
       const limA = a >= 0 ? m.topSpeed : m.topSpeed * m.backwardFactor, limL = m.topSpeed * LATERAL_SPEED;
       const ellipse = hasGoal ? 1 / Math.sqrt((a / limA) * (a / limA) + (l / limL) * (l / limL)) : 0;
-      const want = ellipse * cap * arrive;
+      const free = ellipse * cap;
+      const want = Math.min(free, arrival);
       const wantAlong = a * want, wantLat = l * want;
-      const newAlong = along + Math.max(-step, Math.min(step, wantAlong - along));
+      const newAlong = approach(along, wantAlong, step, arrival < free ? limitDecel : freeDecel);
       const lat = latY * fx - latX * fy; // signed, + to his left
       const latStep = step * LATERAL_ACCEL;
       const pushed = lat + Math.max(-latStep, Math.min(latStep, wantLat - lat));

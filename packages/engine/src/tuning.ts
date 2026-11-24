@@ -85,10 +85,22 @@ export const TUNING = deepFreeze({
     goalieSd: 0.2,
   },
 
-  /** Skating (skating.ts): top speed (m/s) and acceleration (m/s^2), base plus per point of speed / acceleration. */
+  /**
+   * Skating (skating.ts): top speed (m/s) and acceleration (m/s^2), base plus per point of speed / acceleration.
+   * Slowing down (m/s^2): glideDecel coasting, easeDecel light braking (and the deceleration he plans an arrival or a
+   * turn with), brake a hard stop (base plus per point of agility). carve is the largest sideways acceleration his
+   * edges hold in a turn (m/s^2, per point of agility); carveLoss the share of speed along his blades lost per radian
+   * turned (as dexp(-carveLoss * turn)). backward is his backward top speed as a share of forward (per point of agility).
+   */
   skating: {
     topSpeed: { base: 7.62, perPoint: 0.016 },
     accel: { base: 7.8, perPoint: 0.02 },
+    glideDecel: 0.6,
+    easeDecel: 2.5,
+    brake: { base: 6, perPoint: 0.03 },
+    carve: { base: 4.5, perPoint: 0.05 },
+    carveLoss: 0.1,
+    backward: { base: 0.6, perPoint: 0.0012 },
   },
 
   /**

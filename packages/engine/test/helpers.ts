@@ -23,7 +23,7 @@ import { createGame, type Game } from '../src/game';
 import { resolveOnNet, tryBlock } from '../src/goalie';
 import { movementOf, stepSkater } from '../src/skating';
 import { refereeTick } from '../src/referee';
-import type { Movement } from '../src/skating';
+import type { Drive, Movement } from '../src/skating';
 import { availableParallelism } from 'node:os';
 import { MessageChannel, receiveMessageOnPort, Worker, type MessagePort } from 'node:worker_threads';
 import { createObserver, measuresOf, type PlayCounters, type PlayMeasures } from './measures';
@@ -122,9 +122,9 @@ export function movingAt(vx: number, vy: number): SkaterState {
   return s;
 }
 
-export function stepFor(s: SkaterState, seconds: number, m: Movement = movementOf(def({}), 1)): void {
+export function stepFor(s: SkaterState, seconds: number, m: Movement = movementOf(def({}), 1), drive?: Drive): void {
   const n = Math.round(seconds / DT);
-  for (let i = 0; i < n; i++) stepSkater(s, m, DT);
+  for (let i = 0; i < n; i++) stepSkater(s, m, DT, drive);
 }
 
 /** Straight-line top-effort speed after `seconds` from rest. */
