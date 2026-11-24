@@ -662,7 +662,8 @@ function laneTaker(state: GameState, side: Side): SkaterState | null {
     let bestD = LANE_TAKE_RANGE;
     for (let k = 0; k < state.skaters.length; k++) {
       const t = state.skaters[k]!;
-      if (!standing(t) || t.side !== side || t.leaving || t.contestId !== null || !LANE_TAKERS.has(state.plans[k]!.job)) continue;
+      const j = jobNow(state, side, k);
+      if (!standing(t) || t.side !== side || t.leaving || t.contestId !== null || j === null || !LANE_TAKERS.has(j)) continue;
       // The man who has the carrier stays on him.
       if (t === carrierTaker(state, side)) continue;
       const d = segD(t.pos.x, t.pos.y, c.pos.x, c.pos.y, m.pos.x, m.pos.y);

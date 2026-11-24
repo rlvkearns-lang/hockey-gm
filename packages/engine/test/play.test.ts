@@ -65,7 +65,11 @@ describe('A2: every player has a job (Task 4)', () => {
   it('A2: no two skaters of a team ever hold the same job', () => { expect(counters().duplicateJobTicks).toBe(0); }, 60_000);
   it('A2: standing still is under 9% of a skater\'s live time (was 17.5%)', () => { expect(m().stationaryShare).toBeLessThan(0.09); }, 60_000);
   it('A2: at least two attackers are open in over 50% of offensive-zone time (was 40%)', () => { expect(m().twoOpenShare).toBeGreaterThan(0.50); }, 60_000);
-  it('A2: the most dangerous option is shadowed in 60% to 90% of it (was 76%)', () => { expect(m().dangerShadowedShare).toBeGreaterThan(0.60); expect(m().dangerShadowedShare).toBeLessThan(0.90); }, 60_000);
+  // Pooled over seeds 1-8 (Task 4 review, Important 2): one game's share varies by about 0.017, so three seeds left no margin.
+  it('A2: the most dangerous option is shadowed in 60% to 90% of it (was 76%), seeds 1-8 pooled', () => {
+    const share = measureGames([1, 2, 3, 4, 5, 6, 7, 8]).dangerShadowedShare;
+    expect(share).toBeGreaterThan(0.60); expect(share).toBeLessThan(0.90);
+  }, 120_000);
   // Task 10 (engagements, box-outs) tightens this to over 85%.
   it('A2: the net-front defender has inside position (nearer the net than his man, within 1.6 m of him) over 50% of the time he has one (Task 10 tightens this to 85%)', () => { const c = counters(); expect(c.netFrontDefenderInside / c.netFrontDefenderTicks).toBeGreaterThan(0.5); }, 60_000);
   it('A2: the side with the puck skates forward: under 3% of its time backward', () => { expect(m().backwardShareWithPuck).toBeLessThan(0.03); }, 60_000);

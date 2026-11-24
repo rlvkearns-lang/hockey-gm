@@ -104,4 +104,45 @@ describe('every player has a job', () => {
     const t = on[0]!.target;
     expect(Math.hypot(t.x - 27.13, t.y)).toBeLessThan(Math.hypot(c.pos.x - 27.13, c.pos.y));
   });
+
+  describe('the lane taker', () => {
+    /** Home RW carries at (17.4, 10) in the away zone; home C in the slot at (24, -2) is his most dangerous teammate. */
+    const lanePlay = (): GameState => { const st = stateWith({ carrier: 'home', puckX: 18, puckY: 10 }); place(st, 'home:C', 24, -2); setTeamPhase(st); return st; };
+    /** Away skaters standing on the carrier-to-C lane, between 35% and 85% of the way along it, with their jobs. */
+    const onLane = (st: GameState): { id: string; job: Job }[] => {
+      const c = skater(st, 'home', 'RW'), m = skater(st, 'home', 'C');
+      const dx = m.pos.x - c.pos.x, dy = m.pos.y - c.pos.y, l2 = dx * dx + dy * dy;
+      return st.skaters.flatMap((s, i) => {
+        if (s.side !== 'away') return [];
+        const t = ((s.target.x - c.pos.x) * dx + (s.target.y - c.pos.y) * dy) / l2;
+        return segDistXY(s.target.x, s.target.y, c.pos.x, c.pos.y, m.pos.x, m.pos.y) < 0.05 && t >= 0.35 - 1e-9 && t <= 0.85 + 1e-9 ? [{ id: s.id, job: st.plans[i]!.job }] : [];
+      });
+    };
+    it('exactly one defender takes the lane to the most dangerous man, between 35% and 85% of the way along it; never the man on the carrier or at the net', () => {
+      const st = lanePlay(); assignJobs(st, defs, tactics);
+      const on = onLane(st);
+      expect(on.length).toBe(1);
+      expect(['f1', 'dCorner', 'dNet']).not.toContain(on[0]!.job);
+      const c = skater(st, 'home', 'RW');
+      const taker = st.skaters.find((s) => s.id === on[0]!.id)!;
+      const i = st.skaters.indexOf(taker);
+      expect(st.plans[i]!.markId).not.toBe(c.id);
+    });
+    it('nobody takes it from more than 12 m away', () => {
+      const st = lanePlay();
+      for (const s of st.skaters) if (s.side === 'away') s.pos = { x: -10, y: s.pos.y };
+      assignJobs(st, defs, tactics);
+      expect(onLane(st)).toEqual([]);
+    });
+    it('he hands the lane on when another defender is nearer it', () => {
+      const st = lanePlay(); assignJobs(st, defs, tactics);
+      const first = onLane(st)[0]!.id;
+      // Another lane-taking defender (not the first, not the man on the carrier, not at the net) steps onto the lane.
+      const other = st.skaters.find((s, i) => s.side === 'away' && s.id !== first && ['dzCentre', 'wingStrong', 'wingWeak'].includes(st.plans[i]!.job) && st.plans[i]!.markId !== 'home-RW')!;
+      other.pos = { x: 21, y: 4.4 };
+      for (let k = 0; k < 15; k++) { st.tick++; assignJobs(st, defs, tactics); }
+      const on = onLane(st);
+      expect(on.map((o) => o.id)).toEqual([other.id]);
+    });
+  });
 });
