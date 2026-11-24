@@ -154,7 +154,7 @@ export const TUNING = deepFreeze({
      * centre) and is halved with no lane (laneWidth to the net under TUNING.block.path). A pass across the slot to a man
      * whose threat is over oneTimerThreat is a one-timer pass; his first decision values the shot oneTimerBonus higher.
      */
-    rebound: 0.005, traffic: 0.02, oneTimerThreat: 0.06, oneTimerBonus: 0.08,
+    rebound: 0.005, traffic: 0.02, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
     stick: 0.03, shadowed: 0.5, turnoverCost: 0.6, hold: 0.002, holdCap: 10,
     goal: 0.13, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
