@@ -108,8 +108,8 @@ const IN_FEET = 0.45;
 /** A puck in his feet goes to his stick only from within this far (m) of the blade (the most a pickup moves it). */
 const MAX_KICK = 1.2;
 /** The carried puck moves at most the carrier's own travel plus CARRY_TURN (m) a tick, and never more than CARRY_STEP (m). */
-const CARRY_TURN = 0.25;
-const CARRY_STEP = 0.48;
+const CARRY_TURN = 0.2;
+const CARRY_STEP = 0.4;
 const PICKUP_MAX_SPEED = 12;
 /** A pass that comes off his stick (a bobble) leaves at BOBBLE_SPEED m/s, turned by up to BOBBLE_TURN rad. */
 const BOBBLE_SPEED: [number, number] = [2, 4];
@@ -364,12 +364,23 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
     p.vel.y = carrier.vel.y;
     p.z = 0;
     p.vz = 0;
-    noVel.x = 0;
-    noVel.y = 0;
-    resolveNets(p.pos, noVel, PUCK_RADIUS);
+    // Never inside a frame: out through its back or a side, the nearest (never into the goal mouth). It slides round a
+    // frame, a step at a time, toward a blade on his side of it.
+    outOfFrame(p.pos);
     noVel.x = 0;
     noVel.y = 0;
     resolveBoards(p.pos, noVel, PUCK_RADIUS, 0);
+  }
+
+  /** Moves `q`, when it is inside a net frame grown by the puck's radius, out through the nearest of its back and sides. */
+  function outOfFrame(q: { x: number; y: number }): void {
+    const end = q.x >= 0 ? 1 : -1;
+    const x = q.x * end, r = PUCK_RADIUS;
+    const front = RINK.goalLineX - r, back = RINK.goalLineX + RINK.netDepth + r, half = RINK.netHalfWidth + r;
+    if (x <= front || x >= back || q.y <= -half || q.y >= half) return;
+    const toBack = back - x, toSide = half - Math.abs(q.y);
+    if (toBack <= toSide) q.x = back * end;
+    else q.y = (q.y >= 0 ? 1 : -1) * half;
   }
 
   /**

@@ -338,7 +338,9 @@ export function createObserver(setup: GameSetup): Observer {
           if (speed >= GLIDE_MIN_SPEED && Math.abs(speed - before.speed) < GLIDE_MAX_ACCEL * DT) c.glideTicks++;
           if (spot && Math.hypot(s.target.x - before.tx, s.target.y - before.ty) > RETARGET_M) c.retargets++;
         }
-        if (st.possession === s.side) { c.ticksWithPuck++; if (s.mode === 'backward') c.backwardTicksWithPuck++; }
+        // Backward skating: mode backward while moving (a man standing on his spot, shuffling within a few centimetres
+        // of it, is standing still, counted by stationaryTicks; Task 6, when point men started holding the line longer).
+        if (st.possession === s.side) { c.ticksWithPuck++; if (s.mode === 'backward' && speed >= STATIONARY_SPEED) c.backwardTicksWithPuck++; }
       }
       if (p === undefined) prev.set(s.id, { tick, speed, tx: s.target.x, ty: s.target.y });
       else { p.tick = tick; p.speed = speed; p.tx = s.target.x; p.ty = s.target.y; }

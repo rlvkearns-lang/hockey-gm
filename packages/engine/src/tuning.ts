@@ -127,8 +127,9 @@ export const TUNING = deepFreeze({
    * - (1 - chance) * what losing the puck here costs (the threat here plus turnoverCost * the other side's threat from
    * here). He picks by a draw weighted by exp(value / T), with temperature T = pick.base + pick.perPoint * (100 - iq) +
    * pick.pressure * pressure - pick.perPoise * poise (at least pick.min): a smart, poised player usually takes the best
-   * option. A judging error of noise.persist * T stays with him while he has the puck (keyed by his plan's seed;
-   * builder's addition); the option he is committed to gets `stick` more. On a breakaway a carry that ends in a deke
+   * option. A judging error of noise.persist * T stays with him for noise.readSeconds at a time while he has the puck
+   * (keyed by his plan's seed; builder's addition); the option he is committed to gets `stick` more, fading to nothing
+   * over holdCap seconds with the puck (Task 6: a carrier held behind the net for minutes). On a breakaway a carry that ends in a deke
    * near the net is worth `deke` of a shot from there. A pass lane under TUNING.lanes.open is
    * worth `shadowed` of an open one. `hold`: each second he has had the puck adds this much to shooting and passing and
    * takes it off carrying and protecting (at most holdCap seconds).
@@ -140,7 +141,7 @@ export const TUNING = deepFreeze({
    * most raceMax.
    */
   value: {
-    noise: { persist: 0.95 },
+    noise: { persist: 0.95, readSeconds: 4 },
     deke: 0.6,
     /** A pass's chance falls by skill.pass per point of passing under 100, a carry's by skill.carry per point of puckHandling under 100, pressured or not. */
     skill: { pass: 0.001, carry: 0.001 },

@@ -64,6 +64,8 @@ export type Situation = {
   pressuredLow: boolean;
   /** Behind the goal line he attacks, within 4 m of the middle. */
   behindNet: boolean;
+  /** Seconds he has had the puck (since his touch began), at most TUNING.value.holdCap. */
+  held: number;
 };
 
 export type Option =
@@ -119,7 +121,7 @@ const OFFICE_LY = 1.5;
 const OFFICE_WALL = 4;
 /** Holding behind the net: at HOLD_RX, within HOLD_LY of the middle (the frame between him and the nearest opponent). */
 const HOLD_RX = 28.7;
-const HOLD_LY = 0.6;
+const HOLD_LY = 1.4;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */
 const CARRY_IN_ZONE = 5;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
@@ -180,6 +182,9 @@ function readInto(state: GameState, s: SkaterState, out: Situation): Situation {
   out.oddMan = !out.breakaway && srx > -BLUE && hyp(GOAL - rx, ly) > ODD_NEAR && def <= 2 && att > def;
   out.pressuredLow = out.pressure >= 0.5 && rx > DOTS;
   out.behindNet = rx > GOAL && Math.abs(ly) < BEHIND_Y;
+  const t = state.touches;
+  const since = t.side === s.side && t.ids[t.ids.length - 1] === s.id ? t.ticks[t.ticks.length - 1]! : state.tick;
+  out.held = Math.min(V.holdCap, (state.tick - since) * DT);
   return out;
 }
 
@@ -193,11 +198,11 @@ function defenderGoalSide(state: GameState, s: SkaterState): boolean {
 
 /** The carrier's situation now (a new object). */
 export function readSituation(state: GameState, s: SkaterState): Situation {
-  return readInto(state, s, { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false });
+  return readInto(state, s, { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0 });
 }
 
 /** listOptions' situation when its caller passes none (private scratch). */
-const ownSituation: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false };
+const ownSituation: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0 };
 
 /**
  * A habit multiplies a value (a positive one by 0.6 + 0.8 * tendency, a negative one is divided by it) and leans it by
@@ -238,9 +243,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   const valueOf = (chance: number, to: number, lose: number = loss): number => chance * (to - here) - (1 - chance) * lose;
 
   // How long he has had it: the longer, the more he wants to move it on.
-  const t = state.touches;
-  const since = t.side === side && t.ids[t.ids.length - 1] === s.id ? t.ticks[t.ticks.length - 1]! : state.tick;
-  const held = Math.min(V.holdCap, (state.tick - since) * DT);
+  const held = sit.held;
   const moveOn = V.hold * held;
   // Passing: worth less in his first O.pass.settle s with it (he has not settled it), more the longer he has it.
   const passOn = V.hold * B.holdBoost.pass * (held - O.pass.settle), shootOn = moveOn * B.holdBoost.shoot;
@@ -352,7 +355,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     v = habit(v, tend.pass) + passOn;
     // Vision: he sees the best `seen` passes as he reads them (value plus the error of his read, fixed for the possession).
     passKey.toId = m.id;
-    const sv = v + readError(plan, passKey, T0);
+    const sv = v + readError(plan, passKey, T0, held);
     let i = passSeen.length;
     while (i > 0 && passSeen[i - 1]! < sv) i--;
     if (i >= seen) continue;
@@ -592,9 +595,14 @@ function pickTemperature(me: PlayerDef, pressure: number): number {
   return Math.max(P.min, P.base + P.perPoint * (100 - a.iq) + P.pressure * pressure - P.perPoise * a.poise);
 }
 
-/** The error in his read of option `o`, fixed for the possession: persist * T0 * GUMBEL_SD * a normal keyed by his plan's seed; 0 with no seed. */
-function readError(plan: CarrierPlan | null, o: Option, T0: number): number {
-  return plan !== null && plan.seed !== undefined ? V.noise.persist * GUMBEL_SD * seenError(plan.seed, o) * T0 : 0;
+/**
+ * The error in his read of option `o`: persist * T0 * GUMBEL_SD * a normal keyed by his plan's seed and how many
+ * TUNING.value.noise.readSeconds he has had the puck (his read of the play holds that long, then he reads it again);
+ * 0 with no seed.
+ */
+function readError(plan: CarrierPlan | null, o: Option, T0: number, held: number): number {
+  if (plan === null || plan.seed === undefined) return 0;
+  return V.noise.persist * GUMBEL_SD * seenError(mix(plan.seed, Math.floor(held / V.noise.readSeconds) + 1), o) * T0;
 }
 
 /** Fills pickW with each option's weight in the draw (the kind cap applied); returns their total. */
@@ -609,8 +617,9 @@ function weigh(options: readonly Option[], me: PlayerDef, sit: Situation, plan: 
   pickW.length = n;
   for (let i = 0; i < n; i++) {
     const o = options[i]!;
-    const z = readError(plan, o, T0);
-    const v = o.value + (committed(o, plan) ? V.stick : 0) + z;
+    const z = readError(plan, o, T0, sit.held);
+    // His commitment to what he is doing fades over TUNING.value.holdCap seconds with the puck.
+    const v = o.value + (committed(o, plan) ? V.stick * (1 - sit.held / V.holdCap) : 0) + z;
     pickW[i] = v;
     if (v > vmax) vmax = v;
   }

@@ -36,8 +36,10 @@ export type Decision =
 
 const T = TUNING.brain;
 const optionScratch: Option[] = [];
+/** Holding behind the net, he faces the slot at this rx. */
+const HOLD_FACE_RX = 20;
 /** brainTick's copy of the carrier's situation (written by decideCarrier, read for his carry speed). */
-const sitScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false };
+const sitScratch: Situation = { rx: 0, ly: 0, zone: 'N', pressure: 0, breakaway: false, oddMan: false, pressuredLow: false, behindNet: false, held: 0 };
 
 /**
  * What the carrier does next: every option he has is valued (options.ts listOptions) and he takes the best as he sees
@@ -95,7 +97,11 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
       if (busy) return;
       s.target.x = d.to.x;
       s.target.y = d.to.y;
-      s.faceTarget = null;
+      // Holding behind the net he faces out front, where his passes go (Task 6: off the forehand or backhand).
+      if (d.lane === 'hold') {
+        const dir = state.attackDir[s.side];
+        if (s.faceTarget) { s.faceTarget.x = HOLD_FACE_RX * dir; s.faceTarget.y = 0; } else s.faceTarget = { x: HOLD_FACE_RX * dir, y: 0 };
+      } else s.faceTarget = null;
       // In the zone he attacks (but on a breakaway) he skates with it at T.carrySpeed.inZone of his carrying speed: he
       // looks for the play rather than outskating it.
       s.speedCap = d.lane === 'hold' ? T.protectSpeedCap
