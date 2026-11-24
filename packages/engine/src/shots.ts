@@ -6,7 +6,7 @@ import { recordTouch as recordTouch_ } from './actions';
 import { DT as DT_ } from './constants';
 import { gameEvent as gameEvent_ } from './events';
 import { stepPuck as stepPuck_, type PuckEvent } from './puck';
-import { faceShot as faceShot_, resolveOnNet as resolveOnNet_ } from './goalie';
+import { faceShot as faceShot_, lateSave as lateSave_, resolveOnNet as resolveOnNet_ } from './goalie';
 import { tryTip as tryTip_ } from './tips';
 import { RINK as RINK_ } from './rink';
 import type { Rng } from './rng';
@@ -19,6 +19,7 @@ import { clamp as clamp_, findSkater as findSkater_, other as other_ } from './u
 const recordTouch = recordTouch_;
 const stepPuck = stepPuck_;
 const faceShot = faceShot_;
+const lateSave = lateSave_;
 const resolveOnNet = resolveOnNet_;
 const tryTip = tryTip_;
 const DT = DT_;
@@ -86,10 +87,16 @@ export function tryBlock(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
  * when it went wide or over, hit the boards, turned away from the net, slowed below 3 m/s, was picked up, or is still
  * going after 3 s. Call after the puck step and pickup (an `onNet` goes to resolveOnNet instead).
  */
-export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEvent[] = []): void {
+export function trackShot(state: GameState, puckEvents: PuckEvent[], out: GameEvent[] = [], defs?: Map<string, PlayerDef>): void {
   const shot = state.shotInFlight;
-  // A shot past the goalie is on its way in (resolveOnNet scores it at the line).
-  if (shot === null || shot.faced) return;
+  if (shot === null) return;
+  if (shot.faced) {
+    // A shot past the goalie is on its way in (resolveOnNet scores it at the line); one that turns back or stops short
+    // (a fallback) was saved after all.
+    const pk0 = state.puck, end0 = state.attackDir[shot.side];
+    if (state.carrierId !== null || pk0.vel.x * end0 <= 0 || hypot2(pk0.vel.x, pk0.vel.y) < MISS_SPEED || (state.tick - shot.tick) * DT > SHOT_MAX_SECONDS) lateSave(state, defs, out);
+    return;
+  }
   const end = state.attackDir[shot.side];
   const pk = state.puck;
   let post = false, gone = false;

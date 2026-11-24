@@ -31,7 +31,7 @@ export function flyShot(st: GameState, ds: Map<string, PlayerDef>, rng: Rng, max
     const before = { x: st.puck.pos.x, y: st.puck.pos.y };
     const speed = Math.hypot(st.puck.vel.x, st.puck.vel.y, st.puck.vz);
     const r = moveLoosePuck(st, ds, rng, out, prev);
-    if (st.phase === 'live' && !r.onNet) trackShot(st, r.puckEvents, out);
+    if (st.phase === 'live' && !r.onNet) trackShot(st, r.puckEvents, out, ds);
     ticks.push({ tick: st.tick, before, after: { x: st.puck.pos.x, y: st.puck.pos.y }, speed, events: out });
   }
   return ticks;

@@ -84,9 +84,15 @@ describe('goalies, saves, goals', () => {
         }
       });
     }, GAME_TIMEOUT * 8);
-    it('every goal from a shot is immediately preceded by a shot by the same player', () => {
+    // Task 8: the shot is emitted where the puck meets the goalie and the goal when it crosses the line, up to 4 ticks later.
+    it('every goal from a shot is preceded by its shot by the same player, at most 4 ticks before', () => {
       const bad: string[] = [];
-      for (const r of games()) r.events.forEach((e, k) => { if (e.type !== 'goal' || e.detail.releaseTick === null) return; const prev = r.events[k - 1]; if (!prev || prev.type !== 'shot' || prev.playerId !== e.playerId) bad.push(`tick ${e.tick}`); });
+      for (const r of games()) r.events.forEach((e, k) => {
+        if (e.type !== 'goal' || e.detail.releaseTick === null) return;
+        let j = k - 1; while (j >= 0 && r.events[j]!.type !== 'shot') j--;
+        const prev = r.events[j];
+        if (!prev || prev.type !== 'shot' || prev.playerId !== e.playerId || e.tick - prev.tick > 4) bad.push(`tick ${e.tick}`);
+      });
       expect(bad).toEqual([]);
     }, GAME_TIMEOUT * 8);
   });

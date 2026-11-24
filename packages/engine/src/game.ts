@@ -10,6 +10,7 @@ import { gameEvent as gameEvent_ } from './events';
 import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
 import { goalieTick as goalieTick_, scoreFacedShot as scoreFacedShot_ } from './goalie';
 import { moveLoosePuck as moveLoosePuck_, trackShot as trackShot_ } from './shots';
+import type { PuckEvent } from './puck';
 import { refereeTick as refereeTick_ } from './referee';
 import { clipToNets as clipToNets_, FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_, routeAroundNets as routeAroundNets_ } from './rink';
 import { createRng as createRng_, restoreRng as restoreRng_, type Rng } from './rng';
@@ -121,6 +122,7 @@ const noVel = { x: 0, y: 0 };
 /** Scratch: a skater's blade. */
 const bladeScratch = { x: 0, y: 0 };
 const NO_IDS: string[] = [];
+const NO_PUCK_EVENTS: PuckEvent[] = [];
 /** A skater routes round a net frame grown by his radius plus ROUTE_SLACK (m), via a corner ROUTE_ROUND (m) further out. */
 const ROUTE_SLACK = 0.05;
 const ROUTE_ROUND = 0.4;
@@ -517,6 +519,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
       if (state.carrierId !== null) for (const sk of skaters) if (sk.id === state.carrierId) { carrier = sk; break; }
       if (carrier) {
         carryPuck(carrier);
+        // A shot still in flight that someone has come away with (a contest's hand-over): it is over.
+        if (state.shotInFlight !== null) trackShot(state, NO_PUCK_EVENTS, events, defs);
       } else {
         state.carrierId = null;
         // Tips, blocks, the goalie's save at his plane, the puck's step and the net (shots.ts moveLoosePuck).
@@ -531,7 +535,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[]):
               else tryPickup(skaters, prevPuck);
             } else tryPickup(skaters, prevPuck);
           }
-          trackShot(state, puckEvents, events);
+          trackShot(state, puckEvents, events, defs);
         }
       }
       watchLastSave();

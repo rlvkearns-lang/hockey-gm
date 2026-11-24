@@ -35,7 +35,7 @@ describe('resuming a game from a snapshot', () => {
     // Task 8: mid-flight past the goalie (a goal on its way in), with a rebound loose in front, mid-tip.
     ['with a shot past the goalie on its way in', (s) => s.shotInFlight !== null && s.shotInFlight.faced, 10_000],
     ['with a rebound loose in front', (s) => s.lastSave !== null && s.lastSave.kind === 'rebound' && s.carrierId === null, 10_000],
-    ['with a tipped shot in flight', (s) => s.shotInFlight !== null && s.shotInFlight.tippedBy !== null, 10_000],
+    ['with a tipped shot in flight', (s) => s.shotInFlight !== null && s.shotInFlight.tippedBy !== null, 0],
     // Task 7 review, Minor 4: a one-timer pass just taken.
     ['just after a one-timer pass was taken', (s) => s.oneTimerTaken !== null && s.tick - s.oneTimerTaken.tick <= 1, 10_000],
     ['while play is stopped', (s) => s.phase === 'stopped', 70_000],

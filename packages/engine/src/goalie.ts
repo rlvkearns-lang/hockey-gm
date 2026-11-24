@@ -9,7 +9,7 @@ import { wrapAngle as wrapAngle_ } from './skating';
 import { TUNING as TUNING_ } from './tuning';
 import { saveOutcome as saveOutcome_ } from './rebounds';
 import type { Crossing, EventDetails, GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, ShotInFlight, Side } from './types';
-import { dist as dist_, hypot2 as hypot2_, type Vec2 } from './vec';
+import { dist as dist_, hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
 import { datan2 as datan2_, dexp as dexp_, dtanh as dtanh_, hypot3 as hypot3_ } from './dmath';
 import { clamp as clamp_, GRAVITY as GRAVITY_, other as other_, PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
@@ -22,6 +22,7 @@ const wrapAngle = wrapAngle_;
 const TUNING = TUNING_;
 const dist = dist_;
 const hypot2 = hypot2_;
+const segDistXY = segDistXY_;
 const datan2 = datan2_;
 const hypot3 = hypot3_;
 const GRAVITY = GRAVITY_;
@@ -47,6 +48,7 @@ const COVER_SECONDS = 1.2;
 /** He faces only a shot on its way in clear of the posts (by POST_CLEAR m: the puck and the post's radius) and under the bar (by BAR_CLEAR m). */
 const POST_CLEAR = PUCK_RADIUS_ + 0.03 + 0.01;
 const BAR_CLEAR = 0.05;
+const POSTS: readonly number[] = [RINK_.netHalfWidth, -RINK_.netHalfWidth];
 /** An attacker screens him within SCREEN_OFF (m) of a shot's line, SCREEN_NEAR to SCREEN_FAR (m) in front of him. */
 const SCREEN_OFF = 0.6;
 const SCREEN_NEAR = 0.8;
@@ -301,7 +303,10 @@ export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   const lz = heightAfter(pk.z, pk.vz, tl);
   if (Math.abs(ly) >= RINK.netHalfWidth || lz >= RINK.netHeight) return false;
   // Within a post's (or the bar's) reach it may ring off it if he does not stop it: then only his save is decided here.
-  const near = Math.abs(ly) >= RINK.netHalfWidth - POST_CLEAR || lz >= RINK.netHeight - BAR_CLEAR;
+  // (At a sharp angle the path can meet a post before the line even when it crosses the line inside it.)
+  let near = Math.abs(ly) >= RINK.netHalfWidth - POST_CLEAR || lz >= RINK.netHeight - BAR_CLEAR;
+  const t0 = (gx - x0) / vx, sx = gx, sy = y0 + vy * t0;
+  for (const py of POSTS) if (segDistXY(nx, py, sx, sy, nx, ly) < POST_CLEAR) near = true;
   const t = (gx - x0) / vx;
   const cy = y0 + vy * t, cz = heightAfter(pk.z, pk.vz, t);
   const cross: Crossing = { side: (cy - g.pos.y) * -end, height: cz };
@@ -474,4 +479,22 @@ export function resolveOnNet(
   scoreGoal(state, attSide, shooterId, shot ? shotGoalDetail(shot, cross)
     : { distance, releaseTick: null, cross, shotType: null, tippedFrom: null, screened: false, rebound: false }, out);
   return 'goal';
+}
+
+/**
+ * A shot past the goalie (shot.faced) that turned back or stopped short of the line (a fallback the geometry in faceShot
+ * should leave unused): he got a piece of it after all. `save` (its `shot` was emitted when it met him), the puck loose
+ * where it is (kind 'rebound').
+ */
+export function lateSave(state: GameState, defs: Map<string, PlayerDef> | undefined, out: GameEvent[]): void {
+  const shot = state.shotInFlight;
+  if (shot === null || !shot.faced) return;
+  state.shotInFlight = null;
+  const defSide = other(shot.side);
+  const g = state.goalies[defSide];
+  const end = (-state.attackDir[defSide]) as 1 | -1;
+  const cross = shot.cross ?? { side: 0, height: 0 };
+  const pose = poseFor(defs?.get(g.id)?.catches ?? 'L', { netEnd: end, dy: cross.side * -end, z: cross.height });
+  state.lastSave = { side: defSide, tick: state.tick, kind: 'rebound' };
+  out.push(gameEvent(state, { type: 'save', side: defSide, playerId: g.id, otherId: shot.tippedBy ?? shot.shooterId, pos: state.puck.pos, detail: { pose, kind: 'rebound', cross } }));
 }
