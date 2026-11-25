@@ -23,6 +23,12 @@ describe('real-world scale (Task 13b)', () => {
     expect(m.topSpeed / m.accel).toBeGreaterThan(0.85); expect(m.topSpeed / m.accel).toBeLessThan(1.0);
     expect((m.topSpeed * m.topSpeed) / m.carve).toBeGreaterThan(9); expect((m.topSpeed * m.topSpeed) / m.carve).toBeLessThan(10);
   });
+  // Task 14 (Task 13b review, Minor 4): a 99-power Heavy Slapshot read 112 mph; nothing leaves a stick above 108.
+  it('the hardest shot there is (a 99-power Heavy Slapshot) is 105 to 108 mph', () => {
+    const v = shotSpeedOf({ ...def({ shootingPower: 99 }), badges: ['Heavy Slapshot'] }, 'slap') * MPH;
+    expect(v).toBeGreaterThanOrEqual(105); expect(v).toBeLessThanOrEqual(108);
+    expect(shotSpeedOf({ ...def({ shootingPower: 70 }), badges: ['Heavy Slapshot'] }, 'slap')).toBeGreaterThan(shotSpeedOf(def({ shootingPower: 70 }), 'slap') * 1.07);
+  });
   it('wrist shots 70 to 90 mph across shooting power; slapshots 85 to 105, a 99-power slapshot 100 to 105; one-timers near a slapshot; backhands slower', () => {
     for (const p of [40, 70, 99]) { expect(shot(p, 'wrist')).toBeGreaterThanOrEqual(69.5); expect(shot(p, 'wrist')).toBeLessThanOrEqual(90.5); }
     for (const p of [40, 70, 99]) { expect(shot(p, 'slap')).toBeGreaterThanOrEqual(83); expect(shot(p, 'slap')).toBeLessThanOrEqual(105); }

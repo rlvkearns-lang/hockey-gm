@@ -95,7 +95,8 @@ describe('hits', () => {
   }, 60_000);
   it('the degree chances follow the formula and are never certain', () => {
     // x = (closing - 6) * 0.25 + (hitterMass - targetMass) / 8 - (balance - 70) / 20 - (sawIt ? 0.8 : 0) + margin
-    const c = hitDegreeChances(6, 90, 90, 70, false, 0.2);                           // x = 0.2
+    // (Task 14, Task 13b review Minor 1: closingFrom is 6 * SPEED_SCALE and perClosing 0.25 / SPEED_SCALE, as minClosing scaled.)
+    const c = hitDegreeChances(6 * SPEED_SCALE, 90, 90, 70, false, 0.2);             // x = 0.2
     expect(c.knockdown).toBeCloseTo(0.5, 9); expect(c.stagger).toBeCloseTo(1 / (1 + Math.exp(-1.4)), 9);
     const big = hitDegreeChances(20, 200, 60, 1, false, 1), small = hitDegreeChances(0, 60, 200, 99, true, 0);
     expect(big.knockdown).toBe(0.97); expect(big.stagger).toBe(0.97); expect(small.knockdown).toBe(0.03); expect(small.stagger).toBe(0.03);

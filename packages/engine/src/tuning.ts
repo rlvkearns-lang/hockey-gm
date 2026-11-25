@@ -524,6 +524,8 @@ export const TUNING = deepFreeze({
      * 0.13 to 0.19 of a free one from the same spot per attempt, 0.36 to 0.52 per shot on goal; see task-8b-report.md).
      */
     rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.2, wild: 0.15, aim: 0.8, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.6 },
+    /** Task 14: the hardest shot there is (m/s; 48.2 is 107.8 mph: the hardest shots tracked are about 100 to 105 mph, skills-competition records near 108). */
+    maxSpeed: 48.2,
     /** Shooters aim this far (m) from the centre of the net, either side, and this high. */
     aimY: [0.3, 0.65] as [number, number],
     aimZ: [0.1, 0.8] as [number, number],
@@ -812,7 +814,8 @@ export const TUNING = deepFreeze({
      * nudges him with bumpPush of the push, and a carrier loses it with chance bumpLoose.
      */
     degree: {
-      closingFrom: 6, perClosing: 0.25, kgPerPoint: 8, balanceFrom: 70, balancePer: 20, sawIt: 0.8, sawAngle: (100 * Math.PI) / 180,
+      // Task 14 (Task 13b review, Minor 1): closingFrom and perClosing scaled with real speeds as minClosing was (the same degree for the same closing as a share of top speed).
+      closingFrom: 6 * SPEED_SCALE, perClosing: 0.25 / SPEED_SCALE, kgPerPoint: 8, balanceFrom: 70, balancePer: 20, sawIt: 0.8, sawAngle: (100 * Math.PI) / 180,
       knockdown: -0.2, stagger: 1.2,
       staggerKeep: 0.6, staggerCap: 0.4, staggerSeconds: 0.5, staggerLoose: 0.5, bumpPush: 0.3, bumpLoose: 0.15,
     },

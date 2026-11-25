@@ -125,6 +125,9 @@ const IN_FEET = 0.45;
 const MAX_KICK = 1.2;
 /** The carried puck moves at most the carrier's own travel plus CARRY_TURN (m) a tick, and never more than CARRY_STEP (m). */
 const CARRY_TURN = 0.2;
+// Task 14 (Task 13b review, Minor 2): re-derived for real speeds from speed x DT: the fastest skater there is (a 99
+// Burner, 11.28 m/s) travels 0.376 m a tick and nobody on his feet is above his top speed (skating.ts), so 0.4 m is
+// his travel plus 0.024 m: the cap binds only on a blade swinging round (CARRY_TURN), never on straight skating.
 const CARRY_STEP = 0.4;
 const frameProbe = { x: 0, y: 0 };
 const PICKUP_MAX_SPEED = 12;

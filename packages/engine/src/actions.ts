@@ -294,7 +294,8 @@ export function spreadOf(me: PlayerDef, d: number, pressure: number, type: ShotT
 /** A shot's speed (m/s) by `me` of `type`, before rushing: the type's speed for his power (TYPE_SPEED); Heavy Slapshot's slapshot times heavySlapSpeed. */
 export function shotSpeedOf(me: PlayerDef, type: ShotType): number {
   const t = TYPE_SPEED[type];
-  return (t.base + me.attrs.shootingPower * t.perPoint) * (type === 'slap' && hasBadge(me, 'Heavy Slapshot') ? BADGE.heavySlapSpeed : 1);
+  // (Task 14, Task 13b review Minor 4: nothing leaves a stick above TUNING.shot.maxSpeed, 108 mph; a 99-power Heavy Slapshot read 112.)
+  return Math.min(SHOT.maxSpeed, (t.base + me.attrs.shootingPower * t.perPoint) * (type === 'slap' && hasBadge(me, 'Heavy Slapshot') ? BADGE.heavySlapSpeed : 1));
 }
 
 /** Whether a shot `side` lets go now is a rebound shot: within TUNING.rebound.windowSeconds of a save on the net it attacks (Task 8). */
