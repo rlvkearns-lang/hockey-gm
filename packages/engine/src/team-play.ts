@@ -260,6 +260,16 @@ function assignAll(state: GameState, defs: Map<string, PlayerDef>, tactics: Reco
     }
     if (plan.job === 'f1') s.speedCap *= s.side === 'home' ? homeBack : awayBack;
   }
+  // Task 14 (real effort): a carrier away flat out (a breakaway or an odd-man rush: brain.ts gives him more than hard
+  // skating) is chased flat out by the men he has got behind: every man of the other side skating hard who is further
+  // from his own net than the carrier goes all out to get back. The men still goal-side of him play him as they were.
+  if (carrier !== null && carrier.speedCap > TUNING.effort.sprint) {
+    const dir = state.attackDir[carrier.side], cx = carrier.pos.x * dir;
+    for (let i = 0; i < sk.length; i++) {
+      const s = sk[i]!;
+      if (s.onIce && s.side !== carrier.side && !s.leaving && s.pos.x * dir < cx && s.speedCap === TUNING.effort.sprint && state.plans[i]!.effort === 'sprint') s.speedCap = TUNING.effort.allOut;
+    }
+  }
 }
 
 /** Jobs that go at the puck or its carrier skating forward, whatever the phase. */

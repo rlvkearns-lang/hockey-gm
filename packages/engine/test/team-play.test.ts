@@ -46,6 +46,19 @@ describe('team play', () => {
     const b = skater(rush, 'away', 'LW'); b.pos = { x: -3, y: 6 }; b.vel = { x: 8, y: 0 }; assignJobs(rush, defs, tactics);
     expect(rush.plans[rush.skaters.indexOf(b)]).toMatchObject({ slow: 'coast', through: false });
   });
+  // Task 14 (real effort): a sprint is hard skating; the men chasing a carrier who is away flat out (a breakaway or an
+  // odd-man rush: brain.ts gives him more than TUNING.effort.sprint) go flat out after him too.
+  it('with the carrier away flat out the men getting back go flat out too; otherwise a sprint is hard skating', () => {
+    const run = (carrierCap: number): number => {
+      const st = stateWith({ carrier: 'home', puckX: 0 });
+      st.skaters.find((k) => k.id === st.carrierId)!.speedCap = carrierCap;
+      for (const k of onIce(st, 'away')) k.pos = { x: -12 + (k.pos.y > 0 ? 0.5 : 0), y: k.pos.y }; // all behind him, a long way to get back
+      assignJobs(st, defs, tactics);
+      return Math.max(...onIce(st, 'away').map((k) => k.speedCap));
+    };
+    expect(run(TUNING.effort.sprint * 0.93)).toBe(TUNING.effort.sprint);
+    expect(run(0.93)).toBe(TUNING.effort.allOut);
+  });
   it('the chaser keeps the puck unless a teammate is clearly closer, and a held spot waits out its hold', () => {
     const st = stateWith({ carrier: null, puckX: 0 }); assignJobs(st, defs, tactics);
     const chaser = (side: 'home' | 'away') => st.skaters.find((s, i) => s.side === side && st.plans[i]!.job === 'chase')!;

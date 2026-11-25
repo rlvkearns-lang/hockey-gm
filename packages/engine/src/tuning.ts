@@ -342,7 +342,7 @@ export const TUNING = deepFreeze({
    * by itself no longer clears a possession valued at patience times the slot look; the screen being set is what he
    * was waiting for.
    */
-  patience: { base: 1.48, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5, pointTraffic: 0.35 }, max: 2 },
+  patience: { base: 1.1, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5, pointTraffic: 0.35 }, max: 2 },
 
   /**
    * Team tactics (tactics.ts, Task 11). Every factor a tactic applies is here; tactics shade option values and jobs and
@@ -665,7 +665,7 @@ export const TUNING = deepFreeze({
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.13,
+      base: 2.04,
       perReactionSecond: 3.2,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
