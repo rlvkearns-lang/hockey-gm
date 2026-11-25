@@ -1364,6 +1364,14 @@ export function playRecord(i: number, o: CalibrationOpts = {}): GameRecord {
   const counts: Record<string, number> = {};
   for (const e of r.events) {
     counts[e.type] = (counts[e.type] ?? 0) + 1;
+    // Task 14: goals off a rebound, off a tip, and from the point (11 m or more) through traffic (screened or tipped).
+    if (e.type === 'goal') {
+      const d = e.detail;
+      if (d.rebound) counts['goal:rebound'] = (counts['goal:rebound'] ?? 0) + 1;
+      if (d.tippedFrom !== null) counts['goal:tipped'] = (counts['goal:tipped'] ?? 0) + 1;
+      if (d.rebound || d.tippedFrom !== null) counts['goal:second'] = (counts['goal:second'] ?? 0) + 1;
+      if (d.distance >= 11 && (d.screened || d.tippedFrom !== null)) counts['goal:pointTraffic'] = (counts['goal:pointTraffic'] ?? 0) + 1;
+    }
     if (DETAILED.has(e.type)) {
       const k = `${e.type}:${detailKey(e)}`;
       counts[k] = (counts[k] ?? 0) + 1;

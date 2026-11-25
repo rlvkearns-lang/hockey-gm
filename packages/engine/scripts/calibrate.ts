@@ -69,5 +69,9 @@ const goalsDist = new Map<number, number>();
 for (const r of rs as GameRecord[]) { const n = r.score.home + r.score.away; goalsDist.set(n, (goalsDist.get(n) ?? 0) + 1); }
 row('total goals: games', [...goalsDist.keys()].sort((a, b) => a - b).map((k) => `${k}:${goalsDist.get(k)}`).join(' '));
 
+const goalsAll = rs.reduce((a, r) => a + r.score.home + r.score.away, 0);
+row('goals rebound/tipped/either', `${f(perGame('goal:rebound'))} / ${f(perGame('goal:tipped'))} / ${f(perGame('goal:second'))} a game: ${f((perGame('goal:second') * rs.length) / goalsAll, 3)} of goals`);
+row('goals from the point in traffic', `${f(perGame('goal:pointTraffic'))} a game: ${f((perGame('goal:pointTraffic') * rs.length) / goalsAll, 3)} of goals`);
+row('largest game (goals)', String(Math.max(...rs.map((r) => r.score.home + r.score.away))));
 console.log('\nhow it plays (test/measures.ts)');
 for (const [k, v] of Object.entries(m.play)) row(k, f(v, Math.abs(v) < 1 ? 3 : 2));

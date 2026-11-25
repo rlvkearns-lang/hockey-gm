@@ -42,7 +42,7 @@ export type PlayCounterKey =
   | 'engagedTicks' | 'contactOver03Free' | 'contactOver03Engaged' | 'coverTicks' | 'coverDist' | 'coverNearTicks' | 'coverNearDist' | 'engagements'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
-  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals' | 'icings' | 'hardClears' | 'faceoffs' | 'faceoffCapped'
+  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals' | 'icings' | 'hardClears' | 'faceoffs' | 'faceoffCapped' | 'longestLiveTicks' | 'liveOver240'
   | 'fastestMph' | 'bursts20' | 'bursts22' | 'shotsWrist' | 'shotsSlap' | 'shotsOneTimer' | 'shotsBackhand'
   | 'mphWrist' | 'mphSlap' | 'mphOneTimer' | 'mphBackhand' | 'maxMphWrist' | 'maxMphSlap' | 'maxMphOneTimer' | 'maxMphBackhand'
   | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
@@ -65,7 +65,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'engagedTicks', 'contactOver03Free', 'contactOver03Engaged', 'coverTicks', 'coverDist', 'coverNearTicks', 'coverNearDist', 'engagements',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
-  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals', 'icings', 'hardClears', 'faceoffs', 'faceoffCapped',
+  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals', 'icings', 'hardClears', 'faceoffs', 'faceoffCapped', 'longestLiveTicks', 'liveOver240',
   'fastestMph', 'bursts20', 'bursts22', 'shotsWrist', 'shotsSlap', 'shotsOneTimer', 'shotsBackhand',
   'mphWrist', 'mphSlap', 'mphOneTimer', 'mphBackhand', 'maxMphWrist', 'maxMphSlap', 'maxMphOneTimer', 'maxMphBackhand',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
@@ -75,7 +75,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
 ];
 
 /** Counters that hold a largest value, not a sum: games combine by taking the largest. */
-const MAX_KEYS: ReadonlySet<PlayCounterKey> = new Set<PlayCounterKey>(['pickupSnapMax', 'carryStepMax', 'fastestMph', 'maxMphWrist', 'maxMphSlap', 'maxMphOneTimer', 'maxMphBackhand']);
+const MAX_KEYS: ReadonlySet<PlayCounterKey> = new Set<PlayCounterKey>(['pickupSnapMax', 'carryStepMax', 'longestLiveTicks', 'fastestMph', 'maxMphWrist', 'maxMphSlap', 'maxMphOneTimer', 'maxMphBackhand']);
 /** Adds counter `k` of one game (`v`) into the running total `c`. */
 const addInto = (c: PlayCounters, k: PlayCounterKey, v: number): void => { c[k] = MAX_KEYS.has(k) ? Math.max(c[k], v) : c[k] + v; };
 
@@ -95,6 +95,8 @@ export type PlayMeasures = {
   shotMphWrist: number; shotMphSlap: number; shotMphOneTimer: number; shotMphBackhand: number;
   shotMphMaxWrist: number; shotMphMaxSlap: number; shotMphMaxOneTimer: number; shotMphMaxBackhand: number;
   passCompletion: number; pointPassesPerGame: number; pointPassKeptShare: number; pointPassCompletion: number;
+  /** Task 14: the longest live stretch without a whistle in the set (s), and stretches over four minutes per game. */
+  longestLiveSeconds: number; liveOver240PerGame: number; hardClearsPerGame: number;
   attemptsPerTeam: number; defenceAttemptsPerTeam: number; reboundChancesPerGame: number;
   battleWinnerCameAwayShare: number; battleToWinnerIsWinnerShare: number; battlesNoWinnerPerGame: number; knockdownShare: number;
   ozoneSecondsPerPossession: number; attemptsPerOzonePossession: number; twoOpenShare: number; dangerShadowedShare: number;
@@ -110,6 +112,8 @@ export const emptyCounters = (): PlayCounters => Object.fromEntries(PLAY_COUNTER
 
 // ---- definitions ----
 const STATIONARY_SPEED = 0.5;
+/** Task 14: a live stretch this long (four minutes) without a whistle is counted (liveOver240). */
+const LONG_LIVE_TICKS = Math.round(240 / DT);
 const TOP_SPEED_SHARE = 0.9;
 /** Task 14: under this share of his own top speed he is gliding or cruising. */
 const CRUISE_SHARE = 0.75;
@@ -214,6 +218,7 @@ export function createObserver(setup: GameSetup): Observer {
   let openPass: { from: string; to: string; side: Side; tick: number; point: boolean } | null = null;
   let openPoint: { from: string; side: Side; tick: number } | null = null;
   let lastSave: { attack: Side; tick: number } | null = null;
+  let liveRun = 0;
   const openBattles: { winner: string; tick: number }[] = [];
   let ozone: { side: Side; k: number } | null = null;
   let behind: { id: string; ticks: number } | null = null;
@@ -736,6 +741,8 @@ export function createObserver(setup: GameSetup): Observer {
       else { if (prevPhase === 'faceoffSetup' && st.phase === 'live' && setupTicks * DT >= FACEOFF_MAX_SECONDS - 1e-6) c.faceoffCapped++; setupTicks = 0; }
       prevPhase = st.phase;
       if (st.phase === 'live') { c.liveTicks++; if (st.engagements.length > 0) c.engagedTicks++; }
+      // Task 14: the longest stretch of live play without a whistle, and how many stretches ran over four minutes.
+      if (st.phase === 'live') { liveRun++; if (liveRun > c.longestLiveTicks) c.longestLiveTicks = liveRun; if (liveRun === LONG_LIVE_TICKS) c.liveOver240++; } else liveRun = 0;
       for (const e of events) if (e.type === 'engagement') c.engagements++;
       netFront(st, events);
       skaters(st);
@@ -770,6 +777,7 @@ export function measuresOf(games: { counters: PlayCounters; maxPuckJump: number 
     glideShare: ratio(c.glideTicks, c.skaterTicks),
     topSpeedShare: ratio(c.topSpeedTicks, c.skaterTicks),
     cruiseShare: ratio(c.cruiseTicks, c.skaterTicks), hardShare: ratio(c.hardTicks, c.skaterTicks),
+    longestLiveSeconds: c.longestLiveTicks * DT, liveOver240PerGame: perGame(c.liveOver240), hardClearsPerGame: perGame(c.hardClears),
     sprintRunSeconds: ratio(c.sprintRunTicks * DT, c.sprintRuns),
     backwardShareWithPuck: ratio(c.backwardTicksWithPuck, c.ticksWithPuck),
     retargetShare: ratio(c.retargets, c.spotTicks),
