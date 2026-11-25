@@ -158,7 +158,7 @@ export type CarrierPlan = {
   read?: string;
   /** Task 8 fix round 2: he holds this plan until this tick unless an event makes a decision point (brain.ts). */
   until?: number;
-  /** Whether he was under pressure (TUNING.brain.decide.pressed) when he chose it. */
+  /** No longer written (Task 13b: dead since pressure got its own trigger, Task 8b review Minor 2); kept so old snapshots still type. */
   pressed?: boolean;
   /**
    * Task 8b: what made his last decision (brain.ts): 'gain' (he got the puck), 'read' (his situation changed), 'hold'

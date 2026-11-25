@@ -34,6 +34,14 @@ describe('tactics: two teams look different (offence, forecheck)', () => {
     expect(pts.defenceAttemptsPerGame).toBeGreaterThan(cyc.defenceAttemptsPerGame * 1.4);
     expect(pts.pointAttemptShare).toBeGreaterThan(cyc.pointAttemptShare * 1.4);
   }, LONG);
+  // Task 13b item 5 (the offence tactic's job order, Task 11/12 reviews): the net-front man is handed out first; after
+  // him a cycle team's second forward takes low support before the high forward (jobs.ts phaseJobs). Read on the same
+  // games (8 each). At Task 13b: low support 0.608 of a cycle team's zone time, 0.593 a point-shot team's, 0.583 a rush
+  // team's (a small edge: the carrier's own job is taken out of the list, and the hold keeps men where they are).
+  it('the offence orders the zone jobs: a cycle team has a man in low support more of its zone time than a rush or point-shot team', () => {
+    const cyc = home({ offence: 'cycle' }, 8), rush = home({ offence: 'rush' }, 8), pts = home({ offence: 'pointShots' }, 8);
+    expect(cyc.lowSupportShare).toBeGreaterThan(rush.lowSupportShare); expect(cyc.lowSupportShare).toBeGreaterThan(pts.lowSupportShare);
+  }, LONG);
   it('an aggressive forecheck has two men deep; a trap has at most one', () => {
     expect(home({ forecheck: 'aggressive' }, 2).twoDeepShare).toBeGreaterThan(0.40);
     expect(home({ forecheck: 'passive' }, 2).twoDeepShare).toBeLessThan(0.10);

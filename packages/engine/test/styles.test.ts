@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { blendHabits, STYLES, styleLabel, styleOf } from '../src/styles';
+import { blendHabits, STYLES, styleGaps, styleLabel, styleOf } from '../src/styles';
+import { TUNING } from '../src/tuning';
 import { PLAYER_TYPES } from '../src/player-types';
 import { generateTeam } from '../src/roster-gen';
 import { at, def, runBattle, shareOf } from './helpers';
@@ -60,6 +61,38 @@ describe('styles (Task 12)', () => {
       expect(p.tendencies.block).toBeGreaterThanOrEqual(0); expect(p.tendencies.block).toBeLessThanOrEqual(1);
     }
     expect(ps.some((p) => p.type === 'Shutdown Forward')).toBe(true);
+  });
+});
+
+// Task 13b item 5 (Task 12 review): a label kept unless the evidence clearly crosses. His declared style (his type's) stays
+// his primary unless another scores TUNING.styles.keepMargin more.
+describe('style labels with a margin (Task 13b)', () => {
+  const skaters = (): PlayerDef[] => Array.from({ length: 40 }, (_, k) => generateTeam(k + 1, 'T', 'TTT').players).flat().filter((p) => p.position !== 'G');
+  const declared = (d: PlayerDef): Style | undefined => (Object.keys(STYLES) as Style[]).find((k) => STYLES[k].typeKey === d.type);
+  it('a generated player is read as his own type nearly always (under 2% otherwise; about 7% before)', () => {
+    const ps = skaters();
+    const off = ps.filter((p) => styleOf(p)!.primary !== declared(p)).length;
+    expect(off / ps.length).toBeLessThan(0.02);
+  });
+  it('a one-point change in any single attribute flips no label that was not within its margin', () => {
+    const M = TUNING.styles.keepMargin, W = TUNING.styles.secondaryWithin, NEAR = 0.015;
+    let cases = 0, flips = 0;
+    for (const p of skaters()) {
+      const before = styleOf(p)!;
+      for (const a of Object.keys(p.attrs) as (keyof typeof p.attrs)[]) for (const dv of [-1, 1]) {
+        const q: PlayerDef = { ...p, attrs: { ...p.attrs, [a]: p.attrs[a] + dv } };
+        const after = styleOf(q)!;
+        cases++;
+        if (after.label === before.label) continue;
+        flips++;
+        const g = styleGaps(p);
+        // Either the primary's challenger stood within NEAR of beating it by the margin, or the secondary within NEAR of its
+        // threshold, or two styles within NEAR of each other for the secondary (no declared secondary to keep).
+        expect(Math.abs(g.challenger - M) <= NEAR || Math.abs(g.secondaryRatio - W) <= NEAR || g.secondaryTie <= NEAR, `${p.id} ${a} ${dv}: ${before.label} -> ${after.label}`).toBe(true);
+      }
+    }
+    expect(cases).toBeGreaterThan(5000);
+    expect(flips / cases).toBeLessThan(0.01);
   });
 });
 

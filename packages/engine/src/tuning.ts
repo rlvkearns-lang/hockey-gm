@@ -43,7 +43,7 @@ export const TUNING = deepFreeze({
      * arriveLead s (plus one look) before he would reach a carry's target, he carries on up the same lane unless he sees
      * better. Inside a hold he weighs his plan against the rest once per betterEvery s.
      */
-    decide: { holdZone: 1.5, hold: 1.0, holdPressure: 0.3, pressed: 0.5, arrive: 1.5, margin: 0.08, marginHeld: 0.035, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 3, readGap: 0.8, arriveLead: 0.3, betterEvery: 0.4 },
+    decide: { holdZone: 1.5, hold: 1.0, holdPressure: 0.3, arrive: 1.5, margin: 0.08, marginHeld: 0.035, slotRx: 17, slotLy: 6, pressIn: 3, pressOut: 4.5, pressCooldown: 3, readGap: 0.8, arriveLead: 0.3, betterEvery: 0.4 },
     /** Shot quality falls as exp(-distance / shotDistanceScale); nothing beyond maxShotDistance (m). */
     shotDistanceScale: 9,
     maxShotDistance: 25,
@@ -85,6 +85,9 @@ export const TUNING = deepFreeze({
      * adds hold * holdBoost.shoot to a shot's value and hold * holdBoost.pass to a pass's (options.ts). Task 8b: time with
      * the puck no longer pushes him to shoot (shoot 0, was 0.3: with patience he waits for a look), and moves him to pass
      * more (pass 6, was 2); in his first second with it (not settled) a pass is held back by `unsettled` instead.
+     * Task 13b (Task 8b review, Minor 6): declared, like patience: pass 6 and unsettled 1.33 are a calibration set by hand
+     * in Task 8b to hold the 600-900 passes bar, not a measurement (0.036 after 3 s with the puck, up to 0.18 at holdCap,
+     * against a pick temperature of about 0.018: time with the puck favours passing). Task 14 tunes it.
      */
     holdBoost: { shoot: 0, pass: 6, unsettled: 1.33 },
     /** Shielding: he backs this far (m) away from the nearest opponent, at this fraction of top speed. */
@@ -183,7 +186,9 @@ export const TUNING = deepFreeze({
    * the rest of the 3.5 the Task 8 fit found was pressured shots, now valued through shootPressure and TUNING.shot.rushed),
    * and TUNING.options.threat.shot with it (0.15 -> 0.23: a spot is worth the shot from it); `traffic` 0.02 -> 0.1 (a screen,
    * a tip and a rebound with a man in front: point shots wait for traffic); pick.base 0.017 -> 0.0147 and pick.perPoint
-   * 0.0001 -> 0.00012 (the same spread for an average player on values that are now larger; a limited player errs more);
+   * 0.0001 -> 0.00012 (Task 13b, Task 8b review Minor 3, what it does: values grew about 1.5 times, V.goal 0.13 -> 0.2,
+   * while the temperature fell about 8%, 0.020 -> 0.018 at IQ 70, so relative to the values the pick is about 40% colder,
+   * which suppresses poor (rushed) picks; a limited player errs more);
    * `stick` 0.03 -> 0.034 and `hold` 0.002 -> 0.003 (kept in proportion to the larger values).
    */
   value: {
@@ -457,8 +462,14 @@ export const TUNING = deepFreeze({
      * he attacks); no backhand or blind pass within ownNetClear m of the centre of his own net.
      */
     netBeyond: 4.5, netCone: 0.06, ownNetClear: 3.5,
-    /** The cover (0 to 1) a pass has when the stick blade of a man level with or behind the puck is within stickLane of its lane (Task 8b close-out). */
-    checkerCover: 0.8,
+    /**
+     * The cover (0 to 1) a pass has when the stick blade of a man level with or behind the puck is within stickLane of its
+     * lane (Task 8b close-out). Task 13b (Task 8b review, Minor 8): set from the mechanism, not by hand (was 0.8). In play
+     * the passer's checker reaches with stickInterceptChance times checkerTry: a 70 checker on a 15 m/s pass, 0.548 *
+     * 0.4 = 0.22, so 0.78 of those passes get by him. The valuation keeps 1 - sqrt(cover) * (options.pass.cover -
+     * coverPerPoint * passing) of a pass's chance: 0.78 at passing 70 needs sqrt(cover) = 0.22 / 0.65, cover 0.11.
+     */
+    checkerCover: 0.11,
     backhand: { speed: 0.75, error: 1.6, range: 15 },
     behind: { speed: 0.6, error: 2.2, range: 8 },
   },
@@ -893,6 +904,18 @@ export const TUNING = deepFreeze({
     limits: { receive: 0.6, spread: 1, shootValue: 0.5, tip: 0.6, reach: 0.5 },
   },
 
+  /**
+   * Builder's constants moved here (Task 8b review, Minor 4; Task 13b): `pressure` is the pressure ramp (actions.ts
+   * pressureOn, options.ts lookLeft): 0 with nobody within `from` m, 1 with an opponent `from - over` m off or closer;
+   * clearedSpeed (m/s, bench.ts): the puck moving out of a team's zone this fast with nobody carrying lets it change;
+   * stoppedPush (m, game.ts): how far a goalie's body may push a skater in one tick while play is stopped; protectOffLine
+   * (m, brain.ts): a protecting carrier's target stays this far on the puck's side of a goal line; carryMin (m,
+   * options.ts): a carry lane in the zone is offered only when its end is this far from him; checkerNear (m, passing.ts):
+   * a passer's checker is an opponent this near the puck as he lets it go; faceNear (m, team-play.ts): the attacking
+   * jobs that face the play do so only within this far of their spot.
+   */
+  builder: { pressure: { from: 5, over: 4 }, clearedSpeed: 3, stoppedPush: 0.4, protectOffLine: 0.6, carryMin: 2.5, checkerNear: 2.5, faceNear: 2 },
+
   /** Fatigue and line changes (bench.ts). */
   fatigue: {
     /**
@@ -917,9 +940,11 @@ export const TUNING = deepFreeze({
    * secondaryBias of the secondary's. styleOf scores each style of his group by attrWeight of how well his attributes
    * match its bias (0.5 + the mean bias-weighted difference from his own mean / attrSpan, within 0 to 1) and the rest by
    * how well his habits match its habits (1 - the mean absolute difference); the next best is his secondary when its
-   * score is at least secondaryWithin of the best.
+   * score is at least secondaryWithin of the best. Task 13b: his declared style (his type's) is kept as primary unless
+   * another scores keepMargin more (it flipped on a one-point change near a tie; 6.5% of generated skaters read as
+   * another primary than their type).
    */
-  styles: { secondaryChance: 0.6, secondaryShare: 1 / 3, secondaryBias: 0.5, attrWeight: 0.5, attrSpan: 40, secondaryWithin: 0.85 },
+  styles: { secondaryChance: 0.6, secondaryShare: 1 / 3, secondaryBias: 0.5, attrWeight: 0.5, attrSpan: 40, secondaryWithin: 0.85, keepMargin: 0.05 },
 
   /**
    * Badges (badges.ts, Task 12): each badge's one effect, small, read where the badge acts (one guarded line there).

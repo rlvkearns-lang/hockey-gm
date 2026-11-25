@@ -118,7 +118,7 @@ export type Game = {
 const PERIOD_TICKS = Math.round(PERIOD_SECONDS / DT);
 const STOPPED_SECONDS = 1.5;
 /** While play is stopped a skater in a goalie's way is moved out at most this far (m) a tick (bodies.ts resolveGoalies). */
-const STOPPED_PUSH = 0.4;
+const STOPPED_PUSH = TUNING_.builder.stoppedPush;
 /** A loose puck is taken with the blade within his pickup reach of it (engage-state.ts pickupReachOf), or in his feet: his centre within IN_FEET (m). */
 const IN_FEET = 0.45;
 /** A puck in his feet goes to his stick only from within this far (m) of the blade (the most a pickup moves it). */

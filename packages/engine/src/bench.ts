@@ -175,7 +175,7 @@ export function finishChanges(state: GameState, setup: GameSetup): void {
 }
 
 /** A loose puck outside a team's zone going up ice at more than this (m/s) has been cleared: the team may change. */
-const CLEARED_SPEED = 3;
+const CLEARED_SPEED = TUNING.builder.clearedSpeed;
 
 /** `b` should change now (its on-ice energy is in this tick's energySum and headCount). */
 function isDue(state: GameState, setup: GameSetup, side: Side, unit: Unit, b: BenchUnit, now: number, otherChanging: boolean, carrierSide: Side | null): boolean {

@@ -36,7 +36,8 @@ describe('resuming a game from a snapshot', () => {
     ['mid-line-change', (s) => s.bench.home.forwards.changing || s.bench.away.defence.changing, 40_000],
     ['with a shot in flight', (s) => s.shotInFlight !== null, 60_000],
     // Task 8: mid-flight past the goalie (a goal on its way in), with a rebound loose in front, mid-tip.
-    ['with a shot past the goalie on its way in', (s) => s.shotInFlight !== null && s.shotInFlight.faced, 10_000, 12],
+    // (Task 13b: after its changes seed 12 has no shot past the goalie after tick 10,000; seed 11 does, at 30,391.)
+    ['with a shot past the goalie on its way in', (s) => s.shotInFlight !== null && s.shotInFlight.faced, 10_000],
     ['with a rebound loose in front', (s) => s.lastSave !== null && s.lastSave.kind === 'rebound' && s.carrierId === null, 10_000],
     ['with a tipped shot in flight', (s) => s.shotInFlight !== null && s.shotInFlight.tippedBy !== null, 0, 12],
     // Task 8 fix round 2: mid-hold of a carrier's plan (a decision point not yet reached).

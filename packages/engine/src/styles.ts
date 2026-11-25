@@ -86,23 +86,66 @@ function styleScore(d: PlayerDef, k: Style, mean: number): number {
   return S.attrWeight * attr + (1 - S.attrWeight) * habit;
 }
 
+/** The style his type declares (the one built on his PLAYER_TYPES entry), if it is a style of `group`. */
+function declaredStyle(def: PlayerDef, group: 'F' | 'D'): Style | null {
+  for (const k of stylesOf(group)) if (STYLES[k].typeKey === def.type) return k;
+  return null;
+}
+
+/** styleOf's reading of `def` (no override): primary and secondary, their scores, and the declared style's score. */
+function readStyles(def: PlayerDef, group: 'F' | 'D'): { primary: Style; ps: number; next: Style | null; ns: number; declared: Style | null; ds: number; best: Style; bs: number } {
+  let mean = 0;
+  for (const a of SKATER_ATTRS) mean += def.attrs[a];
+  mean /= SKATER_ATTRS.length;
+  const declared = declaredStyle(def, group);
+  let best: Style | null = null, bs = -Infinity, ds = -Infinity;
+  const scores: [Style, number][] = [];
+  for (const k of stylesOf(group)) {
+    const v = styleScore(def, k, mean);
+    scores.push([k, v]);
+    if (v > bs) { best = k; bs = v; }
+    if (k === declared) ds = v;
+  }
+  // Task 13b: his declared style stays primary unless another beats it by keepMargin (hysteresis: a label changes only
+  // when the evidence clearly crosses).
+  const primary = declared !== null && bs <= ds + S.keepMargin ? declared : best!;
+  const ps = primary === declared ? ds : bs;
+  let next: Style | null = null, ns = -Infinity;
+  for (const [k, v] of scores) if (k !== primary && v > ns) { next = k; ns = v; }
+  return { primary, ps, next, ns, declared, ds, best: best!, bs };
+}
+
 /**
  * His style: `def.style` when set; otherwise each style of his group is scored by how well his attributes match its attrBias
- * (mean of bias-weighted attribute differences from his own mean) and his habits match its habits (1 - mean absolute difference);
- * the best is primary, and the next is secondary when its score is at least 0.85 of the best. Goalies: null.
+ * (mean of bias-weighted attribute differences from his own mean) and his habits match its habits (1 - mean absolute difference).
+ * The primary is the style his type declares unless another scores TUNING.styles.keepMargin more (Task 13b; then the
+ * best); the next best is secondary when its score is at least secondaryWithin (0.85) of the primary's. Goalies: null.
  */
 export function styleOf(def: PlayerDef): { primary: Style; secondary: Style | null; label: string } | null {
   const group = groupOf(def.position);
   if (group === null) return null;
   if (def.style) return { primary: def.style.primary, secondary: def.style.secondary, label: styleLabel(def.style.primary, def.style.secondary) };
-  let mean = 0;
-  for (const a of SKATER_ATTRS) mean += def.attrs[a];
-  mean /= SKATER_ATTRS.length;
-  let best: Style | null = null, next: Style | null = null, bs = -Infinity, ns = -Infinity;
+  const r = readStyles(def, group);
+  const secondary = r.next !== null && r.ns >= S.secondaryWithin * r.ps ? r.next : null;
+  return { primary: r.primary, secondary, label: styleLabel(r.primary, secondary) };
+}
+
+/**
+ * How near `def`'s label is to changing (Task 13b, for tests): `challenger`, the best other style's score less his
+ * declared style's (the primary changes when it is over TUNING.styles.keepMargin; NaN with no declared style), and
+ * `secondaryRatio`, the next style's score over the primary's (a secondary from TUNING.styles.secondaryWithin), and
+ * `secondaryTie`, how much the next style outscores the one after it (which of the two is his secondary).
+ */
+export function styleGaps(def: PlayerDef): { challenger: number; secondaryRatio: number; secondaryTie: number } {
+  const group = groupOf(def.position);
+  if (group === null) return { challenger: NaN, secondaryRatio: NaN, secondaryTie: NaN };
+  const r = readStyles(def, group);
+  let other = -Infinity, third = -Infinity;
+  const mean = SKATER_ATTRS.reduce((t, a) => t + def.attrs[a], 0) / SKATER_ATTRS.length;
   for (const k of stylesOf(group)) {
     const v = styleScore(def, k, mean);
-    if (v > bs) { next = best; ns = bs; best = k; bs = v; } else if (v > ns) { next = k; ns = v; }
+    if (k !== r.declared) other = Math.max(other, v);
+    if (k !== r.primary && k !== r.next) third = Math.max(third, v);
   }
-  const secondary = next !== null && ns >= S.secondaryWithin * bs ? next : null;
-  return { primary: best!, secondary, label: styleLabel(best!, secondary) };
+  return { challenger: r.declared === null ? NaN : other - r.ds, secondaryRatio: r.ns / r.ps, secondaryTie: r.ns - third };
 }

@@ -10,7 +10,7 @@ import { TUNING as TUNING_ } from './tuning';
 import { saveOutcome as saveOutcome_, type SaveFacts } from './rebounds';
 import { hasBadge } from './badges';
 import { slideStopChance } from './slide';
-import type { Crossing, EventDetails, GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, ShotInFlight, Side } from './types';
+import type { Crossing, EventDetails, GameEvent, GameState, GoaliePose, GoalieState, PlayerDef, ShotInFlight, ShotType, Side } from './types';
 import { dist as dist_, hypot2 as hypot2_, segDistXY as segDistXY_, type Vec2 } from './vec';
 import { datan2 as datan2_, dexp as dexp_, dtanh as dtanh_, hypot3 as hypot3_ } from './dmath';
 import { clamp as clamp_, GRAVITY as GRAVITY_, other as other_, PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
@@ -114,6 +114,11 @@ export type SaveInput = {
   tipped?: boolean;
   /** 0 to 1: how much of his last save's pose he still has to come out of (his poseT over the pose length): G.save.recovering at 1. */
   recovering?: number;
+  /**
+   * Task 13b (Task 8b review, Minor 9): the speed (m/s) under which the slow-shot term counts, by shot type
+   * (slowFromOf); absent, G.save.slowFrom.
+   */
+  slowFrom?: number;
   /** Task 12: the shooter has Quick Release (the goalie's reaction time times TUNING.badges.quickReleaseReaction). */
   quickRelease?: boolean;
   /** Task 12: the goalie has Glove Hand and the puck comes to his catching side above gloveHeight (+ TUNING.badges.gloveSave log-odds). */
@@ -134,7 +139,7 @@ export function saveChance(input: SaveInput): number {
   const per = skill >= 70 ? G.save.perPointAbove : G.save.perPoint;
   const skillTerm = per * G.save.skillSpan * dtanh((skill - 70) / G.save.skillSpan);
   const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0) + (input.gloveHand === true ? TUNING.badges.gloveSave : 0)
-    + Math.min(G.save.slowMax, G.save.perSlowSpeed * Math.max(0, G.save.slowFrom - input.shotSpeed)) * clamp(input.distance / G.save.slowFull, 0, 1)
+    + Math.min(G.save.slowMax, G.save.perSlowSpeed * Math.max(0, (input.slowFrom ?? G.save.slowFrom) - input.shotSpeed)) * clamp(input.distance / G.save.slowFull, 0, 1)
     - G.save.screened * screen
     - (input.tipped ? G.save.tipped : 0)
     - G.save.recovering * clamp(input.recovering ?? 0, 0, 1)
@@ -379,6 +384,14 @@ function recoveringOf(g: GoalieState): number {
 }
 
 /**
+ * Task 13b (Task 8b review, Minor 9): the slow-shot term is for a shot slowed by a rush, not a type slow by nature: a
+ * backhand's threshold is G.save.slowFrom times the backhand's speed share, a wraparound has none (0); others slowFrom.
+ */
+export function slowFromOf(type: ShotType | null): number {
+  return type === 'backhand' ? G.save.slowFrom * TUNING.shot.types.backhand.speed : type === 'wraparound' ? 0 : G.save.slowFrom;
+}
+
+/**
  * Task 13b: the share of a shot's flight his sight of it was blocked (shot.sight, shots.ts watchSight); a shot with no
  * sight record (built by hand) is a full screen when `screened`, else none.
  */
@@ -452,7 +465,7 @@ export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   const screen = screenShareOf(shot, screened);
   const p = saveChance({
     goalie: ga, lateralMiss: Math.abs(cy - g.pos.y) * Math.abs(vx) / v + squareErr * G.squareMissPerRad, shotSpeed: speed,
-    distance: hypot2(nx - f.x, ly - f.y), screened, screenShare: screen, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: cz,
+    distance: hypot2(nx - f.x, ly - f.y), screened, screenShare: screen, slowFrom: slowFromOf(shot.shotType), goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: cz,
     night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
     quickRelease: quickOf(defs, shot), gloveHand: gloveSide(defs.get(g.id), g, cy, cz, end),
   });
@@ -607,7 +620,7 @@ export function resolveOnNet(
   const screen = shot ? screenShareOf(shot, screened) : 0;
   const p = offLine > SAVE_REACH ? 0 : !shot ? slideStopChance(ev.speed, offLine + squareErr * G.squareMissPerRad) : saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
-    screened, screenShare: screen, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
+    screened, screenShare: screen, slowFrom: shot ? slowFromOf(shot.shotType) : undefined, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
     night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
     quickRelease: quickOf(defs, shot), gloveHand: gloveSide(defs.get(g.id), g, ev.y, ev.z, end),
   });

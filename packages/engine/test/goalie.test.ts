@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { goalieTick, saveChance } from '../src/goalie';
+import { goalieTick, saveChance, slowFromOf } from '../src/goalie';
+import { TUNING } from '../src/tuning';
 import { DT } from '../src/constants';
 import { withGoalies } from './shot-lab';
 import { createGame, simulateGame } from '../src/game';
@@ -28,6 +29,19 @@ function shotsFrom(d: PlayerDef, x: number, y: number, n: number): { y: number; 
   }
   return out;
 }
+
+// Task 13b item 5 (Task 8b review, Minor 9): the slow-shot term is for a shot slowed by a rush, not for a shot type that is
+// slow by nature: a backhand is read against a backhand's speed, a wraparound has none.
+describe('the slow-shot term (Task 13b)', () => {
+  const b = { goalie: g(70), lateralMiss: 0.2, distance: 8, screened: false, goalieMovingSpeed: 0, height: 0.4 };
+  it('a backhand at a backhand\'s speed is no easier to read than at slowFrom; a rushed one is; a wraparound never gains', () => {
+    const fast = saveChance({ ...b, shotSpeed: 40 });
+    expect(saveChance({ ...b, shotSpeed: 27, slowFrom: slowFromOf('backhand') })).toBeCloseTo(saveChance({ ...b, shotSpeed: 27, slowFrom: 27 }), 9);
+    expect(saveChance({ ...b, shotSpeed: 19, slowFrom: slowFromOf('backhand') })).toBeGreaterThan(saveChance({ ...b, shotSpeed: 19, slowFrom: 19 }));
+    expect(saveChance({ ...b, shotSpeed: 9, slowFrom: slowFromOf('wraparound') })).toBeCloseTo(saveChance({ ...b, shotSpeed: 9, slowFrom: 0 }), 9);
+    expect(slowFromOf('wrist')).toBe(TUNING.goalie.save.slowFrom); void fast;
+  });
+});
 
 describe('shots', () => {
   it('a few shots miss the net outright, more for a poor shooter; neither always nor never', () => {

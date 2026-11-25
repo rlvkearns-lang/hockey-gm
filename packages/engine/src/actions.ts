@@ -62,9 +62,9 @@ const bladeScratch: Vec2 = { x: 0, y: 0 };
 export { interceptChance } from './passing';
 
 
-/** 0 (nobody within 5 m) to 1 (an opponent on top of him). */
+/** 0 (nobody within TUNING.builder.pressure.from, 5 m) to 1 (an opponent on top of him). */
 export function pressureOn(state: GameState, s: SkaterState): number {
-  return clamp((5 - nearestOpponentDist(state, s)) / 4, 0, 1);
+  return clamp((TUNING.builder.pressure.from - nearestOpponentDist(state, s)) / TUNING.builder.pressure.over, 0, 1);
 }
 
 /** Longest touch chain kept: the scorer, two assists, and room for repeats. */

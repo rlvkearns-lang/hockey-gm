@@ -167,7 +167,7 @@ const TRAFFIC_NEAR = O.trafficNear;
 /** Carry lanes: how far (m) ahead he aims in the offensive zone, and up ice elsewhere. */
 const CARRY_IN_ZONE = 5;
 /** A carry lane is offered only when its end is at least this far (m) from him. */
-const CARRY_MIN = 2.5;
+const CARRY_MIN = TUNING.builder.carryMin;
 const SHOOTING = { shootingAccuracy: 0.6, shootingPower: 0.4 };
 /** Patience (Task 8b, TUNING.patience). */
 const PT = TUNING.patience;
@@ -260,8 +260,9 @@ export function patienceOf(state: GameState, s: SkaterState, me: PlayerDef, oddM
  * carry that leads to a covered man's look is worth that look, not a free one.
  */
 function lookLeft(space: number, poise: number): number {
-  if (space >= 5) return 1;
-  const pressure = clamp((5 - space) / 4, 0, 1);
+  const PR = TUNING.builder.pressure;
+  if (space >= PR.from) return 1;
+  const pressure = clamp((PR.from - space) / PR.over, 0, 1);
   const calm = 1 - pressure * (B.calm.base - poise * B.calm.perPoise);
   const r = clamp((RU.reach - space) / (RU.reach - RU.full), 0, 1);
   return dpow(calm, B.shootPressure) * (1 - RU.stick.base * r) * (1 - RU.value * r);

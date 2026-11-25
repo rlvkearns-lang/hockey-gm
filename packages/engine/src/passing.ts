@@ -172,7 +172,7 @@ export function passRangeOf(from: PlayerDef | undefined, hand: PassHand, ownZone
 const futScratch: Vec2 = { x: 0, y: 0 };
 const bladeScratch2: Vec2 = { x: 0, y: 0 };
 /** Only a man within this far (m) of the puck, level with or behind it, can have his stick in the lane ahead of it. */
-const CHECKER_NEAR = 2.5;
+const CHECKER_NEAR = TUNING.builder.checkerNear;
 
 /**
  * Fills `out` with the pass from the puck (on `from`'s blade) to `to`: aimed at his blade where he will be when it
