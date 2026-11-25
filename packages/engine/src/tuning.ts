@@ -132,7 +132,7 @@ export const TUNING = deepFreeze({
      * is why skaters spent a quarter of their time at 90% of top speed or more (6,850 bursts over 20 mph a game against
      * an NHL game's few dozen).
      */
-    accelFade: 0.95,
+    accelFade: 0.98,
     glideDecel: 0.6,
     easeDecel: 2.5 * SPEED_SCALE,
     brake: { base: 6 * SPEED_SCALE, perPoint: 0.03 * SPEED_SCALE },
@@ -228,7 +228,7 @@ export const TUNING = deepFreeze({
      * (test/badge-lab.ts labScreen). Set to the lift (0.04 or 0.06), point shots fall by a fifth and tips under 2 a game
      * and net presence at point-shot saves under 40% (item 3's guards). test/valuation-calibration.test.ts reads the gap.
      */
-    traffic: 0.055, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
+    traffic: 0.045, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
     /**
      * What follows in the zone he attacks (Task 8 fix round), measured in play at 43d6dcf, seeds 1-16
      * (task-8-report.md, "Fix round 1"): `keep`, the share of cases in which his team (or nobody) has the puck in the zone
@@ -245,8 +245,8 @@ export const TUNING = deepFreeze({
       carry: { keep: 0.51, rush: 0.06 },
       passFailed: { keep: 0.32, rush: 0.26 },
       held: { keep: 0.46, rush: 0.11 },
-      steered: { keep: 0.34, rush: 0.12 },
-      rebound: { keep: 0.18, rush: 0.07 },
+      steered: { keep: 0.36, rush: 0.12 },
+      rebound: { keep: 0.19, rush: 0.08 },
       blocked: { keep: 0.30, rush: 0.23 },
       wide: { keep: 0.31, rush: 0.14 },
     },
@@ -665,8 +665,8 @@ export const TUNING = deepFreeze({
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.06,
-      perReactionSecond: 3.2,
+      base: 2.29,
+      perReactionSecond: 1.75,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
        * per * skillSpan * tanh((skill - 70) / skillSpan): a weak goalie leaks more than a strong one gains.
@@ -683,7 +683,7 @@ export const TUNING = deepFreeze({
       /** Per metre the shot arrives above `highFrom` (just under the bar is hardest). */
       highFrom: 0.9, perHighMetre: 1.5,
       /** A tipped shot (Task 8); a goalie still in his last save's pose, at the start of it (scaled by how much of it is left). */
-      tipped: 0.9, recovering: 0.8,
+      tipped: 0.9, recovering: 1.1,
       /**
        * A slow shot is easier to read (Task 8b close-out, controller ruling 7): perSlowSpeed per m/s under slowFrom, at
        * most slowMax, in full from slowFull m out and in proportion closer in (in tight he has no time to read anything).
@@ -736,7 +736,7 @@ export const TUNING = deepFreeze({
    * out, an attacker's blade within reach (m) of its path; turned by gauss * turn (rad), vz changed by gauss * lift (m/s),
    * keeping `keep` of its speed.
    */
-  tip: { base: 0.15, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
+  tip: { base: 0.18, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
 
   /**
    * Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from

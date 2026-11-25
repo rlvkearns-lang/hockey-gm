@@ -141,6 +141,8 @@ function nearestOnSeg(px: number, py: number, ax: number, ay: number, bx: number
   return out;
 }
 const PICKUP_MAX_SPEED = 12;
+/** A loose puck higher than this (m) is out of a skater's reach: nobody takes it until it comes down. */
+const PICKUP_MAX_Z = 1.6;
 const HARD_CLEAR_LAND = TUNING.hardClear.landKeep;
 /** A pass that comes off his stick (a bobble) leaves at BOBBLE_SPEED m/s, turned by up to BOBBLE_TURN rad. */
 const BOBBLE_SPEED: [number, number] = [2, 4];
@@ -533,7 +535,9 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
     let takenAt: Vec2 | null = null;
     let passSide: Side | null = null;
     if (pass !== null) for (const k of state.skaters) if (k.id === pass.fromId) passSide = k.side;
-    if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
+    // (Task 14: nor a puck above PICKUP_MAX_Z: one coming down over the net at 2.7 m was taken by a man beside the
+    // frame and put on the ice a metre away, the one hand-over over the 1.2 m bar left in 300 games.)
+    if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED && p.z <= PICKUP_MAX_Z) {
       let bestD = Infinity;
       for (const s of skaters) {
         if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id) || isTiedUp(state, s.id)) continue;
