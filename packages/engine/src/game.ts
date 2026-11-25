@@ -543,7 +543,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
     if (pass !== null) for (const k of state.skaters) if (k.id === pass.fromId) passSide = k.side;
     // (Task 14: nor a puck above PICKUP_MAX_Z: one coming down over the net at 2.7 m was taken by a man beside the
     // frame and put on the ice a metre away, the one hand-over over the 1.2 m bar left in 300 games.)
-    if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED && p.z <= PICKUP_MAX_Z) {
+    // (Nor one that is over a net frame in the air: taken there it was put on the ice outside the frame, a metre away.)
+    if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED && p.z <= PICKUP_MAX_Z && !(p.z > 0 && inFrame(p.pos))) {
       let bestD = Infinity;
       for (const s of skaters) {
         if (s.downT > 0 || s.leaving || steeredByContest(state, s) || blocked.includes(s.id) || isTiedUp(state, s.id)) continue;
@@ -551,6 +552,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         // opponent only by picking it off (actions.ts tryIntercept, his one try).
         if (pass !== null && !pass.bobbled && (s.id === pass.toId || s.side !== passSide)) continue;
         const b = bladePos(s.pos, s.facing, bodyById.get(s.id)!.def.shoots, bladeScratch);
+        // (Task 14: not with his blade inside a net frame: the puck he took there was put outside the frame, a metre away.)
+        if (inFrame(b)) continue;
         const db = segDistXY(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y), dc = dist(s.pos, p.pos);
         // A tied-up man (Task 10) reaches less far for it: times 1 - TUNING.engage.limits.reach * his tie.
         const reach = pickupReachOf(state, s.id, false);

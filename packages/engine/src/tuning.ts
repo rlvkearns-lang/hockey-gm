@@ -244,7 +244,7 @@ export const TUNING = deepFreeze({
       // (task-13b-report.md, item 4); Task 14 refits them after it tunes.
       carry: { keep: 0.51, rush: 0.06 },
       passFailed: { keep: 0.32, rush: 0.26 },
-      held: { keep: 0.46, rush: 0.11 },
+      held: { keep: 0.43, rush: 0.11 },
       steered: { keep: 0.36, rush: 0.12 },
       rebound: { keep: 0.19, rush: 0.08 },
       blocked: { keep: 0.30, rush: 0.23 },
@@ -736,7 +736,7 @@ export const TUNING = deepFreeze({
    * out, an attacker's blade within reach (m) of its path; turned by gauss * turn (rad), vz changed by gauss * lift (m/s),
    * keeping `keep` of its speed.
    */
-  tip: { base: 0.2, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
+  tip: { base: 0.22, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
 
   /**
    * Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from
