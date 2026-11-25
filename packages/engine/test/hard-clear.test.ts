@@ -3,7 +3,7 @@
  * his side, or up the middle), giving up the puck for territory and a line change, at the risk of icing.
  */
 import { describe, it, expect } from 'vitest';
-import { listOptions, type Option } from '../src/options';
+import { hardClearOutlook, listOptions, type Option } from '../src/options';
 import { executeHardClear, tryKnockDown } from '../src/actions';
 import { refereeTick } from '../src/referee';
 import { stepPuck } from '../src/puck';
@@ -28,6 +28,10 @@ function pinned(o: { outlet?: boolean; tired?: boolean } = {}): GameState {
   place(st, 'home:RW', -12, -10); place(st, 'away:RD', -11, -9.6);
   if (o.outlet) { place(st, 'home:C', -17, 4); place(st, 'away:RW', 2, 0); }
   for (const s of st.skaters) if (s.side === 'home') s.energy = o.tired ? 0.6 : 0.85;
+  // (Task 14) He has had it a second and faces up ice: he can fire it.
+  const c = st.skaters.find((k) => k.id === st.carrierId)!;
+  c.facing = 0;
+  st.touches = { side: c.side, ids: [c.id], ticks: [st.tick - 60] };
   return st;
 }
 
@@ -58,6 +62,31 @@ describe('the hard clear (Task 13b)', () => {
     expect(none).toBeGreaterThanOrEqual(0.2); expect(none).toBeLessThanOrEqual(0.6);
     expect(outlet).toBeLessThan(0.05);
   }, 60_000);
+  // Task 14 (headline 2: a last resort; Task 13b review Minors 5 and 6).
+  it('is a last resort: with the forechecker closing but not yet on him (1.7 m off), it is not on his list', () => {
+    const st = pinned();
+    place(st, 'away:C', -22.64, 10.62); // 1.7 m from him: closing, not yet on him
+    expect(optionsOf(st).some((o) => o.kind === 'hardClear')).toBe(false);
+  });
+  it('he cannot fire it the moment he gets it, nor with his back to where it must go', () => {
+    const fresh = pinned();
+    fresh.touches = { side: 'home', ids: [fresh.carrierId!], ticks: [fresh.tick - 6] }; // 0.1 s with it
+    expect(optionsOf(fresh).some((o) => o.kind === 'hardClear')).toBe(false);
+    const turned = pinned();
+    turned.skaters.find((k) => k.id === turned.carrierId)!.facing = Math.PI; // facing his own end boards
+    expect(optionsOf(turned).some((o) => o.kind === 'hardClear')).toBe(false);
+    expect(optionsOf(pinned()).some((o) => o.kind === 'hardClear')).toBe(true);
+  });
+  it('the icing race it expects leaves out a man heading off for a change, as the referee does', () => {
+    const st = stateWith({ carrier: 'home', puckX: -24, puckY: 11.5, carrierSlot: 'LD' }); // by the boards: off the glass, to the far end
+    const me = defs.get(st.carrierId!)!;
+    const carrier = st.skaters.find((k) => k.id === st.carrierId)!;
+    place(st, 'home:LW', 10, 11); // a home man far up ice: he wins the race to the far dots, so icing is less likely
+    const withHim = hardClearOutlook(st, carrier, me, defs, { knocked: 0, knockRx: 0, knockLy: 0, reaches: false, ice: 0, win: 0, rx: 0, ly: 0 }).ice;
+    st.skaters.find((k) => k.side === 'home' && k.slot === 'LW')!.leaving = true;
+    const leaving = hardClearOutlook(st, carrier, me, defs, { knocked: 0, knockRx: 0, knockLy: 0, reaches: false, ice: 0, win: 0, rx: 0, ly: 0 }).ice;
+    expect(withHim).toBeGreaterThan(0); expect(leaving).toBeGreaterThan(withHim + 0.05);
+  });
   it('a tired line clears it more', () => {
     expect(share(pinned({ tired: true }), 'hardClear')).toBeGreaterThan(share(pinned(), 'hardClear'));
   }, 60_000);

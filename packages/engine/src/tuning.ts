@@ -587,7 +587,10 @@ export const TUNING = deepFreeze({
     knock: { maxZ: 1.8, factor: 1, keep: 2, minSpeed: 12 },
     change: 0.03, tiredSpan: 0.4, tiredLoss: 1, lateLead: 0.03,
     /** It is an option only under pressure (pressureFrom or more) with no safe outlet: no pass that works safePass of the time to a man with openSpace m of ice. */
-    pressureFrom: 0.75, safePass: 0.6, openSpace: 2,
+    // Task 14 (headline 2: 54 hard clears a game; a last resort): pressureFrom 0.75 -> 0.9, a checker on him (within
+    // 1.4 m, stick reach), not closing from 2 m.
+    // settle (s) and turn (rad): he must have had the puck that long (a beat to get it on his blade), and its aim must be within that angle of his facing.
+    pressureFrom: 0.9, safePass: 0.6, openSpace: 2, settle: 0.25, turn: 1.75,
     /**
      * Set from play (seeds 1-6, 494 hard clears, task-13b-report.md item 1): the icing race read from where the men stand
      * (0.5 + V.racePerMetre per metre) called 0.1 / 0.3 / 0.5 / 0.7 / 0.9 was iced 0.47 / 0.36 / 0.51 / 0.75 / 0.84 of the

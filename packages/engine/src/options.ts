@@ -704,14 +704,17 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     const cx = RIM.clear.x;
     tw.x = cx * dir; tw.y = ps * CLEAR_LY * dir;
     const chance = race(state, s, tw, null);
-    const v = valueOf(chance, threat(cx, ps * CLEAR_LY), V.turnoverCost * threat(-cx, -ps * CLEAR_LY) * (1 + HC.tiredLoss * tired));
+    const v = valueOf(chance, threat(cx, ps * CLEAR_LY), here + V.turnoverCost * threat(-cx, -ps * CLEAR_LY) * (1 + HC.tiredLoss * tired));
     // Unpressured, a clear throws away a puck he could carry or pass out: it costs O.clearIdle * (1 - pressure).
     out.push({ kind: 'clear', value: habit(v - O.clearIdle * (1 - pressure), tend.dump) });
   }
 
   // ---- the hard clear (own zone, Task 13b) ----
   // Only under pressure (HC.pressureFrom or more) and with no safe outlet: then he moves the puck on another way.
-  if (sit.zone === 'D' && mode === 'normal' && pressure >= HC.pressureFrom && !safeOutlet) {
+  // Task 14 (a last resort he can physically play): he has had the puck HC.settle s (two thirds were fired the tick he
+  // got it), and where it must go is within HC.turn (rad) of the way he faces (over a third went more than 90 degrees
+  // off his facing: behind him).
+  if (sit.zone === 'D' && mode === 'normal' && pressure >= HC.pressureFrom && !safeOutlet && sit.since >= HC.settle && canFireHardClear(state, s, me)) {
     const v = hardClearValue(state, s, me, defs, here, tired);
     out.push({ kind: 'hardClear', value: habit(v - O.clearIdle * (1 - pressure), tend.dump) });
   }
@@ -763,6 +766,14 @@ const ICING_LOSS = 0.5 * V.turnoverCost * threat(DOT_LINE, DOT_LY);
  *   other team's there (the turnover cost from there).
  * `here` and `tired` (lineTired) are listOptions'.
  */
+/** Whether the hard clear's aim (actions.ts hardClearPlan) is within TUNING.hardClear.turn of the way he faces. */
+function canFireHardClear(state: GameState, s: SkaterState, me: PlayerDef): boolean {
+  const plan = hardClearPlan(state, s, me, hcPlan);
+  const ax = plan.aim.x - state.puck.pos.x, ay = plan.aim.y - state.puck.pos.y, al = hyp(ax, ay);
+  if (al <= 0) return false;
+  return (dcos(s.facing) * ax + dsin(s.facing) * ay) / al >= dcos(HC.turn);
+}
+
 /** hardClearOutlook's result: the chances it is knocked down, iced and (played) his team's, and where it is played. */
 export type HardClearOutlook = { knocked: number; knockRx: number; knockLy: number; reaches: boolean; ice: number; win: number; rx: number; ly: number };
 const outlookScratch: HardClearOutlook = { knocked: 0, knockRx: 0, knockLy: 0, reaches: false, ice: 0, win: 0, rx: 0, ly: 0 };
@@ -813,7 +824,8 @@ export function hardClearOutlook(state: GameState, s: SkaterState, me: PlayerDef
     out.rx = GOAL - 1; out.ly = sgn(ly0) * 8;
     let ours = Infinity, theirs = Infinity;
     for (const o of state.skaters) {
-      if (!o.onIce || o.downT > 0) continue;
+      // (Task 14, Task 13b review Minor 6: a man heading off for a change is in no icing race, as in referee.ts.)
+      if (!o.onIce || o.downT > 0 || o.leaving) continue;
       const dd = Math.max(0, DOT_LINE - o.pos.x * dir);
       if (o.side === side) ours = Math.min(ours, dd); else theirs = Math.min(theirs, dd);
     }
@@ -831,14 +843,16 @@ export function hardClearOutlook(state: GameState, s: SkaterState, me: PlayerDef
 function hardClearValue(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, here: number, tired: number): number {
   const side = s.side;
   const o = hardClearOutlook(state, s, me, defs);
-  const knockCost = o.knocked > 0 ? V.turnoverCost * threat(-o.knockRx, -o.knockLy) * (1 + HC.tiredLoss * tired) : 0;
+  // Task 14 (Task 13b review Minor 5): every losing branch gives up what he has here too, as valueOf charges a loss
+  // (they left `here` out, so both clears were valued above passes and carries by about a third of a pick temperature).
+  const knockCost = o.knocked > 0 ? here + V.turnoverCost * threat(-o.knockRx, -o.knockLy) * (1 + HC.tiredLoss * tired) : 0;
   // A clean clear: a change for a tired line, time off the clock with a lead late.
   const lead = state.score[side] - state.score[side === 'home' ? 'away' : 'home'];
   const late = state.period >= PERIODS && lead > 0 ? 1 - state.clock / PERIOD_SECONDS : 0;
   const clean = HC.change * tired + HC.lateLead * late;
-  const played = o.win * (threat(o.rx, o.ly) - here + clean) - (1 - o.win) * (V.turnoverCost * threat(-o.rx, -o.ly) - clean);
+  const played = o.win * (threat(o.rx, o.ly) - here + clean) - (1 - o.win) * (here + V.turnoverCost * threat(-o.rx, -o.ly) - clean);
   // Iced: a faceoff in his end (ICING_LOSS), defended by the same men (no change).
-  return (1 - o.knocked) * ((1 - o.ice) * played - o.ice * ICING_LOSS * (1 + HC.tiredLoss * tired)) - o.knocked * knockCost;
+  return (1 - o.knocked) * ((1 - o.ice) * played - o.ice * (here + ICING_LOSS * (1 + HC.tiredLoss * tired))) - o.knocked * knockCost;
 }
 
 /** Whether a teammate of `s` with job netFront stands within TRAFFIC_NEAR (m) of the centre of the net `s` attacks. */
