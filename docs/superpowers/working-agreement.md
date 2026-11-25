@@ -28,3 +28,9 @@ Updated 2026-11-24 after the owner watched a full game in 3D and agreed this ord
 - Approved designs: `docs/superpowers/specs/`. Plans: `docs/superpowers/plans/`.
 - Build progress for a running plan: the git-ignored ledger under `.superpowers/sdd/`, plus `git log`.
 - A scheduled task wakes the build session every three hours to carry on.
+
+## Auto-run paused (owner, 2026-11-25)
+
+The owner asked to stop the automatic running: it was using his credits too quickly. The scheduled check-in "Keep building hockey-gm" is switched off (not deleted). Nothing is built or reviewed unless he asks in the conversation. When he does ask, do the one step he asks for, on the cheapest model that can do it well, and say roughly how large the next step is before starting anything long.
+
+Where things stand: engine round 2 Part A is built on the branch `engine-round-2` (all tasks done, fast tests green, NHL scorecard 44 of 44 in band on 1,000 games). Not yet done: the final whole-branch review and its fixes, merging into `main`, and rebuilding the 3D watch page on the new engine. Open items parked for that review are in the build ledger and in `docs/superpowers/reviews/engine-scorecard-round-2a.md`.
