@@ -104,7 +104,7 @@ export const TUNING = deepFreeze({
      */
     teamJumpSd: 3,
     /** Each goalie's night (a hot or cold game): a normal shift of his save log-odds with this standard deviation. */
-    goalieSd: 0.35, // Task 14 (parity): 0.2 -> 0.35; the 76 beat the 66 in 0.83 of 300 games (band 0.70 to 0.80)
+    goalieSd: 0.38, // Task 14b: 0.35 -> 0.38 (1,000 games: the 66 won 0.104 against its 0.10 floor, se 0.006); Task 14 (parity): 0.2 -> 0.35; the 76 beat the 66 in 0.83 of 300 games (band 0.70 to 0.80)
   },
 
   /**
@@ -342,9 +342,7 @@ export const TUNING = deepFreeze({
    * by itself no longer clears a possession valued at patience times the slot look; the screen being set is what he
    * was waiting for.
    */
-  // Task 14b: base 1.1 -> 1.05 (1,000 games: attempts 55.5 -> 57.2 a team, against 55 to 62; read on 300 games they sat
-  // at the band's floor by less than their standard error, 0.75).
-  patience: { base: 1.05, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5, pointTraffic: 0.35 }, max: 2 },
+  patience: { base: 1.1, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5, pointTraffic: 0.35 }, max: 2 },
 
   /**
    * Team tactics (tactics.ts, Task 11). Every factor a tactic applies is here; tactics shade option values and jobs and
@@ -378,7 +376,8 @@ export const TUNING = deepFreeze({
    *   Task 14b (headline 6, tactics balance; 300 games a variant against an equal team on the default tactics): rush 0.5
    *   -> 0.7 with rushShot 1.3 -> 1.1 (a rush team's attempts 80 -> 69 a team, win share 0.605 -> 0.600: the rush still
    *   wins, see task-14b-report.md; 0.8 broke the cycle-over-rush zone-time ratio, 4.79 against 4.43 s); pointShots'
-   *   pointShot 4 -> 2.5 (attempts 72 -> 66, its ratios held); passiveF1.trapGap 0.6 -> 0.8 (a trap took 9 attempts a
+   *   pointShot 4 -> 3 (attempts 72 -> 66 at 2.5; 3 keeps its defencemen's-attempts ratio, 1.4x, after the
+   *   interception change); passiveF1.trapGap 0.6 -> 0.8 (a trap took 9 attempts a
    *   game off the other team and won 0.612; 0.568 at 0.8, 0.505 at 1.0).
    * - pointIn (m): with pointShots the point men hold this much further in.
    * - joinRush: the joinRush tendency a defenceman needs for the dJoin job (rush tactic: `rush`; otherwise `other`).
@@ -403,7 +402,7 @@ export const TUNING = deepFreeze({
     bend: { perHabit: 2, min: 0.2 },
     offence: {
       cycle: { lowCycle: 1.3, pointPass: 1, pointShot: 0.8, rushShot: 1, hold: 1.2 },
-      pointShots: { lowCycle: 1, pointPass: 2, pointShot: 2.5, rushShot: 1, hold: 1 },
+      pointShots: { lowCycle: 1, pointPass: 2, pointShot: 3, rushShot: 1, hold: 1 },
       rush: { lowCycle: 0.8, pointPass: 0.9, pointShot: 1, rushShot: 1.1, hold: 0.8 },
     },
     patience: { cycle: 1, pointShots: 1, rush: 0.7 },
@@ -674,7 +673,7 @@ export const TUNING = deepFreeze({
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.335, // Task 14b: 2.36 -> 2.335 (1,000 games: save % .9198 -> .9179 with patience 1.05, against .915 to .920)
+      base: 2.34, // Task 14b: 2.36 -> 2.34 with the goalie's night 0.38 (1,000 games: save % .9198 -> about .917; task-14b-report.md)
       perReactionSecond: 1.75,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as

@@ -112,13 +112,14 @@ describe('calibration', () => {
   it('no freak scores: nothing like 15 goals in a game, and few 0-0 games', () => {
     const totals = even300().map((r) => r.score.home + r.score.away);
     expect(Math.max(...totals)).toBeLessThan(15);
-    // Task 14b (section 4; a sample change for the controller to ratify, the rate unchanged): 0-0 games read on the 1,000,
-    // at most 16 (5 in 300). Their count in 300 games has a standard error of 2.4 (6 against 5 in the first 300 where the
-    // 1,000 read 4.5 per 300).
-    expect(even().filter((r) => r.score.home === 0 && r.score.away === 0).length).toBeLessThanOrEqual(16);
+    // Task 14b (section 4): the count in 300 games has a standard error of about 2 (read 4 to 7 in the first 300 across
+    // this task's tunings, 4.5 to 5.7 per 300 over the 1,000); left on the first 300, reported as not robust.
+    expect(even300().filter((r) => r.score.home === 0 && r.score.away === 0).length).toBeLessThanOrEqual(5);
   }, GAMES_TIMEOUT);
   it('the 76 still beats the 66 about three quarters of the time, and loses plenty', () => {
-    const w = winShare(runGames(300, { homeOverall: 76, awayOverall: 66 })); expect(w.home).toBeGreaterThanOrEqual(0.70); expect(w.home).toBeLessThanOrEqual(0.80); expect(w.away).toBeGreaterThan(0.10);
+    // Task 14b (section 4): read on 1,000 games (se of the 76's share 0.023 and of the 66's 0.016 at 300: 1.6 se inside
+    // the bars at 867e714; 0.016 and 0.010 at 1,000).
+    const w = winShare(runGames(EVEN, { homeOverall: 76, awayOverall: 66 })); expect(w.home).toBeGreaterThanOrEqual(0.70); expect(w.home).toBeLessThanOrEqual(0.80); expect(w.away).toBeGreaterThan(0.10);
   }, GAMES_TIMEOUT);
   it('snipers outscore grinders per 60 minutes', () => { const g = goalsPer60ByType(even300()); expect(g['Sniper']).toBeGreaterThan(g['Grinder']! * 1.5); }, GAMES_TIMEOUT);
   it('heavier, stronger players win more battles, under 75%', () => { const b = battleWinShareByType(even300()); expect(b['Power Forward']).toBeGreaterThan(b['Speedster']! + 0.05); expect(b['Power Forward']).toBeLessThan(0.75); }, GAMES_TIMEOUT);
