@@ -843,11 +843,12 @@ const pairCache = new Map<string, number>();
 /**
  * Certainty before the cap (normalCertain / normalDecisionPoints) for each of CERTAINTY_PAIRS generated team pairs, games
  * seeds 1 and 2 pooled per pair, with tactics `t` for the home team (and the away team too with `both`) (Task 12
- * close-out ruling 1: read over many rosters, not one pair that happens to sit high).
+ * close-out ruling 1: read over many rosters, not one pair that happens to sit high). `pairs`: the first that many
+ * pairs only (the fast suite's cheap version, Task 14b).
  */
-export function pairCertainty(t: Partial<Tactics> = {}, both = false): number[] {
+export function pairCertainty(t: Partial<Tactics> = {}, both = false, pairs = CERTAINTY_PAIRS): number[] {
   const out: number[] = [];
-  for (let k = 1; k <= CERTAINTY_PAIRS; k++) {
+  for (let k = 1; k <= pairs; k++) {
     const key = JSON.stringify([t, both, k]);
     let v = pairCache.get(key);
     if (v === undefined) {
