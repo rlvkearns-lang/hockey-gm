@@ -62,6 +62,16 @@ describe('the hard clear (Task 13b)', () => {
     expect(none).toBeGreaterThanOrEqual(0.2); expect(none).toBeLessThanOrEqual(0.6);
     expect(outlet).toBeLessThan(0.05);
   }, 60_000);
+  // Task 13b review, Minor 7: the "with an open man" case above reads the gate (a safe outlet takes the hard clear off his
+  // list), not the valuation. This reads the valuation: it ranks the pass to the open man above the hard clear in the same
+  // spot without him, but only just (Task 14b: 0.0066 against 0.0001, under half a pick temperature of about 0.015), so
+  // without the gate he would fire it about two thirds as often as he made the pass. The gate is what makes the hard
+  // clear a last resort; the valuation only orders them. (Not changed: both values are what execution measures.)
+  it('the valuation ranks a pass to the open man above the hard clear (the gate, not the valuation, makes it a last resort)', () => {
+    const hc = optionsOf(pinned()).find((o) => o.kind === 'hardClear')!.value;
+    const pass = Math.max(...optionsOf(pinned({ outlet: true })).filter((o) => o.kind === 'pass' && o.toId === 'home-C').map((o) => o.value));
+    expect(pass).toBeGreaterThan(hc);
+  });
   // Task 14 (headline 2: a last resort; Task 13b review Minors 5 and 6).
   it('is a last resort: with the forechecker closing but not yet on him (1.7 m off), it is not on his list', () => {
     const st = pinned();

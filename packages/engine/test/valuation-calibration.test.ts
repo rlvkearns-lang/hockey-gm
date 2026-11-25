@@ -32,7 +32,7 @@ describe('the valuation matches execution (Task 13b)', () => {
       expect(Math.abs(m.lift - valued[c]), `${c}: measured ${m.lift.toFixed(3)} (${m.with} / ${m.without}), valued ${valued[c].toFixed(3)}`).toBeLessThanOrEqual(0.04);
     }
   }, LONG);
-  // Tolerance: two standard errors of the measured lift, at least 0.02. (Red on purpose from Task 13b until Task 14 fitted V.traffic to the lift.)
+  // Tolerance: two standard errors of the measured lift, at least 0.02. (Task 13b review, Minor 10: this was red on purpose from Task 13b, unannounced at the test, until Task 14 fitted V.traffic to the lift; green since.)
   it('traffic: TUNING.value.traffic is within two standard errors (at least 0.02) of the lift a man in front gives far shots', () => {
     const t = trafficLift(attempts());
     expect(t.with.n).toBeGreaterThan(60); expect(t.without.n).toBeGreaterThan(200);

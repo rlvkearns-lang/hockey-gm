@@ -44,6 +44,9 @@ export function attemptsOf(setup: GameSetup): Attempt[] {
   const out: Attempt[] = [];
   const open = new Map<number, Attempt>(); // by release tick
   const watching: { a: Attempt; until: number; wait: boolean }[] = [];
+  // The release tick of the last shot on goal (its save names no release tick). Per game (Task 13b review, Minor 10:
+  // it was module state shared between games).
+  let lastShotTick: number | null = null;
   while (!g.done) {
     g.step();
     const st = g.state;
@@ -78,7 +81,6 @@ export function attemptsOf(setup: GameSetup): Attempt[] {
   }
   return out;
 }
-let lastShotTick: number | null = null;
 
 function attempt(st: GameState, defs: Map<string, PlayerDef>, side: Side, shooter: string, pos: { x: number; y: number }, type: ShotType): Attempt {
   const dir = st.attackDir[side];
