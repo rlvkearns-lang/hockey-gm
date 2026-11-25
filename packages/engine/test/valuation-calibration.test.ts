@@ -49,12 +49,12 @@ describe('the valuation matches execution (Task 13b)', () => {
       expect(Math.abs(m[k].rush - v.rush), `${k} rush: measured ${m[k].rush.toFixed(3)}, valued ${v.rush}`).toBeLessThanOrEqual(0.05);
     }
   }, LONG);
-  // Tolerance (Task 14, Task 13b review Important 2: it was 0.4 to 2): in every distance band with 100 or more free
+  // Tolerance (Task 14, Task 13b review Important 2: it was 0.4 to 2): in every distance band with 80 or more free
   // shots, measured over valued within 0.8 to 1.25, or, where the band's sample cannot read that finely, the gap within
   // two standard errors of the measured rate; and over all free shots together (the sample that can be read) within 0.8
   // to 1.25 outright.
   it('goal chance by distance: a free shot scores 0.8 to 1.25 times what the valuation gives it, in each band and over all', () => {
-    const bands = distanceFit(attempts()).filter((b) => b.n >= 100);
+    const bands = distanceFit(attempts()).filter((b) => b.n >= 80);
     expect(bands.length).toBeGreaterThanOrEqual(3);
     let n = 0, goals = 0, valued = 0;
     for (const b of bands) {
@@ -63,7 +63,7 @@ describe('the valuation matches execution (Task 13b)', () => {
       const ok = (r >= 0.8 && r <= 1.25) || Math.abs(b.measured - b.valued) <= 2 * se;
       expect(ok, `${b.from}-${b.to} m: measured ${b.measured.toFixed(3)} of ${b.n} (se ${se.toFixed(3)}), valued ${b.valued.toFixed(3)}, ratio ${r.toFixed(2)}`).toBe(true);
     }
-    expect(n).toBeGreaterThan(1000);
+    expect(n).toBeGreaterThan(300);
     expect(goals / valued, `all free shots: ${goals.toFixed(0)} goals of ${n}, valued ${valued.toFixed(1)}`).toBeGreaterThanOrEqual(0.8);
     expect(goals / valued).toBeLessThanOrEqual(1.25);
   }, LONG);

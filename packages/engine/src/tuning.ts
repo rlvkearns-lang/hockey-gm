@@ -104,7 +104,7 @@ export const TUNING = deepFreeze({
      */
     teamJumpSd: 3,
     /** Each goalie's night (a hot or cold game): a normal shift of his save log-odds with this standard deviation. */
-    goalieSd: 0.2,
+    goalieSd: 0.3, // Task 14 (parity): 0.2 -> 0.3; the 76 beat the 66 in 0.83 of 300 games (band 0.70 to 0.80)
   },
 
   /**
@@ -736,7 +736,7 @@ export const TUNING = deepFreeze({
    * out, an attacker's blade within reach (m) of its path; turned by gauss * turn (rad), vz changed by gauss * lift (m/s),
    * keeping `keep` of its speed.
    */
-  tip: { base: 0.18, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
+  tip: { base: 0.2, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
 
   /**
    * Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from
