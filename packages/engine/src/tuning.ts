@@ -629,7 +629,8 @@ export const TUNING = deepFreeze({
      * only, the shooter and the tipper not). The share of the flight blocked makes him react later (times 1 - react *
      * share) and read it worse (save.screened * share off the log-odds).
      */
-    screen: { off: 0.6, near: 0.8, far: 4, pad: 0.1, react: 1 },
+    // Task 14: `flag`: a shot is `screened` (the events, the held-rebound chance) with that share of its flight hidden or more. off and far are no longer read.
+    screen: { off: 0.6, near: 0.8, far: 4, pad: 0.1, react: 1, flag: 0.5 },
     /** Top speed along his arc (m/s): base plus per point of lateral. */
     speed: { base: 1.5, perPoint: 0.035 },
     /** How fast he turns square to the puck (rad/s): base plus per point of positioning. */

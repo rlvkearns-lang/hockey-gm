@@ -133,7 +133,7 @@ function round(c: ContestStateOf<'netFront'>, ctx: ContestCtx, att: SkaterState,
   const effectTick = state.tick + Math.round(EFFECT_SECONDS / DT);
   c.data.rounds++;
   if (ctx.rng.next() < winProb(edge)) {
-    state.screenedUntilTick[def.side] = effectTick;
+    // (Task 14: no timer flag screens the goalie; the attacker who held his ground screens him by standing in his sight line: shots.ts watchSight.)
     state.reboundEdge = { id: att.id, untilTick: state.tick + Math.round(REBOUND_EDGE_SECONDS / DT) };
     c.leader = att.id;
     if (!c.freeIds.includes(att.id)) c.freeIds.push(att.id);

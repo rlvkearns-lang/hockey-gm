@@ -140,7 +140,7 @@ const SCREEN = TUNING.goalie.screen;
 
 /**
  * Task 13b: one tick of the goalie's sight of a shot on its way to him (state.shotInFlight, not yet faced): counted in
- * shot.sight.ticks, and in shot.sight.blocked when an attacker's body (his radius plus SCREEN.pad) is across the line from
+ * shot.sight.ticks, and in shot.sight.blocked when a skater's body, of either team (his radius plus SCREEN.pad), is across the line from
  * the goalie to the puck, more than SCREEN.near m in front of him and short of the puck (not the shooter, not the tipper).
  */
 export function watchSight(state: GameState, defs: Map<string, PlayerDef>): void {
@@ -153,7 +153,8 @@ export function watchSight(state: GameState, defs: Map<string, PlayerDef>): void
   if (l <= SCREEN.near) return;
   const ux = lx / l, uy = ly / l;
   for (const s of state.skaters) {
-    if (!s.onIce || s.side !== shot.side || s.downT > 0 || s.id === shot.shooterId || s.id === shot.tippedBy) continue;
+    // (Task 14, Task 13b review Minor 8: his own defenders block his sight as an attacker does.)
+    if (!s.onIce || s.downT > 0 || s.id === shot.shooterId || s.id === shot.tippedBy) continue;
     const dx = s.pos.x - g.x, dy = s.pos.y - g.y;
     const along = dx * ux + dy * uy;
     if (along < SCREEN.near || along > l) continue;

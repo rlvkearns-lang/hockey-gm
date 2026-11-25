@@ -247,7 +247,7 @@ export type ShotInFlight = {
   tipTried: string[];
   /** Released within TUNING.rebound.windowSeconds of a save on that net (state.lastSave still set). */
   rebound: boolean;
-  /** The goalie was screened when it reached him (set when he faces it). */
+  /** The goalie was screened when it reached him (set when he faces it). Task 14: his sight of it was blocked for half its flight or more (TUNING.goalie.screen.flag). */
   screened: boolean;
   /**
    * Task 13b: his sight of it on its way: the ticks he watched it and the ticks an attacker's body was in his sight line
@@ -445,7 +445,7 @@ export type GameState = {
    * Cleared when that side carries the puck, the puck leaves that zone, TUNING.rebound.windowSeconds pass, or play stops.
    */
   lastSave: { side: Side; tick: number; kind: SaveKind } | null;
-  /** The goalie of each side is screened while tick < this value (set by net-front battles). */
+  /** Unused since Task 14 (kept so the state's shape is additive): a screen is the sight-line share (ShotInFlight.sight), not a timer. Always 0. */
   screenedUntilTick: Record<Side, number>;
   /** Skater `id` has his stick tied up (no pass reception, no loose-puck pickup or race) while tick < `tick` (net-front). */
   tiedUpUntil: { id: string; tick: number }[];

@@ -53,10 +53,6 @@ const BAR_CLEAR = TUNING.goalie.face.barClear;
 const POSTS: readonly number[] = [RINK_.netHalfWidth, -RINK_.netHalfWidth];
 /** A save needs him within this far (m) of the puck's line (TUNING.goalie.face.reach; Task 8 review, Minor 1). */
 const SAVE_REACH = TUNING.goalie.face.reach;
-/** An attacker screens him within SCREEN_OFF (m) of a shot's line, SCREEN_NEAR to SCREEN_FAR (m) in front of him (TUNING.goalie.screen). */
-const SCREEN_OFF = TUNING.goalie.screen.off;
-const SCREEN_NEAR = TUNING.goalie.screen.near;
-const SCREEN_FAR = TUNING.goalie.screen.far;
 /** A save above this height (m) is a glove or blocker save; below it, a pad save when this far (m) off his centre, else butterfly. */
 const HIGH_SAVE_Z = 0.5;
 const PAD_OFFSET = 0.35;
@@ -401,22 +397,6 @@ function screenShareOf(shot: ShotInFlight, screened: boolean): number {
 }
 
 /**
- * Whether an attacker of `att` (other than `shooterId` and the man who tipped it, `tippedBy`: Task 8 review, Minor 2) screens a shot meeting the goalie at (cx, cy) along (ux, uy)
- * (its unit direction): within SCREEN_OFF (0.6 m) of its line, between SCREEN_NEAR (0.8 m) and SCREEN_FAR (4 m) in front
- * of the goalie.
- */
-function screenedOnLine(state: GameState, att: Side, shooterId: string, tippedBy: string | null, cx: number, cy: number, ux: number, uy: number): boolean {
-  for (const s of state.skaters) {
-    if (!s.onIce || s.side !== att || s.downT > 0 || s.id === shooterId || s.id === tippedBy) continue;
-    const dx = s.pos.x - cx, dy = s.pos.y - cy;
-    const along = -(dx * ux + dy * uy);
-    if (along < SCREEN_NEAR || along > SCREEN_FAR) continue;
-    if (Math.abs(dx * uy - dy * ux) < SCREEN_OFF) return true;
-  }
-  return false;
-}
-
-/**
  * Saves are made where the goalie is, not on the goal line. While a shot is in flight toward the net he defends and its path this
  * tick crosses his plane (x = his x) on its way to a spot inside the posts (clear of them) and under the bar: the puck is moved to
  * that crossing, `shot` is emitted, and saveChance decides (his squaring and the line's offset from his centre, the shot's speed,
@@ -457,12 +437,15 @@ export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   const cross: Crossing = { side: (cy - g.pos.y) * -end, height: cz };
   const v = hypot2(vx, vy);
   const speed = hypot3(vx, vy, pk.z === 0 && pk.vz === 0 ? 0 : pk.vz - GRAVITY * t);
-  const screened = state.screenedUntilTick[defSide] > state.tick || screenedOnLine(state, shot.side, shot.shooterId, shot.tippedBy, gx, cy, vx / v, vy / v);
+  // Task 14 (Task 13b review, Important 1): one screen mechanism. The share of its flight his sight was blocked
+  // (shots.ts watchSight) decides the save; `screened` (the events, the held-rebound chance) is that share at
+  // G.screen.flag or more. No timer flag, no second test on the line.
+  const screen = screenShareOf(shot, shot.screened);
+  const screened = screen >= G.screen.flag;
   const f = shot.from;
   const squareErr = Math.abs(wrapAngle(datan2(f.y - g.pos.y, f.x - g.pos.x) - g.facing));
   const ga = goalieAttrs(defs, g.id);
   const tipped = shot.tippedBy !== null;
-  const screen = screenShareOf(shot, screened);
   const p = saveChance({
     goalie: ga, lateralMiss: Math.abs(cy - g.pos.y) * Math.abs(vx) / v + squareErr * G.squareMissPerRad, shotSpeed: speed,
     distance: hypot2(nx - f.x, ly - f.y), screened, screenShare: screen, slowFrom: slowFromOf(shot.shotType), goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: cz,
@@ -587,7 +570,7 @@ export function resolveOnNet(
     const sid = shot.tippedBy ?? shot.shooterId;
     out.push(gameEvent(state, {
       type: 'shot', side: attSide, playerId: sid, otherId: g.id, pos: state.puck.pos,
-      detail: { distance: shot.fromDist, releaseTick: shot.tick, speed: ev.speed, cross, shotType: shot.shotType, tippedFrom: shot.tippedBy !== null ? shot.shooterId : null, screened: shot.screened, rebound: shot.rebound },
+      detail: { distance: shot.fromDist, releaseTick: shot.tick, speed: ev.speed, cross, shotType: shot.shotType, tippedFrom: shot.tippedBy !== null ? shot.shooterId : null, screened: shot.screened, rebound: shot.rebound, screen: screenShareOf(shot, shot.screened) },
     }));
     scoreGoal(state, attSide, sid, shotGoalDetail(shot, cross), out);
     return 'goal';
@@ -611,13 +594,12 @@ export function resolveOnNet(
   const offLine = Math.abs((g.pos.x - fx) * ly - (g.pos.y - fy) * lx) / ll;
   const squareErr = Math.abs(wrapAngle(datan2(fy - g.pos.y, fx - g.pos.x) - g.facing));
   // (Task 8 review, Minor 5: a shot played on the line is screened as one met at his plane is: by an attacker on its line.)
-  const screened = state.screenedUntilTick[defSide] > state.tick
-    || (shot !== null && screenedOnLine(state, attSide, shot.shooterId, shot.tippedBy, netX, ev.y, lx / ll, ly / ll));
+  const screen = shot ? screenShareOf(shot, shot.screened) : 0;
+  const screened = screen >= G.screen.flag;
   const tipped = shot !== null && shot.tippedBy !== null;
   // A shot whose line passes beyond his reach cannot be saved (Task 8 review, Minor 1): a save needs his body, glove or pad there.
   // A puck that was not shot is played with stick or pad by its speed and how square he is to it (slideStopChance), not as
   // a shot (Task 8b review, Important 2); beyond his reach neither can be stopped.
-  const screen = shot ? screenShareOf(shot, screened) : 0;
   const p = offLine > SAVE_REACH ? 0 : !shot ? slideStopChance(ev.speed, offLine + squareErr * G.squareMissPerRad) : saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
     screened, screenShare: screen, slowFrom: shot ? slowFromOf(shot.shotType) : undefined, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,

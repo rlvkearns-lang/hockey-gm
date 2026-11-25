@@ -34,7 +34,9 @@ function netFrontBetweenShare(n: number): number {
 }
 
 describe('net-front battles', () => {
-  it('a net-front winner screens the goalie', () => { const st = netFrontWonByAttacker(); expect(isScreened(st)).toBe(true); });
+  // Task 14 (Task 13b review, Important 1): the winner screens the goalie by standing in his sight line (shots.ts
+  // watchSight, test/screens.test.ts), not through a timer flag; what the round gives him is the first step to a rebound.
+  it('a net-front winner holds his ground: first to a rebound, and no timer flag screens the goalie', () => { const st = netFrontWonByAttacker(); expect(isScreened(st)).toBe(false); expect(st.reboundEdge?.id).toBe(attackerId); });
   it('a tied-up forward cannot take a pass', () => { const st = netFrontWonByDefender(); expect(canReceive(st, attackerId)).toBe(false); });
 
   it('a forward who holds his ground can take a pass', () => { const st = netFrontWonByAttacker(); expect(canReceive(st, attackerId)).toBe(true); });
