@@ -62,7 +62,8 @@ function timeToLine(s: SkaterState, line: number, dir: 1 | -1, m: Racer): number
  *   wholly in it.
  * - Hybrid icing: a puck released from a team's own half (`state.icingWatch`) that fully crosses the far goal line
  *   untouched (a puck on net stops on the line instead) is icing when a defending skater, not the goalie, would reach
- *   the end-zone dot line no later than any of that team's skaters; otherwise it is waved off. Faceoff at the
+ *   the end-zone dot line no later than any of that team's skaters (men heading off for a change race for nobody);
+ *   otherwise it is waved off. Faceoff at the
  *   offending team's end dot nearest the release, and that team may not change (`state.noChange`). With a delayed
  *   offside against the same team still on, the offside is called instead (it happened first).
  *
@@ -124,7 +125,8 @@ function hybridIcing(state: GameState, side: Side, dir: 1 | -1, fromY: number, d
   let defT = Infinity, attT = Infinity;
   let defender: string | null = null;
   for (const s of state.skaters) {
-    if (!s.onIce || s.downT > 0) continue;
+    // (Task 13b: a man heading off for a change is in no race.)
+    if (!s.onIce || s.downT > 0 || s.leaving) continue;
     const t = timeToLine(s, DOT_LINE, dir, racer(s));
     if (s.side === side) attT = Math.min(attT, t);
     else if (t < defT) { defT = t; defender = s.id; }

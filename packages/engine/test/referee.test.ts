@@ -26,6 +26,18 @@ describe('referee', () => {
   });
   it('not icing from past centre, or when it goes on net', () => { expect(icingAfter(shotFrom(2))).toBeNull(); expect(icingAfter(shotFrom(-5, { onNet: true }))).toBeNull(); });
   it('not icing when the attacker wins the race', () => { expect(icingAfter(shotFrom(-5), { attackerAhead: true })).toBeNull(); });
+  it('a man heading off the ice for a change is in no icing race (Task 13b): the attacker ahead but leaving does not wave it off', () => {
+    // Home LW in the neutral zone, onside, ahead of the away defencemen in the race to the dot line.
+    const race = (leaving: boolean): string | undefined => {
+      const st = shotFrom(-5);
+      place(st, 'home:LW', 3, 6);
+      const lw = st.skaters.find((s) => s.id === 'home-LW')!;
+      lw.vel = { x: 7, y: 0 }; lw.facing = 0; lw.target = { x: 28, y: 6 }; lw.leaving = leaving;
+      return refereeUntilCall(st)?.type;
+    };
+    expect(race(false)).toBeUndefined();
+    expect(race(true)).toBe('icing');
+  });
   it('a puck iced while a delayed offside against the same team is on is called offside', () => {
     expect(icedWithWingerOffside()).toMatchObject({ type: 'offside', side: 'home' });
   });
