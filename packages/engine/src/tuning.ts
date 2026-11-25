@@ -530,7 +530,7 @@ export const TUNING = deepFreeze({
      * and `value` * how rushed more for the lost speed and accuracy (set from play, close-out: a fully rushed shot scores
      * 0.13 to 0.19 of a free one from the same spot per attempt, 0.36 to 0.52 per shot on goal; see task-8b-report.md).
      */
-    rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.2, wild: 0.15, aim: 0.8, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.6 },
+    rushed: { reach: 1.8, full: 1.0, speed: 0.3, spread: 0.2, wild: 0.15, aim: 0.8, stick: { base: 0.3, perPoint: 0.004, block: 0.5, keep: 0.6 }, value: 0.77 },
     /** Task 14: the hardest shot there is (m/s; 48.2 is 107.8 mph: the hardest shots tracked are about 100 to 105 mph, skills-competition records near 108). */
     maxSpeed: 48.2,
     /** Shooters aim this far (m) from the centre of the net, either side, and this high. */
@@ -665,7 +665,7 @@ export const TUNING = deepFreeze({
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.04,
+      base: 2.06,
       perReactionSecond: 3.2,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
@@ -787,7 +787,7 @@ export const TUNING = deepFreeze({
     /** A skater thinks about a hit on an opponent this close (m)... */
     triggerRange: 1.8,
     /** ...whom he is closing on faster than this (m/s; Task 13b: times SPEED_SCALE)... */
-    minClosing: 7.5 * SPEED_SCALE,
+    minClosing: 7.2 * SPEED_SCALE,
     /** ...who has the puck or let it go less than this long ago (s)... */
     releaseWindowSeconds: 0.3,
     /** ...and makes up his mind (one draw against hitAttemptChance) at most once per this many seconds. */
@@ -900,7 +900,7 @@ export const TUNING = deepFreeze({
    * Box-score takeaways and giveaways (turnovers.ts): a clean turnover counts once the winning side has kept the puck
    * keepSeconds; a pass picked off from a passer under less than unforcedPressure (0..1, see pressureOn) is a giveaway.
    */
-  boxScore: { keepSeconds: 2, unforcedPressure: 0.5, controlSeconds: 1.5 },
+  boxScore: { keepSeconds: 2, unforcedPressure: 0.5, controlSeconds: 2.5 },
 
   /** Faceoffs (faceoff.ts): the centres' rating difference is scaled by edgeScale before winProb. */
   faceoff: {
@@ -930,7 +930,7 @@ export const TUNING = deepFreeze({
   engage: {
     contact: 0.15, drawSeconds: 0.4, slow: 0.5, massPerPoint: 4, insideEdge: 5, tieUp: 0.3, tieDown: 0.2,
     weights: { strength: 0.35, balance: 0.3, compete: 0.35 },
-    startTie: 0.3, maxRelSpeed: 3.5 * SPEED_SCALE, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
+    startTie: 0.3, maxRelSpeed: 2.5 * SPEED_SCALE, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
     limits: { receive: 0.6, spread: 1, shootValue: 0.5, tip: 0.6, reach: 0.5 },
   },
 

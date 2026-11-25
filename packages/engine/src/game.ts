@@ -122,7 +122,8 @@ const STOPPED_PUSH = TUNING_.builder.stoppedPush;
 /** A loose puck is taken with the blade within his pickup reach of it (engage-state.ts pickupReachOf), or in his feet: his centre within IN_FEET (m). */
 const IN_FEET = 0.45;
 /** A puck in his feet goes to his stick only from within this far (m) of the blade (the most a pickup moves it). */
-const MAX_KICK = 1.2;
+// Task 14 (thin guard): 1.0, not the 1.2 m no-teleport bar itself: he moves on the tick he takes it, so a kick from exactly 1.2 m read up to 1.3 m.
+const MAX_KICK = 1.0;
 /** The carried puck moves at most the carrier's own travel plus CARRY_TURN (m) a tick, and never more than CARRY_STEP (m). */
 const CARRY_TURN = 0.2;
 // Task 14 (Task 13b review, Minor 2): re-derived for real speeds from speed x DT: the fastest skater there is (a 99
@@ -130,6 +131,15 @@ const CARRY_TURN = 0.2;
 // his travel plus 0.024 m: the cap binds only on a blade swinging round (CARRY_TURN), never on straight skating.
 const CARRY_STEP = 0.4;
 const frameProbe = { x: 0, y: 0 };
+const takenScratch = { x: 0, y: 0 };
+/** The point of the segment (ax, ay)-(bx, by) nearest (px, py), written into `out`. */
+function nearestOnSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number, out: { x: number; y: number }): { x: number; y: number } {
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+  let u = l2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / l2;
+  u = u < 0 ? 0 : u > 1 ? 1 : u;
+  out.x = ax + dx * u; out.y = ay + dy * u;
+  return out;
+}
 const PICKUP_MAX_SPEED = 12;
 const HARD_CLEAR_LAND = TUNING.hardClear.landKeep;
 /** A pass that comes off his stick (a bobble) leaves at BOBBLE_SPEED m/s, turned by up to BOBBLE_TURN rad. */
@@ -520,6 +530,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         break;
       }
     }
+    let takenAt: Vec2 | null = null;
     let passSide: Side | null = null;
     if (pass !== null) for (const k of state.skaters) if (k.id === pass.fromId) passSide = k.side;
     if (!best && hypot2(p.vel.x, p.vel.y) < PICKUP_MAX_SPEED) {
@@ -535,10 +546,17 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         const reach = pickupReachOf(state, s.id, false);
         // In his feet he kicks it up to his stick: only when the blade is within MAX_KICK of it.
         const d = db <= reach ? db : dc <= IN_FEET && dist(b, p.pos) <= MAX_KICK ? dc : Infinity;
-        if (d < bestD) { bestD = d; best = s; }
+        if (d < bestD) {
+          bestD = d; best = s;
+          // Task 14 (thin guard, hand-overs at the 1.2 m bar): a puck his blade reached on its way this tick is taken
+          // where it passed his blade, the point of its path nearest it, not where the tick would have left it (a puck
+          // coming off the boards at speed was "taken" up to 1.3 m past his blade and then carried back).
+          takenAt = db <= reach ? nearestOnSeg(b.x, b.y, prev.x, prev.y, p.pos.x, p.pos.y, takenScratch) : null;
+        }
       }
     }
     if (!best) return;
+    if (takenAt !== null) { p.pos.x = takenAt.x; p.pos.y = takenAt.y; }
     // A one-timer pass taken by its receiver: he may shoot it at once (actions.ts shotTypeFor, options.ts).
     if (pass !== null && pass.oneTimer && best.id === pass.toId) state.oneTimerTaken = { id: best.id, tick: state.tick };
     state.pendingPass = null;

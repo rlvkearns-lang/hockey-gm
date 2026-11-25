@@ -29,7 +29,7 @@ const PICKUP_MAX_SECONDS = 1;
  * the puck reaches it (two kicks in eight games went 1.21 m).
  */
 const IN_FEET = 0.45;
-const MAX_KICK = 1.1;
+const MAX_KICK = 1.0; // Task 14: as game.ts MAX_KICK (margin under the 1.2 m no-teleport bar; was 1.1)
 /** The loser yields: he is steered this far (m) to his side of the winner's line to the puck. */
 const YIELD_OFFSET = 1.5;
 /** A bounce leaves the puck at this speed (m/s), any direction. */

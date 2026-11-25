@@ -340,6 +340,9 @@ describe('A5: battles the winner wins (Task 9)', () => {
   }, 240_000);
   it('no teleport: on a live tick the puck never moves further than its speed allows, 1.2 m when it changes hands (seeds 1-16)', () => {
     expect(countGames(Array.from({ length: 16 }, (_, i) => i + 1)).puckJumpTicks).toBe(0); expect(m16().maxPuckJump).toBeLessThanOrEqual(1.2);
+    // Task 14 (thin guard): with margin under the 1.2 m bar. Hand-overs are capped at 1.0 m (board battles, pucks in the feet) and a puck
+    // his blade reached on its way is taken where it passed the blade; the largest read is 1.08 m on seeds 1-32.
+    expect(m16().maxPuckJump).toBeLessThanOrEqual(1.12);
   }, 240_000);
   // Task 11 close-out ruling 6: the same on both teams playing the default tactics (the natural ones are the set above).
   // Three jump ticks there were pucks knocked loose by a poke that bounced off a post the same tick: the measure now
