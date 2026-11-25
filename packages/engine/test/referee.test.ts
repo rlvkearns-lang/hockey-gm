@@ -4,6 +4,7 @@ import { assignJobs } from '../src/team-play';
 import { drawChance, dropPuck } from '../src/faceoff';
 import { createRng } from '../src/rng';
 import { RINK } from '../src/rink';
+import { puckOutOfPlay } from '../src/referee';
 import {
   carryTo, count, def, defs, dumpedInWith, icedWithWingerOffside, icingAfter, live, moveOut, offsideWinger, onIce, place, refereeUntilCall, setup,
   shootDownIce, shotFrom, skater, stateWith, tactics,
@@ -88,5 +89,31 @@ describe('referee', () => {
     while (g.state.phase !== 'live') g.step();
     const fo = g.drainEvents().find((e) => e.type === 'faceoff')!;
     expect(g.state.possession).toBe(fo.side); expect(g.state.noChange).toBeNull();
+  });
+
+  // Task 13: the puck out of play (over the glass, into the netting or a bench): a faceoff where the rules put it.
+  describe('the puck out of play', () => {
+    /** A live state with the puck loose at the boards, last played by `id` standing at (x, y). */
+    const outFrom = (id: string, x: number, y: number) => {
+      const st = stateWith({ carrier: null, puckX: x, puckY: y });
+      const k = st.skaters.find((s) => s.id === id);
+      if (k) k.pos = { x, y }; else st.goalies[id.startsWith('home') ? 'home' : 'away'].pos = { x, y };
+      st.lastTouch = { id, side: id.startsWith('home') ? 'home' : 'away' };
+      st.puck = { pos: { x: x + 3, y: 12.9 }, z: 3, vel: { x: 0, y: 0 }, vz: 0 };
+      return st;
+    };
+    it('put out by an attacker in the zone he attacks: faceoff at the neutral dot outside that blue line, on his side', () => {
+      const st = outFrom('home-C', 20, 5); const e = puckOutOfPlay(st, 'glass');
+      expect(e).toMatchObject({ type: 'outOfPlay', side: 'home', playerId: 'home-C', detail: { where: 'glass', spot: { x: 6.1, y: 6.7 } } });
+      expect(st.phase).toBe('stopped'); expect(st.faceoffSpot).toEqual({ x: 6.1, y: 6.7 });
+    });
+    it('put out by a defender, or off the goalie, in his own zone: faceoff at that end-zone dot', () => {
+      expect(puckOutOfPlay(outFrom('away-LD', 24, -5), 'glass').detail.spot).toEqual({ x: 21.03, y: -6.7 });
+      expect(puckOutOfPlay(outFrom('away-G', 26.5, 0.4), 'netting').detail.spot).toEqual({ x: 21.03, y: 6.7 });
+    });
+    it('put out from the neutral zone: faceoff at the nearest neutral-zone dot', () => {
+      expect(puckOutOfPlay(outFrom('away-C', -3, -5), 'bench').detail.spot).toEqual({ x: -6.1, y: -6.7 });
+      expect(puckOutOfPlay(outFrom('home-LD', 1, 1), 'bench').detail.spot).toEqual({ x: 6.1, y: 6.7 }); // never the centre dot
+    });
   });
 });

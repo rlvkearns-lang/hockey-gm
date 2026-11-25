@@ -22,6 +22,7 @@ const TURNOVER_HOW = {
 const BATTLE_HOW = { protect: 'He kept the puck', pinned: 'He pinned him on the boards', stick: 'He won it with his stick', scramble: 'In the scramble', support: 'His teammate came to help', netFront: '' } as const;
 const HIT_DEGREE = { knockdown: ' and put him down', stagger: ' and staggered him', bump: ' (a bump)' } as const;
 const ENGAGE_HOW = { heldPosition: 'held his spot', foughtThrough: 'fought through', spunOff: 'spun off', released: 'they came apart', contest: 'it became a battle', whistle: 'the whistle went' } as const;
+const OUT_WHERE = { glass: 'over the glass', netting: 'into the netting', bench: 'into a bench' } as const;
 const SAVE_HOW = { pad: 'with the pad', glove: 'with the glove', blocker: 'with the blocker', butterfly: 'in the butterfly' } as const;
 
 const metres = (d: number): string => ` from ${d.toFixed(1)} m`;
@@ -63,6 +64,7 @@ export function describe(e: GameEvent, defs: Map<string, PlayerDef>, abbr: Recor
       }
       case 'offside': return `Offside: ${me}`;
       case 'icing': return `Icing: ${me}`;
+      case 'outOfPlay': return `Whistle: the puck went ${OUT_WHERE[e.detail.where]} (last played by ${me})`;
       case 'freeze': return e.detail.cause === 'trapped'
         ? `Whistle: the puck was trapped along the boards between ${name(e.playerId)} and ${other}`
         : `Whistle: ${me} covered the puck`;

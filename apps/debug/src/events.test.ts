@@ -27,6 +27,9 @@ suite('describe', () => {
     expect(line).not.toContain('covered');
     expect(describe({ ...common, type: 'freeze', detail: { cause: 'cover' } }, defs, abbr)).toContain('Ray Carver (HBR) covered the puck');
   });
+  it('the puck out of play is a whistle naming where it went (Task 13)', () => {
+    expect(describe({ ...common, type: 'outOfPlay', detail: { spot: { x: 6.1, y: 6.7 }, where: 'netting' } }, defs, abbr)).toContain('the puck went into the netting (last played by Ray Carver (HBR))');
+  });
   it('bookkeeping events are not listed', () => {
     const rel: GameEvent = { ...common, type: 'release', detail: { kind: 'shot', toId: null, vel: { x: 30, y: 0, z: 2 }, shotType: 'slap' } };
     expect(listed(rel)).toBe(false); expect(describe(rel, defs, abbr)).toBeNull();

@@ -22,6 +22,21 @@ export const FACEOFF_DOTS: { centre: Vec2; neutral: Vec2[]; end: Vec2[] } = {
   ],
 };
 
+/**
+ * What stands round the ice (m), for a puck lifted out of play (Task 13): boards `boards` high; glass `sideGlass` above
+ * them along the sides and `endGlass` behind the goal lines (netting above that); in front of the players' benches
+ * (on the -y side, |x| from `bench.fromX` to `bench.toX`, round the doors at x = 7 and -7) nothing above the boards.
+ */
+export const GLASS = { boards: 1.07, sideGlass: 1.52, endGlass: 2.44, bench: { fromX: 3.4, toX: 10.6 } } as const;
+
+/** Where a lifted puck meets the boards at `p`: the height (m) above which it leaves play, and what it goes over. */
+export function glassAt(p: Vec2): { top: number; where: 'glass' | 'netting' | 'bench' } {
+  const ax = Math.abs(p.x);
+  if (ax > RINK.goalLineX) return { top: GLASS.boards + GLASS.endGlass, where: 'netting' };
+  if (p.y < 0 && ax >= GLASS.bench.fromX && ax <= GLASS.bench.toX) return { top: GLASS.boards, where: 'bench' };
+  return { top: GLASS.boards + GLASS.sideGlass, where: 'glass' };
+}
+
 export type Zone = 'D' | 'N' | 'O';
 
 /** Zone of an x position for a team attacking toward attackDir (blue lines divide the zones). */

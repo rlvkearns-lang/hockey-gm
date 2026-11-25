@@ -1,5 +1,5 @@
 import type { Vec2 } from './vec';
-import { boardsNormal as boardsNormal_, RINK as RINK_, resolveBoards as resolveBoards_ } from './rink';
+import { boardsNormal as boardsNormal_, glassAt as glassAt_, RINK as RINK_, resolveBoards as resolveBoards_ } from './rink';
 import { hypot2 as hypot2_ } from './vec';
 import { dexp as dexp_, hypot3 as hypot3_ } from './dmath';
 import { GRAVITY as GRAVITY_, PUCK_RADIUS as PUCK_RADIUS_ } from './util';
@@ -8,6 +8,7 @@ import { TUNING } from './tuning';
 const RINK = RINK_;
 const resolveBoards = resolveBoards_;
 const boardsNormal = boardsNormal_;
+const glassAt = glassAt_;
 const hypot2 = hypot2_;
 const dexp = dexp_;
 const hypot3 = hypot3_;
@@ -20,7 +21,9 @@ export type PuckEvent =
   | { kind: 'boards' }
   | { kind: 'post'; end: 1 | -1 }
   | { kind: 'onNet'; end: 1 | -1; y: number; z: number; speed: number; /** Its velocity on the ice as it reached the line (m/s). */ vx?: number; vy?: number }
-  | { kind: 'overNet'; end: 1 | -1 };
+  | { kind: 'overNet'; end: 1 | -1 }
+  /** It met the boards higher than the glass (or the boards, at a bench) there: out of play (rink.ts glassAt). */
+  | { kind: 'outOfPlay'; where: 'glass' | 'netting' | 'bench' };
 
 /** Per second, on speed, while the puck slides on the ice (its speed falls as exp(-ICE_DECAY * t)). */
 export const ICE_DECAY = 0.38;
@@ -131,8 +134,22 @@ export function stepPuck(puck: Puck, dt: number): PuckEvent[] {
       }
     }
 
-    // A lifted puck that reaches the boards (or the glass above them) keeps its height and falls: it stays in the rink.
-    if (puckBoards(puck)) boardsHit = true;
+    // A lifted puck that reaches the boards (or the glass above them) keeps its height and falls: it stays in the rink,
+    // unless it meets them above the glass (above the boards, at a bench): then it is out of play and stops there.
+    if (puckBoards(puck)) {
+      boardsHit = true;
+      if (puck.z > 0) {
+        const g = glassAt(puck.pos);
+        if (puck.z > g.top) {
+          puck.vel.x = 0;
+          puck.vel.y = 0;
+          puck.vz = 0;
+          events.unshift({ kind: 'boards' });
+          events.push({ kind: 'outOfPlay', where: g.where });
+          return events;
+        }
+      }
+    }
 
     // Goal-line crossing from the front, between the posts.
     for (const end of ENDS) {

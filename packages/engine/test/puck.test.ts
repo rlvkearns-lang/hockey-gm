@@ -49,4 +49,25 @@ describe('puck', () => {
     }
     expect(total).toBeGreaterThan(0);
   });
+
+  // Task 13: the puck out of play, by its height where it meets the boards (boards 1.07 m; glass 1.52 m above them on
+  // the sides, 2.44 m behind the goal lines with netting above; nothing above the boards in front of the benches).
+  it('a lifted puck meeting the side boards above the glass is out of play; below the top of the glass it comes back', () => {
+    const over = runUntilEvent(puckAt(15, 8, 0, 25, 2.5, 3));
+    expect(over).toMatchObject({ kind: 'outOfPlay', where: 'glass' });
+    const under = puckAt(15, 8, 0, 25, 1.5, 0.5); run(under, 0.5);
+    expect(under.vel.y).toBeLessThan(0);
+  });
+  it('over the boards in front of a bench (no glass there) it is out of play', () => {
+    expect(runUntilEvent(puckAt(-7, -8, 0, -25, 1.2, 1))).toMatchObject({ kind: 'outOfPlay', where: 'bench' });
+    const k = puckAt(-7, -8, 0, -25, 0.5, 0); run(k, 0.5); expect(k.vel.y).toBeGreaterThan(0);
+  });
+  it('behind the goal line above the end glass it goes into the netting: out of play', () => {
+    expect(runUntilEvent(puckAt(28.5, 5, 25, 0, 3.4, 4))).toMatchObject({ kind: 'outOfPlay', where: 'netting' });
+    const k = puckAt(28.5, 5, 25, 0, 2.5, 0); run(k, 0.3); expect(k.vel.x).toBeLessThan(0);
+  });
+  it('out of play, the puck stops where it met the boards', () => {
+    const k = puckAt(15, 8, 0, 25, 2.5, 3); runUntilEvent(k);
+    expect(k.vel).toEqual({ x: 0, y: 0 }); expect(k.vz).toBe(0); expect(Math.abs(k.pos.y)).toBeGreaterThan(12.8);
+  });
 });

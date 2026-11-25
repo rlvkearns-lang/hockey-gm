@@ -577,6 +577,13 @@ export type EventDetails = {
   offside: { spot: Vec2 };
   /** Icing by `side`; faceoff at `spot`. */
   icing: { spot: Vec2 };
+  /**
+   * The puck went out of play (Task 13): over the glass, into the netting behind a goal line, or over the boards into a
+   * bench (`where`). playerId (of `side`) last played it; `pos` is where it left; faceoff at `spot`: at the neutral-zone
+   * dot outside the blue line when an attacker put it out from the zone he attacks, else at the dot nearest where it was
+   * last played (an end-zone dot in an end zone, a neutral-zone dot in the neutral zone).
+   */
+  outOfPlay: { spot: Vec2; where: 'glass' | 'netting' | 'bench' };
   /** Play stopped: the goalie (playerId) held a save or covered a loose puck, or the puck was trapped in a board battle. */
   freeze: { cause: 'save' | 'cover' | 'trapped' };
   /** `side` started changing a unit from line/pair `from` to `to` (0-based), on the fly or at a stoppage. */

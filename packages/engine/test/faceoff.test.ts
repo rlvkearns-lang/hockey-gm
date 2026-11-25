@@ -199,3 +199,20 @@ describe('the goalie at a stoppage', () => {
   }, GAME_TIMEOUT);
 });
 
+describe('stoppages', () => {
+  it('the puck goes out of play now and then (seeds 1-4), and each time play stops for a faceoff at the spot named', () => {
+    let outs = 0; const bad: string[] = [];
+    for (const seed of [1, 2, 3, 4]) {
+      const g = createGame(gameSetup(seed)); let pending: { spot: Vec2; tick: number } | null = null;
+      while (!g.done) {
+        g.step();
+        for (const e of g.drainEvents()) {
+          if (e.type === 'outOfPlay') { outs++; pending = { spot: e.detail.spot, tick: e.tick }; if (g.state.phase !== 'stopped') bad.push(`seed ${seed} tick ${e.tick}: play not stopped`); }
+          else if (e.type === 'faceoff' && pending) { if (e.detail.spot.x !== pending.spot.x || e.detail.spot.y !== pending.spot.y) bad.push(`seed ${seed} tick ${pending.tick}: faceoff elsewhere`); pending = null; }
+        }
+      }
+    }
+    expect(bad).toEqual([]); expect(outs).toBeGreaterThan(2);
+  }, GAME_TIMEOUT * 4);
+});
+

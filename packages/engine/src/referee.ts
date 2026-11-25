@@ -2,7 +2,7 @@ import { gameEvent as gameEvent_ } from './events';
 import { stopPlay as stopPlay_ } from './faceoff';
 import { FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_ } from './rink';
 import { bodyRadius as bodyRadius_, movementOf as movementOf_ } from './skating';
-import type { GameEvent, GameState, PlayerDef, Side, SkaterState } from './types';
+import type { GameEvent, GameEventOf, GameState, PlayerDef, Side, SkaterState } from './types';
 import type { Vec2 } from './vec';
 import { findSkater as findSkater_, PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
@@ -152,4 +152,41 @@ function hybridIcing(state: GameState, side: Side, dir: 1 | -1, fromY: number, d
 function call(state: GameState, type: 'offside' | 'icing', side: Side, playerId: string | null, otherId: string | null, spot: Vec2): GameEvent {
   const fields = { side, playerId, otherId, pos: state.puck.pos, detail: { spot: { x: spot.x, y: spot.y } } };
   return type === 'offside' ? gameEvent(state, { type: 'offside', ...fields }) : gameEvent(state, { type: 'icing', ...fields });
+}
+
+/** The dot of `dots` nearest to `p`. */
+function nearestDot(dots: Vec2[], p: Vec2): Vec2 {
+  let best = dots[0]!, bestD = Infinity;
+  for (const d of dots) {
+    const dd = (d.x - p.x) * (d.x - p.x) + (d.y - p.y) * (d.y - p.y);
+    if (dd < bestD) { bestD = dd; best = d; }
+  }
+  return best;
+}
+
+/**
+ * The puck went out of play (puck.ts `outOfPlay`, `where` it went): play stops for a faceoff where the rules put it.
+ * Where it was last played is where its last toucher (a skater or a goalie) is. Put out by an attacker from the zone he
+ * attacks: the neutral-zone dot outside that blue line on the side it was played. Otherwise the dot nearest where it was
+ * last played: in an end zone that zone's dot, in the neutral zone a neutral-zone dot (never the centre dot). (A
+ * defender putting it over the glass from his own zone is a delay-of-game penalty in the rules: Part B.)
+ */
+export function puckOutOfPlay(state: GameState, where: 'glass' | 'netting' | 'bench'): GameEventOf<'outOfPlay'> {
+  const t = state.lastTouch;
+  let at: Vec2 = state.puck.pos;
+  if (t !== null) {
+    const s = findSkater(state, t.id);
+    if (s) at = s.pos;
+    else for (const side of SIDES) if (state.goalies[side].id === t.id) at = state.goalies[side].pos;
+  }
+  let spot: Vec2;
+  const zoneEnd = at.x > BLUE ? 1 : at.x < -BLUE ? -1 : 0;
+  if (t !== null && zoneEnd !== 0 && zoneEnd === state.attackDir[t.side]) spot = dotNear(FACEOFF_DOTS.neutral, zoneEnd, at.y);
+  else if (zoneEnd !== 0) spot = dotNear(FACEOFF_DOTS.end, zoneEnd, at.y);
+  else spot = nearestDot(FACEOFF_DOTS.neutral, at);
+  const e = gameEvent(state, {
+    type: 'outOfPlay', side: t?.side ?? null, playerId: t?.id ?? null, otherId: null, pos: state.puck.pos, detail: { spot: { x: spot.x, y: spot.y }, where },
+  });
+  stopPlay(state, spot);
+  return e;
 }
