@@ -12,6 +12,13 @@
  * shots, .903; 2024-25: 3.01, 28.1, .900; all situations). The 5-on-5 rates, hits, blocks, takeaways, giveaways,
  * faceoffs and icings were not found: still from memory, `verified: false`.
  *
+ * Verification (2026-11-25, Task 14b): a third try. naturalstattrick.com, api.nhle.com, espn.com, moneypuck.com and
+ * quanthockey.com do not resolve from the build session; web searches found no published league-average 5-on-5 rates,
+ * takeaways, giveaways, faceoffs or icings. One search quoted 2023-24 team season totals from statmuse.com (page not
+ * opened): hits from about 1,580 to 2,348 a team (19 to 29 a game) and blocked shots from about 1,104 to 1,533 (13.5
+ * to 18.7 a game), consistent with the 22.5 and 14.5 below but not a check of a league average: those rows stay
+ * `verified: false` with the range in their source. Nothing below was changed from a search's guess.
+ *
  * Verification (2026-11-24): the session that wrote this file could not open the league's statistics pages (the
  * network refused nhl.com's API, hockey-reference.com and dailyfaceoff.com). A web search returned the 2024-25
  * all-situations league averages quoted in the `goals`, `shots` and `savePct` rows, but no 5-on-5 rates, so every NHL
@@ -51,8 +58,8 @@ export const NHL_REFERENCE: readonly Reference[] = [
   { key: 'shots', label: 'shots on goal', nhl: 29.0, band: [28, 31], unit: 'per team per 60 (5v5)', source: `${NST}; ${HR_2025}: 30.1 / 28.1 a game`, season: '2023-24', verified: false },
   { key: 'attempts', label: 'shot attempts (Corsi)', nhl: 57.0, band: [55, 62], unit: 'per team per 60 (5v5)', source: NST, season: '2023-24', verified: false },
   { key: 'savePct', label: 'save percentage', nhl: 0.917, band: [0.915, 0.92], unit: 'saves / shots (5v5)', source: `${NST}; ${HR_2025}: .903 / .900`, season: '2023-24', verified: false },
-  { key: 'hits', label: 'hits', nhl: 22.5, band: [20, 25], unit: 'per team per game', source: `${NHL_REALTIME}; ours counts absorbed and bounced checks too`, season: '2023-24', verified: false },
-  { key: 'blocks', label: 'blocked shots', nhl: 14.5, band: [8, 12], unit: 'per team per game', source: `${NHL_REALTIME}; band 8 to 12 by the controller's ruling (Task 14b): the design's 13 to 16 needs shot wind-ups so a lane can close, carried to Part B`, season: '2023-24', verified: false },
+  { key: 'hits', label: 'hits', nhl: 22.5, band: [20, 25], unit: 'per team per game', source: `${NHL_REALTIME}; ours counts absorbed and bounced checks too; Task 14b: a web search quoted 2023-24 team totals of about 19 to 29 a game (statmuse.com, page not opened)`, season: '2023-24', verified: false },
+  { key: 'blocks', label: 'blocked shots', nhl: 14.5, band: [8, 12], unit: 'per team per game', source: `${NHL_REALTIME}; Task 14b: a web search quoted 2023-24 team totals of about 13.5 to 18.7 a game (statmuse.com, page not opened); band 8 to 12 by the controller's ruling (Task 14b): the design's 13 to 16 needs shot wind-ups so a lane can close, carried to Part B`, season: '2023-24', verified: false },
   { key: 'takeaways', label: 'takeaways', nhl: 6.5, band: [BASELINE.takeaways * 0.7, BASELINE.takeaways * 1.3], unit: 'per team per game', source: `${NHL_REALTIME}; band: within 30% of our baseline (scorekeepers differ arena to arena)`, season: '2023-24', verified: false },
   { key: 'giveaways', label: 'giveaways', nhl: 8.5, band: [BASELINE.giveaways * 0.7, BASELINE.giveaways * 1.3], unit: 'per team per game', source: `${NHL_REALTIME}; band: within 30% of our baseline (scorekeepers differ arena to arena)`, season: '2023-24', verified: false },
   { key: 'faceoffsTotal', label: 'faceoffs', nhl: 57, band: [50, 68], unit: 'per game, both teams', source: 'NHL.com team faceoff stats, all situations, from memory', season: '2023-24', verified: false },
