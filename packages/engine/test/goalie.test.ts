@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { saveChance } from '../src/goalie';
+import { goalieTick, saveChance } from '../src/goalie';
+import { DT } from '../src/constants';
+import { withGoalies } from './shot-lab';
 import { createGame, simulateGame } from '../src/game';
-import type { GameResult } from '../src/types';
+import type { GameEvent, GameResult } from '../src/types';
 import { executeShot } from '../src/actions';
 import { RINK } from '../src/rink';
 import { createRng } from '../src/rng';
@@ -95,5 +97,53 @@ describe('goalies, saves, goals', () => {
       });
       expect(bad).toEqual([]);
     }, GAME_TIMEOUT * 8);
+  });
+});
+
+// Task 13: a goalie under pressure covers a puck he has. His body in his crease, a slow loose puck within his reach in
+// front of his goal line (in the crease or just outside it), an opponent near it: he falls on it and play stops. Not
+// behind his line, not from out of his crease, not with nobody near.
+describe('a goalie under pressure covers the puck (Task 13)', () => {
+  const GOAL_X = RINK.goalLineX;
+  /** Away goalie (net at +x) at `g`, the puck still at `p`, home C at `c` (or off the ice), everyone else off the ice. */
+  function cover(gp: { x: number; y: number }, p: { x: number; y: number }, c: { x: number; y: number } | null): { stopped: boolean; events: GameEvent[] } {
+    const st = stateWith({ carrier: null, puckX: p.x, puckY: p.y });
+    for (const s of st.skaters) s.onIce = false;
+    const hc = st.skaters.find((k) => k.id === 'home-C')!;
+    if (c !== null) { hc.onIce = true; hc.pos = { ...c }; }
+    st.goalies.away.pos = { ...gp };
+    st.puck.vel = { x: 0, y: 0 };
+    const out: GameEvent[] = [];
+    goalieTick(st, withGoalies(), DT, out);
+    return { stopped: st.phase === 'stopped', events: out };
+  }
+  it('covers a puck at his feet just outside his crease with an attacker on him', () => {
+    const r = cover({ x: GOAL_X - 1.55, y: 0.4 }, { x: GOAL_X - 2.25, y: 0.9 }, { x: GOAL_X - 3.6, y: 1.5 });
+    expect(r.stopped).toBe(true);
+    expect(r.events).toEqual([expect.objectContaining({ type: 'freeze', playerId: 'away-G', detail: { cause: 'cover' } })]);
+  });
+  it('covers one in his crease, as before', () => {
+    expect(cover({ x: GOAL_X - 0.9, y: 0 }, { x: GOAL_X - 1.2, y: 0.5 }, { x: GOAL_X - 3, y: 0.5 }).stopped).toBe(true);
+  });
+  it('goes for a slow loose puck in his crease when an attacker is on it, and covers it within half a second', () => {
+    for (const p of [{ x: GOAL_X - 0.9, y: 1.55 }, { x: GOAL_X - 1.75, y: -0.4 }, { x: GOAL_X - 1.2, y: -1.2 }]) {
+      const st = stateWith({ carrier: null, puckX: p.x, puckY: p.y });
+      for (const s of st.skaters) s.onIce = false;
+      const hc = st.skaters.find((k) => k.id === 'home-C')!;
+      hc.onIce = true; hc.pos = { x: p.x - 2.2, y: p.y };
+      st.goalies.away.pos = { x: GOAL_X - 0.5, y: 0 };
+      st.puck.vel = { x: 0, y: 0 };
+      const ds = withGoalies(); const out: GameEvent[] = [];
+      expect(Math.hypot(st.goalies.away.pos.x - p.x, st.goalies.away.pos.y - p.y)).toBeGreaterThan(1.1);
+      for (let t = 0; t < 30 && st.phase === 'live'; t++) goalieTick(st, ds, DT, out);
+      expect(st.phase).toBe('stopped');
+      expect(out.at(-1)).toMatchObject({ type: 'freeze', playerId: 'away-G', detail: { cause: 'cover' } });
+    }
+  });
+  it('leaves it with nobody near, behind his goal line, or when he is out of his crease', () => {
+    expect(cover({ x: GOAL_X - 1.55, y: 0.4 }, { x: GOAL_X - 2.25, y: 0.9 }, null).stopped).toBe(false);
+    expect(cover({ x: GOAL_X - 1.55, y: 0.4 }, { x: GOAL_X - 2.25, y: 0.9 }, { x: GOAL_X - 8, y: 1.5 }).stopped).toBe(false);
+    expect(cover({ x: GOAL_X - 0.4, y: 1.1 }, { x: GOAL_X + 0.3, y: 1.4 }, { x: GOAL_X + 1.5, y: 2.5 }).stopped).toBe(false);
+    expect(cover({ x: GOAL_X - 2.6, y: 0.5 }, { x: GOAL_X - 3.3, y: 0.9 }, { x: GOAL_X - 4.5, y: 1.5 }).stopped).toBe(false);
   });
 });

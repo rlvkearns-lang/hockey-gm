@@ -249,12 +249,33 @@ function endDotNear(end: 1 | -1, p: Vec2): Vec2 {
   return best;
 }
 
-/** He covers a slow loose puck in his crease when an opponent is close to it: `freeze`, play stops. Otherwise he leaves it for his skaters. */
-function tryCover(state: GameState, side: Side, g: GoalieState, end: 1 | -1, out: GameEvent[]): boolean {
+/**
+ * True when the goalie of `side` (net at `end`) goes for the puck (Task 13): play live, nobody has it and no shot is on
+ * its way, it is slow and on the ice in his crease, and an opponent is within G.cover.threat of it. He skates to it and
+ * covers it once it is within his reach (tryCover); a goalie under pressure does not leave a loose puck in his crease.
+ */
+function goesFor(state: GameState, side: Side, end: 1 | -1): boolean {
+  if (state.carrierId !== null || state.shotInFlight !== null) return false;
   const pk = state.puck;
   if (hypot2(pk.vel.x, pk.vel.y) >= G.cover.speed || pk.z > G.cover.maxZ) return false;
   const nx = end * GOAL;
   if ((pk.pos.x - nx) * end > 0 || hypot2(pk.pos.x - nx, pk.pos.y) > RINK.creaseRadius) return false;
+  for (const s of state.skaters) if (s.onIce && s.side !== side && s.downT <= 0 && dist(s.pos, pk.pos) <= G.cover.threat) return true;
+  return false;
+}
+
+/**
+ * Under pressure he covers a puck he has (Task 13): a slow loose puck within his reach in front of his goal line, in his
+ * crease or, with his body in it, just outside it, when an opponent is close to it: `freeze`, play stops. (The rules let
+ * a goalie under pressure smother a puck at the edge of his crease; never behind his line.) Otherwise he leaves it for
+ * his skaters.
+ */
+function tryCover(state: GameState, side: Side, g: GoalieState, end: 1 | -1, out: GameEvent[]): boolean {
+  const pk = state.puck;
+  if (hypot2(pk.vel.x, pk.vel.y) >= G.cover.speed || pk.z > G.cover.maxZ) return false;
+  const nx = end * GOAL;
+  if ((pk.pos.x - nx) * end > 0) return false;
+  if (hypot2(pk.pos.x - nx, pk.pos.y) > RINK.creaseRadius && hypot2(g.pos.x - nx, g.pos.y) > RINK.creaseRadius) return false;
   if (dist(g.pos, pk.pos) > G.cover.reach) return false;
   let threat = false;
   for (const s of state.skaters) {
@@ -273,7 +294,7 @@ function tryCover(state: GameState, side: Side, g: GoalieState, end: 1 | -1, out
  * Both goalies: each moves along an arc between the puck and his net centre (deeper the farther the puck), at a top
  * speed from lateral, and turns square to the puck at a rate from positioning. Against a shot in flight he plays its
  * release point instead. Showing a save slows him; the pose returns to `stance` when poseT runs out. While play is live and nobody has the puck, a goalie covers a slow loose
- * puck in his crease when an opponent is near it (emits `freeze` into `out`, play stops for an end-zone faceoff).
+ * puck in his reach at his crease when an opponent is near it (emits `freeze` into `out`, play stops for an end-zone faceoff).
  */
 export function goalieTick(state: GameState, defs: Map<string, PlayerDef>, dt: number, out: GameEvent[] = []): void {
   for (const side of SIDES) {
@@ -282,6 +303,8 @@ export function goalieTick(state: GameState, defs: Map<string, PlayerDef>, dt: n
     // Against a shot on its way he plays where it was released from, not the puck in flight.
     if (state.phase !== 'live') { settleGoalie(state, g, goalieAttrs(defs, g.id), end, dt); continue; }
     const shot = state.shotInFlight;
+    // A slow loose puck in his crease with an attacker on it: he goes for it to cover it (tryCover).
+    if (goesFor(state, side, end)) { const pk = state.puck.pos; stepGoalie(g, goalieAttrs(defs, g.id), pk, datan2(pk.y - g.pos.y, pk.x - g.pos.x), dt); continue; }
     const read = shot !== null && shot.side !== side ? shot.from : state.puck.pos;
     moveGoalie(g, goalieAttrs(defs, g.id), read, end, dt);
   }
