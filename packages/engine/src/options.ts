@@ -25,13 +25,16 @@
  */
 import { tieOf, tiedChance } from './engage-state';
 import { hasBadge } from './badges';
-import { goalieShade as goalieShade_, pressureOn as pressureOn_, shotRush as shotRush_ } from './actions';
+import { goalieShade as goalieShade_, hardClearPlan as hardClearPlan_, pressureOn as pressureOn_, shotRush as shotRush_, type HardClearPlan } from './actions';
+import { interceptChance as interceptChance_, stickInterceptChance as stickInterceptChance_ } from './passing';
+import { ICE_DECAY } from './puck';
+import { GRAVITY } from './util';
 import { composite as composite_ } from './attributes';
 import { DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { planOf as planOf_ } from './commit';
 import { clearPathToNet as clearPathToNet_, laneWidth as laneWidth_, spaceAt as spaceAt_ } from './lanes';
 import { canReceivePass as canReceivePass_, planPass as planPass_, type PassPlan } from './passing';
-import { distToBoards as distToBoards_, RINK as RINK_ } from './rink';
+import { distToBoards as distToBoards_, FACEOFF_DOTS, RINK as RINK_ } from './rink';
 import { bodyRadius as bodyRadius_ } from './skating';
 import { scoreMargin as scoreMargin_ } from './team-play';
 import { shotQuality as shotQuality_, threat as threat_ } from './threat';
@@ -45,6 +48,9 @@ import type { Vec2 } from './vec';
 // Local bindings of hot imports (a call through an imported binding costs more under the test runner). Never alias
 // in a module on an import cycle: this one is not on one (options imports nothing that imports it).
 const goalieShade = goalieShade_;
+const hardClearPlan = hardClearPlan_;
+const interceptChance = interceptChance_;
+const stickInterceptChance = stickInterceptChance_;
 const pressureOn = pressureOn_;
 const shotRush = shotRush_;
 const composite = composite_;
@@ -94,7 +100,7 @@ export type Option =
   | { kind: 'pass'; toId: string; value: number }
   | { kind: 'carry'; lane: CarryLane; to: Vec2; value: number }
   | { kind: 'rim'; toId: string | null; value: number }
-  | { kind: 'dump'; value: number } | { kind: 'protect'; value: number } | { kind: 'clear'; value: number };
+  | { kind: 'dump'; value: number } | { kind: 'protect'; value: number } | { kind: 'clear'; value: number } | { kind: 'hardClear'; value: number };
 
 const GOAL = RINK.goalLineX;
 const BLUE = RINK.blueLineX;
@@ -393,9 +399,12 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   // it loses the share of the possession's continuation that a failed pass loses, and their rushes the other way.
   // Elsewhere it gives up what he has here and the other side's threat from the spot.
   const AF = V.after;
+  // In his own zone (Task 13b) a tired line defends what it gives up worse: the other side's threat counts
+  // 1 + TUNING.hardClear.tiredLoss * tired (lineTired: 0 fresh, 1 spent).
+  const tired = sit.zone === 'D' ? lineTired(state, side) : 0;
   const loss = rx > BLUE
     ? here * (1 - AF.passFailed.keep / AF.carry.keep) + AF.passFailed.rush * V.turnoverCost * threat(0, 0)
-    : here + V.turnoverCost * threat(-rx, -ly);
+    : here + V.turnoverCost * threat(-rx, -ly) * (1 + HC.tiredLoss * tired);
   const valueOf = (chance: number, to: number, lose: number = loss): number => chance * (to - here) - (1 - chance) * lose;
 
   // How long he has had it: the longer, the more he wants to move it on.
@@ -489,6 +498,8 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   // (Task 12: Playmaker's Vision sees TUNING.badges.visionExtraPasses more.)
   const seen = 1 + Math.floor(a.vision / 25) + (hasBadge(me, "Playmaker's Vision") ? TUNING.badges.visionExtraPasses : 0);
   passIds.length = 0;
+  // A safe outlet (Task 13b): a pass that works HC.safePass of the time or more to a man with HC.openSpace m of ice.
+  let safeOutlet = false;
   passValues.length = 0;
   passSeen.length = 0;
   const plan = state.carrierPlan !== null && state.carrierPlan.id === s.id ? state.carrierPlan : null;
@@ -534,6 +545,7 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     // A tied-up receiver (Task 10 close-out): his catch is cut as execution cuts it (passing.ts receiveChance, tiedChance
     // with TUNING.engage.limits.receive), after the fit, so the carrier sees it whole and looks elsewhere or waits.
     if (state.engagements.length > 0) { const tie = tieOf(state, m.id); if (tie > 0) chance = tiedChance(chance, tie, TUNING.engage.limits.receive); }
+    if (chance >= HC.safePass && space >= HC.openSpace) safeOutlet = true;
     // A pass across the front of the net makes the goalie move: the receiver's shot is worth more (O.pass.across).
     const qm = shotQuality(mrx, mly), opn = openAt(space);
     let to = threat(mrx, mly) * opn;
@@ -691,9 +703,16 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
     const cx = RIM.clear.x;
     tw.x = cx * dir; tw.y = ps * CLEAR_LY * dir;
     const chance = race(state, s, tw, null);
-    const v = valueOf(chance, threat(cx, ps * CLEAR_LY), V.turnoverCost * threat(-cx, -ps * CLEAR_LY));
+    const v = valueOf(chance, threat(cx, ps * CLEAR_LY), V.turnoverCost * threat(-cx, -ps * CLEAR_LY) * (1 + HC.tiredLoss * tired));
     // Unpressured, a clear throws away a puck he could carry or pass out: it costs O.clearIdle * (1 - pressure).
     out.push({ kind: 'clear', value: habit(v - O.clearIdle * (1 - pressure), tend.dump) });
+  }
+
+  // ---- the hard clear (own zone, Task 13b) ----
+  // Only under pressure (HC.pressureFrom or more) and with no safe outlet: then he moves the puck on another way.
+  if (sit.zone === 'D' && mode === 'normal' && pressure >= HC.pressureFrom && !safeOutlet) {
+    const v = hardClearValue(state, s, me, defs, here, tired);
+    out.push({ kind: 'hardClear', value: habit(v - O.clearIdle * (1 - pressure), tend.dump) });
   }
 
   // ---- protect ----
@@ -706,6 +725,119 @@ export function listOptions(state: GameState, me: PlayerDef, defs: Map<string, P
   }
   if (out.length === 0) out.push({ kind: 'protect', value: 0 });
   return out;
+}
+
+const HC = TUNING.hardClear;
+/** How tired `side`'s men on the ice are (Task 13b): 0 at full energy, 1 at TUNING.hardClear.tiredSpan below it (mean). */
+function lineTired(state: GameState, side: Side): number {
+  let energy = 0, n = 0;
+  for (const m of state.skaters) if (m.onIce && m.side === side) { energy += m.energy; n++; }
+  return n > 0 ? clamp((1 - energy / n) / HC.tiredSpan, 0, 1) : 0;
+}
+const hcPlan: HardClearPlan = { glass: false, aim: { x: 0, y: 0 }, speed: 0, vz: 0 };
+const PICKUP_SPEED = HC.knock.minSpeed;
+/** A man knocks it down when his stick or glove gets to it: his blade's reach (TUNING.blade.forward) plus TUNING.pass.stickLane off its line. */
+const KNOCK_REACH = TUNING.blade.forward + TUNING.pass.stickLane;
+/** The end-zone faceoff dots (rx, |ly|): the line the hybrid-icing race is to (referee.ts), and the icing faceoff. */
+const DOT_LINE = Math.abs(FACEOFF_DOTS.end[0]!.x), DOT_LY = Math.abs(FACEOFF_DOTS.end[0]!.y);
+/** Icing (Task 13b): a faceoff at his own end's dot that the other team wins half the time, valued from there. */
+const ICING_LOSS = 0.5 * V.turnoverCost * threat(DOT_LINE, DOT_LY);
+
+/**
+ * What the hard clear `s` would fire now is worth (Task 13b; actions.ts hardClearPlan fires the same). It flies (no
+ * friction) for its flight time, lands keeping TUNING.hardClear.landKeep of its speed, then slides (ICE_DECAY) and can
+ * be played once under PICKUP_SPEED m/s: `pick` is how
+ * far along it gets that far, `stop` how far it would go untouched (off the glass, along the boards at
+ * TUNING.boards.along of its speed after it meets them). Before that:
+ * - knocked down: each opponent within his reach of its line (not over his head on a flip, not the checkers within
+ *   TUNING.pass.clearOfPasser of him) tries with stickInterceptChance times knock.factor, as tryKnockDown does; then it
+ *   is theirs where he stands (the turnover cost from there).
+ * - icing: when it would stop beyond the far goal line, the other team's nearest man to the dot line against his team's
+ *   nearest (0.5 + V.racePerMetre per metre between them, read through TUNING.hardClear.fit.ice, set from play); it costs a faceoff at his own end's dot
+ *   that the other team wins half the time (ICING_LOSS, from the threat there), defended by the same men (no change: times
+ *   1 + tiredLoss * `tired`, as every loss in his own zone).
+ * - otherwise it is played at `pick` (the far corner when it reaches the line, and then his team's fit.played of the
+ *   time, measured): his team's first with the race chance times fit.race (measured),
+ *   worth the threat there plus a clean change (`change` times how tired his line is) and the late-lead bonus; else the
+ *   other team's there (the turnover cost from there).
+ * `here` and `tired` (lineTired) are listOptions'.
+ */
+/** hardClearOutlook's result: the chances it is knocked down, iced and (played) his team's, and where it is played. */
+export type HardClearOutlook = { knocked: number; knockRx: number; knockLy: number; reaches: boolean; ice: number; win: number; rx: number; ly: number };
+const outlookScratch: HardClearOutlook = { knocked: 0, knockRx: 0, knockLy: 0, reaches: false, ice: 0, win: 0, rx: 0, ly: 0 };
+
+/** What hardClearValue expects of the hard clear `s` would fire now (attack-relative spots), written into `out`. */
+export function hardClearOutlook(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, out: HardClearOutlook = outlookScratch): HardClearOutlook {
+  const side = s.side, dir = state.attackDir[side];
+  const p = state.puck.pos;
+  const plan = hardClearPlan(state, s, me, hcPlan);
+  const h = plan.speed, tf = (2 * plan.vz) / GRAVITY;
+  const ax = plan.aim.x - p.x, ay = plan.aim.y - p.y, al = hyp(ax, ay) || 1;
+  const ux = ax / al, uy = ay / al;
+  // Along-the-ice progress (rx, attack-relative) of its first playable spot and of where it would stop.
+  const air = h * tf;
+  // It lands on its edge (game.ts: TUNING.hardClear.landKeep of its speed), then slides.
+  const slideV = (plan.glass ? h * TUNING.boards.along : h) * HC.landKeep;
+  const cosx = plan.glass ? 1 : ux * dir;
+  const pickD = air + Math.max(0, slideV - PICKUP_SPEED) / ICE_DECAY, stopD = air + slideV / ICE_DECAY;
+  const rx0 = p.x * dir, ly0 = p.y * dir;
+  out.reaches = rx0 + stopD * cosx > GOAL + 0.5;
+  // Knocked down on its way (as tryKnockDown).
+  let through = 1, knockRx = 0, knockLy = 0, knockW = 0;
+  const lowUntil = plan.glass ? Infinity : h * ((plan.vz - Math.sqrt(Math.max(0, plan.vz * plan.vz - 2 * GRAVITY * HC.knock.maxZ))) / GRAVITY);
+  const lowFrom = plan.glass ? Infinity : air - lowUntil;
+  // Off the glass it runs to the boards, then along them (up ice) from where it meets them.
+  const toBoards = plan.glass ? al : Infinity;
+  for (const o of state.skaters) {
+    if (!o.onIce || o.side === side || o.downT > 0) continue;
+    // (The checkers within clearOfPasser of him as he lets it go get no try: actions.ts checkersOf.)
+    if (hyp(o.pos.x - s.pos.x, o.pos.y - s.pos.y) <= TUNING.pass.clearOfPasser) continue;
+    const ox = o.pos.x - p.x, oy = o.pos.y - p.y;
+    let along = ox * ux + oy * uy, off = Math.abs(ox * uy - oy * ux);
+    if (along > toBoards) { const bx = (o.pos.x - plan.aim.x) * dir; along = toBoards + bx; off = Math.abs(o.pos.y - plan.aim.y); if (bx < 0) continue; }
+    // A stick at the puck as it leaves his blade reaches it too (along a little below 0).
+    if (along <= -TUNING.pass.stickLane || along > pickD || (along > lowUntil && along < lowFrom)) continue;
+    if (off > KNOCK_REACH) continue;
+    const d = defs.get(o.id);
+    if (d === undefined) continue;
+    const c = clamp(stickInterceptChance(d, h) * HC.knock.factor, 0.03, 0.97);
+    knockW += through * c; knockRx += through * c * o.pos.x * dir; knockLy += through * c * o.pos.y * dir;
+    through *= 1 - c;
+  }
+  out.knocked = 1 - through;
+  out.knockRx = knockW > 0 ? knockRx / knockW : 0; out.knockLy = knockW > 0 ? knockLy / knockW : 0;
+  // Where it is first played, and the icing race.
+  out.ice = 0;
+  if (out.reaches) {
+    out.rx = GOAL - 1; out.ly = sgn(ly0) * 8;
+    let ours = Infinity, theirs = Infinity;
+    for (const o of state.skaters) {
+      if (!o.onIce || o.downT > 0) continue;
+      const dd = Math.max(0, DOT_LINE - o.pos.x * dir);
+      if (o.side === side) ours = Math.min(ours, dd); else theirs = Math.min(theirs, dd);
+    }
+    out.ice = theirs === Infinity ? 0 : clamp(HC.fit.ice.base + HC.fit.ice.slope * clamp(0.5 + V.racePerMetre * (ours - theirs), 0, 1), 0.03, 0.97);
+  } else {
+    out.rx = clamp(rx0 + pickD * cosx, -GOAL, GOAL - 1);
+    out.ly = plan.glass ? sgn(ly0) * (RINK.halfWidth - 1.5) : clamp(ly0 + pickD * uy * dir, -RINK.halfWidth + 1.5, RINK.halfWidth - 1.5);
+  }
+  tw.x = out.rx * dir; tw.y = out.ly * dir;
+  // Reaching the far end and not iced: his team's HC.fit.played of the time (measured).
+  out.win = out.reaches ? HC.fit.played : HC.fit.race * race(state, s, tw, null);
+  return out;
+}
+
+function hardClearValue(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, here: number, tired: number): number {
+  const side = s.side;
+  const o = hardClearOutlook(state, s, me, defs);
+  const knockCost = o.knocked > 0 ? V.turnoverCost * threat(-o.knockRx, -o.knockLy) * (1 + HC.tiredLoss * tired) : 0;
+  // A clean clear: a change for a tired line, time off the clock with a lead late.
+  const lead = state.score[side] - state.score[side === 'home' ? 'away' : 'home'];
+  const late = state.period >= PERIODS && lead > 0 ? 1 - state.clock / PERIOD_SECONDS : 0;
+  const clean = HC.change * tired + HC.lateLead * late;
+  const played = o.win * (threat(o.rx, o.ly) - here + clean) - (1 - o.win) * (V.turnoverCost * threat(-o.rx, -o.ly) - clean);
+  // Iced: a faceoff in his end (ICING_LOSS), defended by the same men (no change).
+  return (1 - o.knocked) * ((1 - o.ice) * played - o.ice * ICING_LOSS * (1 + HC.tiredLoss * tired)) - o.knocked * knockCost;
 }
 
 /** Whether a teammate of `s` with job netFront stands within TRAFFIC_NEAR (m) of the centre of the net `s` attacks. */
@@ -821,7 +953,7 @@ function race(state: GameState, s: SkaterState, to: Vec2, named: SkaterState | n
 /** The standard deviation of the softmax draw's implied (Gumbel) error, in units of its temperature: pi / sqrt(6). */
 const GUMBEL_SD = 1.2825498301618641;
 const LANE_KEY: Record<CarryLane, number> = { net: 1, wide: 2, middle: 3, office: 4, wrap: 5, hold: 6 };
-const KIND_KEY: Record<Option['kind'], number> = { shoot: 1, pass: 2, carry: 3, rim: 4, dump: 5, protect: 6, clear: 7 };
+const KIND_KEY: Record<Option['kind'], number> = { shoot: 1, pass: 2, carry: 3, rim: 4, dump: 5, protect: 6, clear: 7, hardClear: 8 };
 
 /** A 32-bit integer hash step (deterministic, integer maths only). */
 function mix(h: number, v: number): number {
@@ -851,7 +983,7 @@ function committed(o: Option, plan: CarrierPlan | null): boolean {
 
 /** Scratch for chooseOption: each option's weight and each kind's total. */
 const pickW: number[] = [];
-const kindW: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
+const kindW: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /**
  * His pick, a fresh draw weighted by value every time he chooses: option i is taken with weight exp(seen_i / T), where

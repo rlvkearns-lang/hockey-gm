@@ -51,6 +51,8 @@ describe('resuming a game from a snapshot', () => {
     // Task 10: mid-engagement, inside position taken, a draw or more in.
     ['mid-engagement', (s) => s.engagements.some((e) => s.tick - e.sinceTick > 15 && e.inside !== null), 25_000],
     ['with a phase change pending', (s) => s.teamPhase.home.pending !== null || s.teamPhase.away.pending !== null, 50_000],
+    // Task 13b: a hard clear on its way, an opponent already passed by (his try is spent).
+    ['with a hard clear on its way', (s) => s.hardClear !== null && s.hardClear.tried.length > 0, 20_000],
     ['mid-possession (a carrier plan with a seed, decided 1 to 4 ticks ago)', (s) => s.carrierPlan !== null && s.carrierPlan.seed !== undefined && s.tick - s.carrierPlan.tick >= 1 && s.tick - s.carrierPlan.tick <= 4, 30_000],
   ];
   for (const [name, when, from, seed = 11] of cases) {

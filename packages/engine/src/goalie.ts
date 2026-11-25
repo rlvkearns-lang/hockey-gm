@@ -140,14 +140,15 @@ export function saveChance(input: SaveInput): number {
 export { slideStopChance } from './slide';
 
 /**
- * A pass on the ice that slides within G.slide.reach of the goalie defending against its passer this tick (from `prev` to
- * the puck now: a feed through his crease) gets one try from him (pendingPass.tried): slideStopChance by its speed and how
+ * A pass on the ice (or a hard clear on its way, Task 13b) that slides within G.slide.reach of the goalie defending against its passer this tick (from `prev` to
+ * the puck now: a feed through his crease) gets one try from him (pendingPass.tried, hardClear.tried): slideStopChance by its speed and how
  * far its line passes from his centre (Task 8b review, Important 2). Stopped: the puck goes back to the point of its path
  * nearest him, a `stop` event, and he covers it (`freeze`), steers it away or leaves it loose in front (saveOutcome). No
  * shot on goal. Returns whether he stopped it. Events go into `out`.
  */
 export function goaliePlaysPass(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, prev: Vec2, out: GameEvent[]): boolean {
-  const pass = state.pendingPass;
+  // (Task 13b: a hard clear on its way, state.hardClear, is played as a pass is.)
+  const pass = state.pendingPass ?? state.hardClear;
   const pk = state.puck;
   if (pass === null || state.shotInFlight !== null || pk.z > G.cover.maxZ) return false;
   let passer: Side | null = null;
@@ -171,6 +172,7 @@ export function goaliePlaysPass(state: GameState, defs: Map<string, PlayerDef>, 
   g.pose = pose;
   g.poseT = POSE_SECONDS;
   state.pendingPass = null;
+  state.hardClear = null;
   const stop = gameEvent(state, { type: 'stop', side: defSide, playerId: g.id, otherId: pass.fromId, pos: pk.pos, detail: { pose, kind: 'rebound', speed } });
   out.push(stop);
   const cross: Crossing = { side: (pk.pos.y - g.pos.y) * -end, height: 0 };

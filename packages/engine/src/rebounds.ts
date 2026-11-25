@@ -86,6 +86,7 @@ export function saveOutcome(state: GameState, goalieSide: Side, f: SaveFacts, cr
   state.carrierId = null;
   state.lastTouch = { id: g.id, side: goalieSide };
   state.icingWatch = null; // the goalie played it
+  state.hardClear = null;
   pk.z = 0;
   pk.vz = 0;
   if (kind === 'held') {

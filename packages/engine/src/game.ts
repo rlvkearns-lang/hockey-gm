@@ -1,4 +1,4 @@
-import { blockPickup as blockPickup_, recordTouch as recordTouch_, tryIntercept as tryIntercept_ } from './actions';
+import { blockPickup as blockPickup_, recordTouch as recordTouch_, tryIntercept as tryIntercept_, tryKnockDown as tryKnockDown_ } from './actions';
 import { bladePos as bladePos_ } from './blade';
 import { comesFromBehind as comesFromBehind_, receiveChance as receiveChance_, receiverContest as receiverContest_ } from './passing';
 import { BENCH_DOORS as BENCH_DOORS_, benchTick as benchTick_, finishChanges as finishChanges_, initialBench as initialBench_ } from './bench';
@@ -39,6 +39,7 @@ const receiveChance = receiveChance_;
 const receiverContest = receiverContest_;
 const recordTouch = recordTouch_;
 const tryIntercept = tryIntercept_;
+const tryKnockDown = tryKnockDown_;
 const BENCH_DOORS = BENCH_DOORS_;
 const benchTick = benchTick_;
 const finishChanges = finishChanges_;
@@ -127,6 +128,7 @@ const CARRY_TURN = 0.2;
 const CARRY_STEP = 0.4;
 const frameProbe = { x: 0, y: 0 };
 const PICKUP_MAX_SPEED = 12;
+const HARD_CLEAR_LAND = TUNING.hardClear.landKeep;
 /** A pass that comes off his stick (a bobble) leaves at BOBBLE_SPEED m/s, turned by up to BOBBLE_TURN rad. */
 const BOBBLE_SPEED: [number, number] = [2, 4];
 const BOBBLE_TURN = 1;
@@ -189,7 +191,7 @@ function initialState(setup: GameSetup): GameState {
     goalies: { home: goalieAt(setup.home.lines.goalie, dir), away: goalieAt(setup.away.lines.goalie, dir === 1 ? -1 : 1) },
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
-    lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null,
+    lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null, hardClear: null,
     lastRelease: null, contestCooldowns: [], tiedUpUntil: [], staggered: [], engagements: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
     bench: initialBench(setup),
     plans: initialPlans(skaters.length),
@@ -589,7 +591,10 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
       } else {
         state.carrierId = null;
         // Tips, blocks, the goalie's save at his plane, the puck's step and the net (shots.ts moveLoosePuck).
+        const wasUp = state.hardClear !== null && state.puck.z > 0;
         const { puckEvents, onNet } = moveLoosePuck(state, defs, rng, events, prevPuck);
+        // A flipped clear lands on its edge and bounces (Task 13b): it keeps TUNING.hardClear.landKeep of its speed.
+        if (wasUp && state.puck.z === 0 && state.hardClear !== null) { state.puck.vel.x *= HARD_CLEAR_LAND; state.puck.vel.y *= HARD_CLEAR_LAND; }
         // Over the glass, into the netting or a bench (Task 13): a shot on its way is a miss, and play stops.
         const out = onNet ? null : outOfPlayIn(puckEvents);
         if (out !== null && state.phase === 'live') {
@@ -603,6 +608,8 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
           // goalie; it comes out next tick).
           const savedNow = state.lastSave !== null && state.lastSave.tick === state.tick;
           if (!savedNow && (state.shotInFlight === null || !state.shotInFlight.faced)) {
+            // A hard clear on its way: a man in its path may knock it down (Task 13b).
+            if (state.hardClear !== null) { const kd = tryKnockDown(state, defs, rng, prevPuck); if (kd !== null) events.push(kd); }
             const caught = tryIntercept(state, defs, rng, prevPuck);
             if (caught) {
               events.push(caught.event);

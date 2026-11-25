@@ -97,6 +97,7 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.lastAttackTouch = { home: null, away: null };
   state.delayedOffside = null;
   state.icingWatch = null;
+  state.hardClear = null;
   state.lastRelease = null;
   state.tiedUpUntil = [];
   state.staggered = [];
@@ -125,6 +126,7 @@ export function setupFaceoff(state: GameState, spot: Vec2): void {
   state.lastAttackTouch = { home: null, away: null };
   state.delayedOffside = null;
   state.icingWatch = null;
+  state.hardClear = null;
   headForLineup(state);
 }
 

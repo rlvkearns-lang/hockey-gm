@@ -148,7 +148,7 @@ export type SkaterPlan = {
 export type CarryLane = 'net' | 'wide' | 'middle' | 'office' | 'wrap' | 'hold';
 /** What the carrier has committed to (the brain looks for a decision point every BRAIN_INTERVAL_TICKS; the committed option gets TUNING.value.stick). */
 export type CarrierPlan = {
-  id: string; kind: 'carry' | 'pass' | 'shoot' | 'dump' | 'protect' | 'rim' | 'clear'; lane: CarryLane | null; toId: string | null; to: Vec2 | null; tick: number;
+  id: string; kind: 'carry' | 'pass' | 'shoot' | 'dump' | 'protect' | 'rim' | 'clear' | 'hardClear'; lane: CarryLane | null; toId: string | null; to: Vec2 | null; tick: number;
   /** Drawn when he gets the puck: keys the part of his error in judging each option that stays with him while he has it (builder's addition). */
   seed?: number;
   /**
@@ -471,6 +471,11 @@ export type GameState = {
   delayedOffside: { side: Side; y: number } | null;
   /** A puck released by `side` from its own half at y = fromY, untouched since: icing if it crosses the far goal line. */
   icingWatch: { side: Side; fromY: number } | null;
+  /**
+   * A hard clear (Task 13b) by `side` (fromId) still on its way, untouched: each opponent whose stick or glove it passes
+   * within reach gets one try to knock it down (`tried`). Cleared at any touch and at a whistle.
+   */
+  hardClear: { side: Side; fromId: string; tried: string[] } | null;
   /** Each team's line rotation (see bench.ts). */
   bench: Record<Side, BenchState>;
   /** What each skater has committed to: `plans[i]` belongs to `skaters[i]` (commit.ts). */
@@ -525,7 +530,11 @@ export type EventDetails = {
    * otherId the man or null) or a clear (out of his own zone, no receiver), at its release. `hand`: how a pass was
    * played (null for a dump, rim or clear).
    */
-  pass: { kind: 'pass' | 'dump' | 'rim' | 'clear'; distance: number | null; hand: PassHand | null };
+  pass: {
+    kind: 'pass' | 'dump' | 'rim' | 'clear'; distance: number | null; hand: PassHand | null;
+    /** Task 13b: a clear fired or flipped down the ice (off the glass, or up the middle) rather than chipped off the boards. */
+    hard?: boolean;
+  };
   /**
    * A shot on goal reached the goalie (otherId: the goalie): `pos` is where it met him (at his plane; for a shot that beat him by a post, or that he played on the goal line, the puck at the goal line), `cross` where on
    * him, `speed` its speed then (m/s). Followed by `save` (same tick) or `goal` (up to 4 ticks later, when it crosses the

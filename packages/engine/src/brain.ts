@@ -1,4 +1,4 @@
-import { atWrapPost as atWrapPost_, executeClear as executeClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
+import { atWrapPost as atWrapPost_, executeClear as executeClear_, executeHardClear as executeHardClear_, executeDump as executeDump_, executePass as executePass_, executeRim as executeRim_, executeShot as executeShot_ } from './actions';
 import { BRAIN_INTERVAL_TICKS as BRAIN_INTERVAL_TICKS_, DT as DT_ } from './constants';
 import { carryOffside as carryOffside_, chooseOption as chooseOption_, listOptions as listOptions_, planBeaten as planBeaten_, readSituationInto as readSituationInto_, shieldingInBattle as shieldingInBattle_, type Option, type Situation } from './options';
 import { RINK } from './rink';
@@ -11,6 +11,7 @@ import { clamp as clamp_, findSkater as findSkater_ } from './util';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 // Never alias in a module on an import cycle: brain is on none.
 const executeClear = executeClear_;
+const executeHardClear = executeHardClear_;
 const atWrapPost = atWrapPost_;
 const executeDump = executeDump_;
 const executePass = executePass_;
@@ -39,7 +40,8 @@ export type Decision =
   | { kind: 'dump' }
   | { kind: 'protect' }
   | { kind: 'rim'; toId: string | null }
-  | { kind: 'clear' };
+  | { kind: 'clear' }
+  | { kind: 'hardClear' };
 
 const T = TUNING.brain;
 const optionScratch: Option[] = [];
@@ -235,6 +237,7 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
     case 'dump': executeDump(state, s.id, defs, rng, out); return;
     case 'rim': executeRim(state, s.id, d.toId, defs, rng, out); return;
     case 'clear': executeClear(state, s.id, defs, rng, out); return;
+    case 'hardClear': executeHardClear(state, s.id, defs, rng, out); return;
     case 'carry':
       if (busy) return;
       s.target.x = d.to.x;

@@ -502,6 +502,40 @@ export const TUNING = deepFreeze({
    * clear goes at clearSpeed toward the boards at rx `clear.x` (out past his own blue line) on his side.
    */
   rim: { speed: { base: 16, perPoint: 0.04 }, ahead: 4, corner: { back: 1, y: 8 }, path: 1.8, clearSpeed: { base: 14, perPoint: 0.04 }, clear: { x: -3 } },
+  /**
+   * The hard clear (Task 13b; actions.ts executeHardClear, options.ts). From his own zone he fires or flips it down the
+   * ice: within glassWall (m) of the boards he fires it off the glass on his side at speed.base + perPoint *
+   * shootingPower (m/s), aimed at the boards glassAhead m up ice of him (at most to glassMaxRx) and meeting them glassZ m
+   * up; otherwise he flips it high up the middle toward the far corner on his side (the far goal line, aimY m off
+   * centre: not at the net) at flip.speed, to flip.peak m. A lifted clear lands on its edge and keeps landKeep of its
+   * speed (game.ts). An opponent whose stick (or, below
+   * knock.maxZ m, his body) it passes within reach knocks it down with interceptChance (TUNING.pass) times knock.factor
+   * (times TUNING.pass.stickFactor off the stick); it drops dead at his feet (knock.keep m/s). Slower than knock.minSpeed
+   * (m/s; game.ts's loose-puck pickup speed) it is a loose puck anyone may pick up, not a clear to knock down.
+   * Valued (options.ts) on where it can first be played: what it leads to there (his team first, by the race; else the
+   * other team's possession there), knocked down near the knocker, icing (a faceoff at his own end's dot, from the threat
+   * there, and no change) when it would reach the far goal line untouched and the other team would win the race; a
+   * clean clear is worth change * how tired his line is (1 - mean energy, over tiredSpan) and lateLead * how late it is
+   * with a lead in the last period. In his own zone every loss of the puck (and an icing's faceoff) costs 1 + tiredLoss *
+   * tired times as much: a tired line defends worse.
+   */
+  hardClear: {
+    speed: { base: 22, perPoint: 0.08 }, glassWall: 3.5, glassAhead: 14, glassMaxRx: -4, glassZ: 1.6, aimY: 9,
+    flip: { speed: { base: 12, perPoint: 0.05 }, peak: 3 }, landKeep: 0.5,
+    knock: { maxZ: 1.8, factor: 1, keep: 2, minSpeed: 12 },
+    change: 0.03, tiredSpan: 0.4, tiredLoss: 1, lateLead: 0.03,
+    /** It is an option only under pressure (pressureFrom or more) with no safe outlet: no pass that works safePass of the time to a man with openSpace m of ice. */
+    pressureFrom: 0.75, safePass: 0.6, openSpace: 2,
+    /**
+     * Set from play (seeds 1-6, 494 hard clears, task-13b-report.md item 1): the icing race read from where the men stand
+     * (0.5 + V.racePerMetre per metre) called 0.1 / 0.3 / 0.5 / 0.7 / 0.9 was iced 0.47 / 0.36 / 0.51 / 0.75 / 0.84 of the
+     * time (the forwards do not always race for it; the other team's men skate back): the chance used is ice.base +
+     * ice.slope * that read. A clear that reaches the far end and is not iced (or is played before it) was his team's 0.55
+     * of the time, not V.raceMax: `played`. After the flip (a lifted clear lands and dies) most stop short of the line;
+     * those were his team's 0.14 of the time against the race's 0.26 (seeds 5-8, 192 clears): `race` times the race chance.
+     */
+    fit: { ice: { base: 0.32, slope: 0.51 }, played: 0.55, race: 0.5 },
+  },
   /** Dumps (actions.ts): to a spot this deep and wide (attack-relative m), chipped up at vz m/s; speed base + perPoint * passing. */
   dump: { spot: { x: 25.5, y: 8 }, vz: 2, speed: { base: 16, perPoint: 0.05 }, errorFactor: 1.5 },
 

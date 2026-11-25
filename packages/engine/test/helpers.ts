@@ -234,7 +234,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     onIce: { home: SKATER_SLOTS.map((s) => skaterId('home', s)), away: SKATER_SLOTS.map((s) => skaterId('away', s)) },
     pickupBlock: null, pendingPass: null, shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [], ticks: [] }, lastAttackTouch: { home: null, away: null },
-    noChange: null, delayedOffside: null, icingWatch: null, lastRelease: null, contestCooldowns: [],
+    noChange: null, delayedOffside: null, icingWatch: null, hardClear: null, lastRelease: null, contestCooldowns: [],
     tiedUpUntil: [], reboundEdge: null, turnoverWatch: null, lastSave: null, staggered: [], engagements: [],
     bench: {
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },

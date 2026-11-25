@@ -73,6 +73,7 @@ const MAX_TOUCHES = 6;
 /** `id` of `side` has the puck now: a new team starts a new chain; a new player of the same team joins it. */
 export function recordTouch(state: GameState, id: string, side: Side): void {
   state.icingWatch = null;
+  state.hardClear = null;
   const t = state.touches;
   state.lastAttackTouch[side] = id;
   if (t.side !== side) { t.side = side; t.ids.length = 0; t.ticks.length = 0; t.ids.push(id); t.ticks.push(state.tick); return; }
@@ -111,6 +112,7 @@ function release(
   if (out) out.push(gameEvent(state, { type: 'release', side: from.side, playerId: from.id, otherId: toId, pos: p.pos, detail: { kind, toId, vel: { x: vx, y: vy, z: vz }, shotType } }));
   recordTouch(state, from.id, from.side); // his touch lasts until he lets it go
   state.icingWatch = p.pos.x * state.attackDir[from.side] < 0 ? { side: from.side, fromY: p.pos.y } : null;
+  state.hardClear = null;
   p.vel.x = vx;
   p.vel.y = vy;
   p.z = 0;
@@ -468,6 +470,99 @@ export function executeClear(state: GameState, fromId: string, defs: Map<string,
   const angle = datan2(aimScratch.y - p.y, aimScratch.x - p.x) + rng.gauss() * sigma;
   out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'clear', distance: null, hand: null } }));
   release(state, s, dcos(angle) * speed, dsin(angle) * speed, 0, out, 'dump');
+}
+
+const HC = TUNING.hardClear;
+
+/** Where and how a hard clear goes (hardClearPlan's result). */
+export type HardClearPlan = {
+  /** Off the glass on his side (true), or up the middle toward the far end. */
+  glass: boolean;
+  /** Where it is aimed (rink coordinates): the boards up ice of him, or the far end. */
+  aim: Vec2;
+  /** Its speed along the ice (m/s) and its upward speed (m/s) as it leaves his stick. */
+  speed: number; vz: number;
+};
+
+/**
+ * The hard clear `s` (definition `me`) would fire now (Task 13b, TUNING.hardClear), written into `out`: within
+ * glassWall m of the boards, fired off the glass on his side (aimed at the boards glassAhead m up ice, at most
+ * glassMaxRx, lifted to meet them glassZ m up; speed base + perPoint * shootingPower); otherwise flipped high up the
+ * middle toward the far corner, aimY m off centre on his side, to flip.peak m at flip.speed. options.ts values exactly
+ * this; executeHardClear fires it.
+ */
+export function hardClearPlan(state: GameState, s: SkaterState, me: PlayerDef, out: HardClearPlan): HardClearPlan {
+  const dir = state.attackDir[s.side];
+  const p = state.puck.pos;
+  const rx = p.x * dir, ly = p.y * dir, ps = ly >= 0 ? 1 : -1;
+  out.glass = distToBoards(p) <= HC.glassWall && Math.abs(ly) > RINK.halfWidth - 2 * HC.glassWall;
+  out.speed = out.glass ? HC.speed.base + me.attrs.shootingPower * HC.speed.perPoint : HC.flip.speed.base + me.attrs.shootingPower * HC.flip.speed.perPoint;
+  if (out.glass) {
+    const ax = Math.min(rx + HC.glassAhead, HC.glassMaxRx);
+    out.aim = { x: ax * dir, y: ps * RINK.halfWidth * dir };
+    const t = hypot2(out.aim.x - p.x, out.aim.y - p.y) / out.speed;
+    out.vz = (HC.glassZ + 0.5 * GRAVITY * t * t) / t;
+  } else {
+    out.aim = { x: RINK.goalLineX * dir, y: ps * HC.aimY * dir };
+    out.vz = Math.sqrt(2 * GRAVITY * HC.flip.peak);
+  }
+  return out;
+}
+const hcScratch: HardClearPlan = { glass: false, aim: { x: 0, y: 0 }, speed: 0, vz: 0 };
+
+/**
+ * Fire it down the ice (Task 13b): hardClearPlan's aim, speed and lift, off by the dump's direction error (from passing)
+ * grown by pressure. Its `pass` event (kind `clear`, `hard` true, no receiver) and `release` event (kind `dump`) go into
+ * `out`. Released from his own half it is watched for icing; until someone touches it, each opponent it passes within
+ * reach may knock it down (state.hardClear, tryKnockDown; the checkers within TUNING.pass.clearOfPasser of him as he
+ * lets it go get no try).
+ */
+export function executeHardClear(state: GameState, fromId: string, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[] = []): void {
+  const s = skaterById(state, fromId);
+  const me = defs.get(fromId)!;
+  const plan = hardClearPlan(state, s, me, hcScratch);
+  const p = state.puck.pos;
+  const sigma = DUMP.errorFactor * (PASS.error.base + (100 - me.attrs.passing) * PASS.error.perPoint + pressureOn(state, s) * PASS.error.pressure);
+  const angle = datan2(plan.aim.y - p.y, plan.aim.x - p.x) + rng.gauss() * sigma;
+  out.push(gameEvent(state, { type: 'pass', side: s.side, playerId: fromId, otherId: null, pos: p, detail: { kind: 'clear', distance: null, hand: null, hard: true } }));
+  release(state, s, dcos(angle) * plan.speed, dsin(angle) * plan.speed, plan.vz, out, 'dump');
+  state.hardClear = { side: s.side, fromId, tried: checkersOf(state, s) };
+}
+
+/**
+ * A hard clear on its way (state.hardClear), below TUNING.hardClear.knock.maxZ and at knock.minSpeed or more: each opponent (on the ice, not
+ * leaving, not down, not steered by a contest) whose stick blade came within TUNING.pass.stickLane of its path this tick
+ * (from `prev` to now) gets one try with stickInterceptChance, or with his body within TUNING.pass.interceptRange of it
+ * one with interceptChance, each times knock.factor. On success it drops dead at his feet (knock.keep m/s on along its
+ * line), his touch (no more icing watch), and a `turnover` (how `deflected`) is returned.
+ */
+export function tryKnockDown(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, prev: Vec2): GameEvent | null {
+  const hc = state.hardClear;
+  if (hc === null || state.carrierId !== null) return null;
+  const p = state.puck;
+  if (p.z > HC.knock.maxZ) return null;
+  const speed = hypot2(p.vel.x, p.vel.y);
+  if (speed < HC.knock.minSpeed) return null;
+  for (const o of state.skaters) {
+    if (!o.onIce || o.leaving || o.downT > 0 || o.side === hc.side || hc.tried.includes(o.id) || steeredByContest(state, o)) continue;
+    const d = defs.get(o.id)!;
+    const blade = bladePos(o.pos, o.facing, d.shoots, bladeScratch);
+    let chance: number;
+    if (segDistXY(blade.x, blade.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.stickLane) chance = stickInterceptChance(d, speed);
+    else if (segDistXY(o.pos.x, o.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.interceptRange) chance = interceptChance(d, speed);
+    else continue;
+    hc.tried.push(o.id);
+    if (!rng.chance(clamp(chance * HC.knock.factor, 0.03, 0.97))) continue;
+    const k = HC.knock.keep / (speed || 1);
+    p.vel.x *= k; p.vel.y *= k;
+    p.z = 0; p.vz = 0;
+    const from = hc.fromId;
+    state.lastTouch = { id: o.id, side: o.side };
+    state.possession = o.side;
+    recordTouch(state, o.id, o.side);
+    return gameEvent(state, { type: 'turnover', side: o.side, playerId: o.id, otherId: from, pos: p.pos, detail: { how: 'deflected' } });
+  }
+  return null;
 }
 
 /**

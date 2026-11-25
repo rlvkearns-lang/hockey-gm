@@ -41,7 +41,7 @@ export type PlayCounterKey =
   | 'engagedTicks' | 'contactOver03Free' | 'contactOver03Engaged' | 'coverTicks' | 'coverDist' | 'coverNearTicks' | 'coverNearDist' | 'engagements'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
-  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals'
+  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals' | 'icings' | 'hardClears' | 'faceoffs'
   | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
   | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear'
   | 'protectSpells' | 'protectEngaged'
@@ -62,7 +62,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'engagedTicks', 'contactOver03Free', 'contactOver03Engaged', 'coverTicks', 'coverDist', 'coverNearTicks', 'coverNearDist', 'engagements',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
-  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals',
+  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals', 'icings', 'hardClears', 'faceoffs',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
   'netFrontHolds', 'netFrontHoldsLong', 'pointShotSaves', 'pointShotSavesNear',
   'protectSpells', 'protectEngaged',
@@ -250,7 +250,10 @@ export function createObserver(setup: GameSetup): Observer {
     const tick = st.tick;
     for (const e of events) {
       switch (e.type) {
+        case 'icing': c.icings++; break;
+        case 'faceoff': c.faceoffs++; break;
         case 'pass': {
+          if (e.detail.kind === 'clear' && e.detail.hard === true) c.hardClears++;
           if (e.detail.kind !== 'pass' || e.playerId === null || e.otherId === null) break;
           c.passes++;
           const from = skaterById(st, e.playerId), to = skaterById(st, e.otherId);

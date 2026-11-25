@@ -290,6 +290,16 @@ describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
   }, 240_000);
 });
 
+describe('icing and the hard clear (Task 13b)', () => {
+  // Task 13 close-out: icing was called 1.63 times a game (an NHL game has about 7 or 8): nothing fired the puck down the
+  // ice. With the hard clear (options.ts, actions.ts executeHardClear) it reads between 4 and 12 a game.
+  it('icing is called 4 to 12 times a game, and defenders clear it hard (seeds 1-16)', () => {
+    const c = counters16(), n = SEEDS16.length;
+    expect(c.icings / n).toBeGreaterThanOrEqual(4); expect(c.icings / n).toBeLessThanOrEqual(12);
+    expect(c.hardClears / n).toBeGreaterThan(5);
+  }, 240_000);
+});
+
 describe('A5: battling for position (Task 10)', () => {
   // Close-out ruling 6: the engaged share and the count are read pooled over seeds 1-8 (thin on three seeds); bars unchanged.
   it('A5: battling is constant: some pair is engaged in over 30% of live time (seeds 1-8)', () => { expect(counters8().engagedTicks / counters8().liveTicks).toBeGreaterThan(0.30); }, 240_000);
