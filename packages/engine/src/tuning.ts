@@ -782,7 +782,14 @@ export const TUNING = deepFreeze({
   boxScore: { keepSeconds: 2, unforcedPressure: 0.5, controlSeconds: 1.5 },
 
   /** Faceoffs (faceoff.ts): the centres' rating difference is scaled by edgeScale before winProb. */
-  faceoff: { edgeScale: 0.5 },
+  faceoff: {
+    edgeScale: 0.5,
+    /**
+     * Lining up (faceoff.ts): within faceWithin (m) of his spot he turns to his line-up facing (toward a point faceAhead m
+     * along it; squared up, skating.ts Drive.squareWithin); he sprints to it from further than sprintFrom (m).
+     */
+    lineup: { faceWithin: 1.5, faceAhead: 10, sprintFrom: 20 },
+  },
 
   /** Scoring (goalie.ts): a teammate's touch earns an assist only if he had the puck within this long (s) of the goal. */
   scoring: { assistWindowSeconds: 10 },

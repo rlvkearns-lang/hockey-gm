@@ -25,8 +25,12 @@ export type Movement = {
   carve: number;
 };
 
-/** How he slows when he is going faster than he wants, and whether he means to stop at his target or skate through it. */
-export type Drive = { slow: SlowMode; through: boolean };
+/**
+ * How he slows when he is going faster than he wants, and whether he means to stop at his target or skate through it.
+ * `squareWithin` (m): within this far of his target, with a spot to face, he squares up to it whatever his travel
+ * (a man settling into his faceoff spot shuffles in facing the way he will stand).
+ */
+export type Drive = { slow: SlowMode; through: boolean; squareWithin?: number };
 export const DEFAULT_DRIVE: Drive = { slow: 'coast', through: false };
 
 const S = TUNING.skating;
@@ -126,6 +130,7 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number, drive: Drive
       if (fx !== 0 || fy !== 0) {
         const toFace = datan2(fy, fx);
         if (!hasGoal) { wantFacing = toFace; squared = s.mode !== 'forward'; }
+        else if (drive.squareWithin !== undefined && dist < drive.squareWithin) { wantFacing = toFace; squared = true; }
         else {
           const off = Math.abs(wrapAngle(toFace - travel));
           squared = off > (s.mode === 'forward' ? SQUARE_ENTER : SQUARE_EXIT);

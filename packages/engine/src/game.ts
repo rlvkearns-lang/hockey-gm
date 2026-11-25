@@ -9,7 +9,7 @@ import { pickupReachOf } from './engage-state';
 import { BRAIN_INTERVAL_TICKS, DT as DT_, PERIOD_SECONDS as PERIOD_SECONDS_, PERIODS as PERIODS_ } from './constants';
 import { clearContests as clearContests_, contestEndEvent as contestEndEvent_, contestTick as contestTick_, puckHeldByContest as puckHeldByContest_, type ContestRef } from './contests/core';
 import { gameEvent as gameEvent_ } from './events';
-import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
+import { dropPuck as dropPuck_, FACEOFF_MAX_SECONDS as FACEOFF_MAX_SECONDS_, FACEOFF_MIN_SECONDS as FACEOFF_MIN_SECONDS_, linedUp as linedUp_, lineupTick as lineupTick_, restPuck as restPuck_, setupFaceoff as setupFaceoff_, snapToLineup as snapToLineup_ } from './faceoff';
 import { staggerCap as staggerCap_ } from './contests/hit';
 import { engagementTick as engagementTick_, engageSpeedFactor as engageSpeedFactor_, tieOf as tieOf_, whistleEngagements as whistleEngagements_ } from './engagements';
 import { goaliePlaysPass as goaliePlaysPass_, goalieTick as goalieTick_, scoreFacedShot as scoreFacedShot_, whistleFacedShot as whistleFacedShot_ } from './goalie';
@@ -59,6 +59,7 @@ const dropPuck = dropPuck_;
 const FACEOFF_MAX_SECONDS = FACEOFF_MAX_SECONDS_;
 const FACEOFF_MIN_SECONDS = FACEOFF_MIN_SECONDS_;
 const linedUp = linedUp_;
+const lineupTick = lineupTick_;
 const restPuck = restPuck_;
 const setupFaceoff = setupFaceoff_;
 const snapToLineup = snapToLineup_;
@@ -685,6 +686,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         break;
       case 'stopped':
         benchTick(state, setup, DT, events);
+        lineupTick(state);
         moveSkaters(onIceSkaters());
         goalieTick(state, defs, DT, events);
         settle(onIceList);
@@ -692,11 +694,14 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         break;
       case 'faceoffSetup':
         benchTick(state, setup, DT, events);
+        lineupTick(state);
         moveSkaters(onIceSkaters());
         goalieTick(state, defs, DT, events);
         settle(onIceList);
-        if (state.phaseT >= FACEOFF_MIN_SECONDS - EPS && (state.phaseT >= FACEOFF_MAX_SECONDS - EPS || linedUp(state))) {
-          finishChanges(state, setup); // at the 8 s cap a change may still be under way
+        // The puck drops when everyone is lined up (a change under way finishes by itself first); the safety limit
+        // (FACEOFF_MAX_SECONDS) drops it anyway if someone cannot get to his spot, a change still under way finished then.
+        if (state.phaseT >= FACEOFF_MIN_SECONDS - EPS && (linedUp(state) || state.phaseT >= FACEOFF_MAX_SECONDS - EPS)) {
+          finishChanges(state, setup);
           const e = dropPuck(state, defs, rng);
           events.push(e);
           const ids = [e.playerId, e.otherId].filter((id): id is string => id !== null);

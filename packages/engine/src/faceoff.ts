@@ -2,38 +2,71 @@ import { hasBadge } from './badges';
 import { recordTouch } from './actions';
 import { clearContests, effective, winProb } from './contests/core';
 import { gameEvent } from './events';
-import { holdJob, setTeamPhase, speedFor } from './commit';
+import { holdJob, setFace, setTeamPhase, speedFor } from './commit';
+import { datan2, dcos, dsin } from './dmath';
 import { resolveBoards } from './rink';
 import type { Rng } from './rng';
+import { wrapAngle } from './skating';
 import { TUNING } from './tuning';
 import type { GameEventOf, GameState, PlayerDef, Position, Side, SkaterState } from './types';
+import { SIDES } from './util';
 import { hypot2, type Vec2 } from './vec';
 
 /** The puck drops once every on-ice skater is this close to his line-up spot (m)... */
 export const LINEUP_TOLERANCE = 0.6;
-/** ...but never before this many seconds of setup... */
+/** ...slower than this (m/s)... */
+export const LINEUP_SPEED = 0.5;
+/**
+ * ...and within this (rad) of his faceoffFacing (the brief's 0.35 let the puck drop with a man 20 degrees off up ice
+ * while still turning; squared up at his spot he turns this last bit in a tick or two), a centre within
+ * CENTRE_TOLERANCE (m) of his spot (0.2 m to the side of it at 0.6 m back he faces the dot 18 degrees off square)...
+ */
+export const LINEUP_FACING = 0.15;
+export const CENTRE_TOLERANCE = 0.05;
+/** ...but never before this many seconds of setup. */
 export const FACEOFF_MIN_SECONDS = 3;
-/** ...and at the latest after this many, with players wherever they are. */
-export const FACEOFF_MAX_SECONDS = 8;
+/**
+ * A safety net only: a setup lasts as long as the players take to get to their spots (a change under way finishes by
+ * itself first), and the linesman drops the puck at this point only if someone cannot get there (the tests show it is
+ * never reached).
+ */
+export const FACEOFF_MAX_SECONDS = 25;
 /** Faceoffs rating used for a side with no centre on the ice. */
 const NO_CENTRE_RATING = 50;
 /** Speed range (m/s) of the puck pulled back to a defenceman. */
 const DRAW_BACK_SPEED: [number, number] = [6, 8];
+/** He turns to his line-up facing within FACE_WITHIN (m) of his spot, toward a point FACE_AHEAD (m) along it; he sprints from beyond SPRINT_FROM (m). */
+const FACE_WITHIN = TUNING.faceoff.lineup.faceWithin;
+const FACE_AHEAD = TUNING.faceoff.lineup.faceAhead;
+const SPRINT_FROM = TUNING.faceoff.lineup.sprintFrom;
 
-/** Line-up spot behind the dot along the side's attack direction; "left" is +y when attacking +x. */
+/**
+ * Line-up spots, metres behind the dot toward his own end (`back`) and to his left (`left`): the centre over the dot,
+ * the wingers on the circle, the defencemen behind. Everyone is on his own side of the dot.
+ */
 const LINEUP: Record<Exclude<Position, 'G'>, { back: number; left: number }> = {
-  C: { back: 0.9, left: 0 },
-  LW: { back: 1.2, left: 4.5 },
-  RW: { back: 1.2, left: -4.5 },
-  LD: { back: 8, left: 3 },
-  RD: { back: 8, left: -3 },
+  C: { back: 0.6, left: 0 },
+  LW: { back: 0.9, left: 4.6 },
+  RW: { back: 0.9, left: -4.6 },
+  LD: { back: 5, left: 2.5 },
+  RD: { back: 5, left: -2.5 },
 };
 
+/** His line-up spot for the draw at `spot` (attacking toward `dir`; "left" is +y when attacking +x), inside the boards. */
 export function faceoffPosition(spot: Vec2, slot: Position | null, dir: 1 | -1): Vec2 {
   const l = LINEUP[slot === null || slot === 'G' ? 'C' : slot];
   const pos = { x: spot.x - dir * l.back, y: spot.y + dir * l.left };
   resolveBoards(pos, { x: 0, y: 0 }, 0.5, 0);
   return pos;
+}
+
+/** The way he faces at the draw (rad): a centre (or a man with no slot) at the dot from `pos`, everyone else straight up ice. */
+export function faceoffFacing(spot: Vec2, slot: Position | null, dir: 1 | -1, pos: Vec2): number {
+  if (slot === 'C' || slot === null || slot === 'G') {
+    const dx = spot.x - pos.x, dy = spot.y - pos.y;
+    if (dx * dx + dy * dy > 1e-12) return datan2(dy, dx);
+  }
+  return dir === 1 ? 0 : Math.PI;
 }
 
 /** Puck still and flat on the ice (every stoppage). */
@@ -97,30 +130,65 @@ export function setupFaceoff(state: GameState, spot: Vec2): void {
 
 /** Every on-ice skater (but those leaving for the bench) skates toward his line-up spot for the draw at state.faceoffSpot. */
 export function headForLineup(state: GameState): void {
-  const spot = state.faceoffSpot;
   const sk = state.skaters;
   for (let i = 0; i < sk.length; i++) {
     const s = sk[i]!;
     if (!s.onIce || s.leaving) continue;
-    s.target = faceoffPosition(spot, s.slot, state.attackDir[s.side]);
-    s.faceTarget = null;
-    holdJob(state, i, 'lineUp', 'whistle');
-    s.speedCap = speedFor(state.plans[i]!.effort, 'lineUp', s.energy);
+    holdJob(state, i, 'lineUp', 'whistle', 'stop');
+    lineUp(state, i);
   }
 }
 
-/** True when no line change is under way and every on-ice skater is within LINEUP_TOLERANCE of his line-up spot. */
+/**
+ * While play is stopped, every tick before the skaters move: each on-ice skater with job `lineUp` (not leaving) skates
+ * for his spot (effort skate, sprint from beyond 20 m; ready to stop) and, within 1.5 m of it, turns to his
+ * faceoffFacing (a point 10 m along it from his spot).
+ */
+export function lineupTick(state: GameState): void {
+  const sk = state.skaters, plans = state.plans;
+  for (let i = 0; i < sk.length; i++) {
+    const s = sk[i]!;
+    if (!s.onIce || s.leaving || plans[i]!.job !== 'lineUp') continue;
+    lineUp(state, i);
+  }
+}
+
+function lineUp(state: GameState, i: number): void {
+  const s = state.skaters[i]!, plan = state.plans[i]!;
+  const spot = state.faceoffSpot, dir = state.attackDir[s.side];
+  const p = faceoffPosition(spot, s.slot, dir);
+  s.target.x = p.x;
+  s.target.y = p.y;
+  const d = hypot2(p.x - s.pos.x, p.y - s.pos.y);
+  plan.effort = d > SPRINT_FROM ? 'sprint' : 'skate';
+  plan.slow = 'stop';
+  plan.through = false;
+  s.speedCap = speedFor(plan.effort, 'lineUp', s.energy);
+  if (d > FACE_WITHIN) { s.faceTarget = null; return; }
+  const f = faceoffFacing(spot, s.slot, dir, s.pos);
+  setFace(s, { x: p.x + FACE_AHEAD * dcos(f), y: p.y + FACE_AHEAD * dsin(f) });
+}
+
+/**
+ * True when no line change is under way and every on-ice skater is within LINEUP_TOLERANCE of his line-up spot (a
+ * centre within CENTRE_TOLERANCE), slower than LINEUP_SPEED and within LINEUP_FACING of his faceoffFacing.
+ */
 export function linedUp(state: GameState): boolean {
+  for (const side of SIDES) if (state.bench[side].forwards.changing || state.bench[side].defence.changing) return false;
+  const spot = state.faceoffSpot;
   for (const s of state.skaters) {
     if (!s.onIce) continue;
     if (s.leaving) return false;
-    const p = faceoffPosition(state.faceoffSpot, s.slot, state.attackDir[s.side]);
-    if (hypot2(s.pos.x - p.x, s.pos.y - p.y) > LINEUP_TOLERANCE) return false;
+    const dir = state.attackDir[s.side];
+    const p = faceoffPosition(spot, s.slot, dir);
+    if (hypot2(s.pos.x - p.x, s.pos.y - p.y) > (s.slot === 'C' ? CENTRE_TOLERANCE : LINEUP_TOLERANCE)) return false;
+    if (hypot2(s.vel.x, s.vel.y) >= LINEUP_SPEED) return false;
+    if (Math.abs(wrapAngle(s.facing - faceoffFacing(spot, s.slot, dir, s.pos))) > LINEUP_FACING) return false;
   }
   return true;
 }
 
-/** Put every on-ice skater exactly on his line-up spot, still, facing the attack direction. Only for the opening line-up. */
+/** Put every on-ice skater exactly on his line-up spot, still, facing his line-up facing. Only for the opening line-up. */
 export function snapToLineup(state: GameState): void {
   for (const s of state.skaters) {
     if (!s.onIce) continue;
@@ -128,7 +196,7 @@ export function snapToLineup(state: GameState): void {
     s.pos = faceoffPosition(state.faceoffSpot, s.slot, dir);
     s.target = { x: s.pos.x, y: s.pos.y };
     s.vel = { x: 0, y: 0 };
-    s.facing = dir === 1 ? 0 : Math.PI;
+    s.facing = faceoffFacing(state.faceoffSpot, s.slot, dir, s.pos);
   }
 }
 

@@ -291,6 +291,8 @@ function spotEffort(state: GameState, s: SkaterState, plan: SkaterPlan, onside: 
 const STEERED: Drive = { slow: 'stop', through: false };
 const RACING: Drive = { slow: 'coast', through: true };
 const planDrive: Drive = { slow: 'coast', through: false };
+/** Lining up for a draw (play stopped): ready to stop, squared up to his line-up facing near his spot (faceoff.ts). */
+const LINING_UP: Drive = { slow: 'stop', through: false, squareWithin: TUNING.faceoff.lineup.faceWithin };
 
 /**
  * How skater i (`s`) drives this tick: as his plan says, or, steered by a contest, ready to stop and never skating
@@ -306,6 +308,7 @@ export function driveOf(state: GameState, s: SkaterState, i: number): Drive {
     }
   }
   const p = state.plans[i]!;
+  if (p.job === 'lineUp' && state.phase !== 'live') return LINING_UP;
   planDrive.slow = p.slow;
   planDrive.through = p.through;
   return planDrive;

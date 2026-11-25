@@ -35,6 +35,12 @@ export const BENCH_DOORS: Record<Side, Vec2> = { home: { x: -7, y: -12.2 }, away
 const DOOR_REACH = 1.5;
 /** A replacement steps on only when no one on the ice is this close to the door (m): two body radii and a margin. */
 const DOOR_CLEAR = 0.9;
+/**
+ * While play is stopped, only a man who would overlap him at the door (closer than this, m) keeps him off: the
+ * winger lined up for a draw at the neutral dot by the bench stands 0.9 m from the door, and at 0.9 he kept the rest
+ * of his line on the bench until the safety limit (Task 13).
+ */
+const DOOR_CLEAR_STOPPED = 0.7;
 /** Target ice-time shares by line (forwards) and pair (defence), first unit first. */
 const SHARES: Record<Unit, readonly number[]> = { forwards: [0.36, 0.3, 0.21, 0.13], defence: [0.41, 0.34, 0.25] };
 const SLOTS: Record<Unit, readonly Position[]> = { forwards: ['LW', 'C', 'RW'], defence: ['LD', 'RD'] };
@@ -269,9 +275,10 @@ function slotTaken(state: GameState, side: Side, slot: Position): boolean {
   return false;
 }
 
-/** Nobody on the ice within DOOR_CLEAR of the door. */
+/** Nobody on the ice within DOOR_CLEAR of the door (DOOR_CLEAR_STOPPED while play is stopped). */
 function doorClear(state: GameState, door: Vec2): boolean {
-  for (const s of state.skaters) if (s.onIce && hypot2(s.pos.x - door.x, s.pos.y - door.y) < DOOR_CLEAR) return false;
+  const clear = state.phase === 'live' ? DOOR_CLEAR : DOOR_CLEAR_STOPPED;
+  for (const s of state.skaters) if (s.onIce && hypot2(s.pos.x - door.x, s.pos.y - door.y) < clear) return false;
   return true;
 }
 

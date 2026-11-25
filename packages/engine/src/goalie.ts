@@ -199,12 +199,17 @@ function goalieSpot(p: Vec2, end: 1 | -1, out: Vec2): Vec2 {
 const spot: Vec2 = { x: 0, y: 0 };
 
 function moveGoalie(g: GoalieState, a: GoalieAttrs, p: Vec2, end: 1 | -1, dt: number): void {
+  goalieSpot(p, end, spot);
+  stepGoalie(g, a, spot, datan2(p.y - g.pos.y, p.x - g.pos.x), dt);
+}
+
+/** He skates toward `to` at his top speed (cut while showing a save) and turns toward `want` (rad) at his squaring rate. */
+function stepGoalie(g: GoalieState, a: GoalieAttrs, to: Vec2, want: number, dt: number): void {
   if (g.poseT > 0) {
     g.poseT = Math.max(0, g.poseT - dt);
     if (g.poseT === 0) g.pose = 'stance';
   }
-  goalieSpot(p, end, spot);
-  const dx = spot.x - g.pos.x, dy = spot.y - g.pos.y;
+  const dx = to.x - g.pos.x, dy = to.y - g.pos.y;
   const d = hypot2(dx, dy);
   const top = (G.speed.base + a.lateral * G.speed.perPoint) * (g.poseT > 0 ? POSE_SPEED_FACTOR : 1);
   const step = Math.min(d, top * dt);
@@ -213,10 +218,24 @@ function moveGoalie(g: GoalieState, a: GoalieAttrs, p: Vec2, end: 1 | -1, dt: nu
   g.vel.y = (dy * k) / dt;
   g.pos.x += dx * k;
   g.pos.y += dy * k;
-  const want = datan2(p.y - g.pos.y, p.x - g.pos.x);
   const turn = wrapAngle(want - g.facing);
   const maxTurn = (G.squareRate.base + a.positioning * G.squareRate.perPoint) * dt;
   g.facing = wrapAngle(g.facing + clamp(turn, -maxTurn, maxTurn));
+}
+
+/** How far out from his goal line (m) he stands in the middle of his crease while play is stopped. */
+const CREASE_MIDDLE = LINE_GAP + 0.6;
+
+/**
+ * Play stopped: he skates to the middle of his crease and faces straight up ice (phase `stopped`) or the faceoff spot
+ * (phase `faceoffSetup`); he never turns to a stopped puck behind him.
+ */
+function settleGoalie(state: GameState, g: GoalieState, a: GoalieAttrs, end: 1 | -1, dt: number): void {
+  spot.x = end * (GOAL - CREASE_MIDDLE);
+  spot.y = 0;
+  const f = state.faceoffSpot;
+  const want = state.phase === 'faceoffSetup' ? datan2(f.y - spot.y, f.x - spot.x) : end === 1 ? Math.PI : 0;
+  stepGoalie(g, a, spot, want, dt);
 }
 
 /** The end-zone faceoff dot on `end` nearest to `p`. */
@@ -261,6 +280,7 @@ export function goalieTick(state: GameState, defs: Map<string, PlayerDef>, dt: n
     const g = state.goalies[side];
     const end = (-state.attackDir[side]) as 1 | -1;
     // Against a shot on its way he plays where it was released from, not the puck in flight.
+    if (state.phase !== 'live') { settleGoalie(state, g, goalieAttrs(defs, g.id), end, dt); continue; }
     const shot = state.shotInFlight;
     const read = shot !== null && shot.side !== side ? shot.from : state.puck.pos;
     moveGoalie(g, goalieAttrs(defs, g.id), read, end, dt);

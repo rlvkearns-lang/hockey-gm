@@ -3,6 +3,7 @@ import { createGame, simulateGame } from '../src/game';
 import { generateTeam } from '../src/roster-gen';
 import { createRng } from '../src/rng';
 import { DT } from '../src/constants';
+import { FACEOFF_MAX_SECONDS } from '../src/faceoff';
 import { RINK } from '../src/rink';
 import { bladePos } from '../src/blade';
 import { setup as robustSetup } from './helpers';
@@ -53,7 +54,8 @@ describe('game loop', () => {
     while (!g.done) { g.step(); if (g.state.phase === 'stopped') { stopped++; const p = g.state.puck; if (p.vel.x !== 0 || p.vel.y !== 0 || p.vz !== 0 || p.z !== 0) violations.push(g.state.tick); } }
     expect(stopped).toBeGreaterThan(0); expect(violations).toEqual([]);
   }, GAME_TIMEOUT);
-  it('faceoffs wait for the line-up, at least 3 s and at most 8 s', () => {
+  // Task 13: no 8 s cap any more; a setup lasts until the players are lined up, the 25 s safety limit never reached.
+  it('faceoffs wait for the line-up, at least 3 s and never as long as the safety limit', () => {
     const g = createGame(setup(2)); const waits: number[] = []; let setupTicks = 0;
     while (!g.done) {
       const before = g.state.phase; g.step();
@@ -61,7 +63,7 @@ describe('game loop', () => {
       if (before === 'faceoffSetup' && g.state.phase === 'live') waits.push(setupTicks * DT);
     }
     expect(waits.length).toBeGreaterThan(10);
-    expect(Math.min(...waits)).toBeGreaterThanOrEqual(3 - 1e-6); expect(Math.max(...waits)).toBeLessThanOrEqual(8 + 1e-6);
+    expect(Math.min(...waits)).toBeGreaterThanOrEqual(3 - 1e-6); expect(Math.max(...waits)).toBeLessThan(FACEOFF_MAX_SECONDS - 1e-6);
   }, GAME_TIMEOUT);
   it('the players who release the puck are blocked from re-taking it, and the block is in state', () => {
     const g = createGame(setup(1));

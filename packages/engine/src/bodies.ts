@@ -173,10 +173,13 @@ export function resolveGoalies(skaters: SkaterState[], moves: readonly Movement[
 /** A skater within GOALIE_NEAR (m) of a goalie's body with it on his line skates round it, GOALIE_ROUND (m) clear of it. */
 const GOALIE_NEAR = 1;
 const GOALIE_ROUND = 0.3;
+/** The way round a goalie on the centre-ice side of him is taken when it is this much (m) nearer centre ice than the other. */
+const FRONT_SIDE = 0.05;
 
 /**
  * With a goalie's body (TUNING.goalieBody.radius grown by `radius`) on the straight line from `from` to `to` and within
- * GOALIE_NEAR of `from`, a waypoint beside that goalie on the side of the line away from him (GOALIE_ROUND m clear);
+ * GOALIE_NEAR of `from`, a waypoint beside that goalie (GOALIE_ROUND m clear) on the side nearer centre ice (in front of
+ * him, never between him and his net), or, when neither side is, on the side of the line away from him;
  * else `to` is left in `out` as it was. Writes `out` only when it routes, and returns true then. Without it the goalie's
  * body and the net frame can pin a skater in the crease.
  */
@@ -191,7 +194,13 @@ export function routeAroundGoalies(from: Vec2, to: Vec2, radius: number, goalies
     if (along <= 0 || along >= l) continue;
     const across = (gx * dy - gy * dx) / l;          // > 0: the goalie is to the right of his line
     if (Math.abs(across) >= reach) continue;
-    const side = across > 0 ? 1 : -1;                  // so he passes on the left of the goalie
+    // He passes on the side of the line away from him, unless the other side is the way out in front of the net: he
+    // never squeezes between a goalie and his net (Task 13: with the goalie in the middle of his crease at a stoppage,
+    // a defenceman from beside the net flipped between the two sides and never got to his faceoff spot).
+    let side = across > 0 ? 1 : -1;
+    const ox = (-dy / l) * (reach + GOALIE_ROUND);
+    if (Math.abs(g.pos.x - ox) < Math.abs(g.pos.x + ox) - FRONT_SIDE) side = -1;
+    else if (Math.abs(g.pos.x + ox) < Math.abs(g.pos.x - ox) - FRONT_SIDE) side = 1;
     out.x = g.pos.x + (-dy / l) * side * (reach + GOALIE_ROUND);
     out.y = g.pos.y + (dx / l) * side * (reach + GOALIE_ROUND);
     return true;
