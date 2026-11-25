@@ -4,9 +4,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { movementOf } from '../src/skating';
-import { shotSpeedOf } from '../src/actions';
-import type { ShotType } from '../src/types';
-import { def } from './helpers';
+import { executeShot, shotSpeedOf } from '../src/actions';
+import { createRng } from '../src/rng';
+import type { GameEvent, ShotType } from '../src/types';
+import { def, defs, stateWith } from './helpers';
 
 const MPH = 2.23694;
 const top = (r: number): number => movementOf(def({ speed: r }), 1).topSpeed * MPH;
@@ -28,6 +29,21 @@ describe('real-world scale (Task 13b)', () => {
     const v = shotSpeedOf({ ...def({ shootingPower: 99 }), badges: ['Heavy Slapshot'] }, 'slap') * MPH;
     expect(v).toBeGreaterThanOrEqual(105); expect(v).toBeLessThanOrEqual(108);
     expect(shotSpeedOf({ ...def({ shootingPower: 70 }), badges: ['Heavy Slapshot'] }, 'slap')).toBeGreaterThan(shotSpeedOf(def({ shootingPower: 70 }), 'slap') * 1.07);
+  });
+  // Task 14b (controller ruling, section 3: the hardest slapshot read 109.8 mph in 300 games): the cap is on the puck's
+  // whole release speed, lift included, not on its speed along the ice.
+  it('no shot leaves the stick above 108 mph, its lift included: 300 hard slapshots from the point, many of them high', () => {
+    const me = { ...def({ shootingPower: 99, shootingAccuracy: 30 }), id: 'home-LD', position: 'LD' as const, badges: ['Heavy Slapshot' as const] };
+    const ds = new Map(defs); ds.set('home-LD', me);
+    let most = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const st = stateWith({ carrier: 'home', puckX: 6 + (seed % 12), puckY: (seed % 7) - 3, carrierSlot: 'LD' });
+      for (const s of st.skaters) if (s.side === 'away') s.pos = { x: -20, y: s.pos.y };
+      const out: GameEvent[] = [];
+      executeShot(st, 'home-LD', ds, createRng(seed), out, 'slap');
+      for (const e of out) if (e.type === 'release') most = Math.max(most, Math.hypot(e.detail.vel.x, e.detail.vel.y, e.detail.vel.z) * MPH);
+    }
+    expect(most).toBeGreaterThan(105); expect(most).toBeLessThanOrEqual(108);
   });
   it('wrist shots 70 to 90 mph across shooting power; slapshots 85 to 105, a 99-power slapshot 100 to 105; one-timers near a slapshot; backhands slower', () => {
     for (const p of [40, 70, 99]) { expect(shot(p, 'wrist')).toBeGreaterThanOrEqual(69.5); expect(shot(p, 'wrist')).toBeLessThanOrEqual(90.5); }

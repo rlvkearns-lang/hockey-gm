@@ -366,12 +366,20 @@ export function executeShot(state: GameState, shooterId: string, defs: Map<strin
     if (rng.chance(W.highShare)) z = RINK.netHeight + by;
     else y = aimSide * (RINK.netHalfWidth + by);
   }
-  const speed = shotSpeedOf(me, type) * (1 - SHOT.rushed.speed * rushed) * (sticked ? SHOT.rushed.stick.keep : 1);
+  let speed = shotSpeedOf(me, type) * (1 - SHOT.rushed.speed * rushed) * (sticked ? SHOT.rushed.stick.keep : 1);
   const dx = netX - p.x, dy = y - p.y;
   const l = hypot2(dx, dy) || 1;
-  const t = l / speed;
   // Lifted to arrive at height z, but never harder than MAX_SHOT_LIFT (from beside the net that would launch it skyward).
-  release(state, s, (dx / l) * speed, (dy / l) * speed, Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * t * t) / t), out, 'shot', null, type);
+  let vz = Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * (l / speed) * (l / speed)) / (l / speed));
+  // Task 14b: SHOT.maxSpeed caps the whole release speed, the lift included (it capped the speed along the ice, and the
+  // lift took the hardest slapshot to 109.8 mph). Along the ice he keeps what the cap leaves beside the lift.
+  if (speed * speed + vz * vz > SHOT.maxSpeed * SHOT.maxSpeed) {
+    speed = Math.sqrt(SHOT.maxSpeed * SHOT.maxSpeed - vz * vz);
+    vz = Math.min(MAX_SHOT_LIFT, (z + 0.5 * GRAVITY * (l / speed) * (l / speed)) / (l / speed));
+    const total = hypot2(speed, vz);
+    if (total > SHOT.maxSpeed) { speed *= SHOT.maxSpeed / total; vz *= SHOT.maxSpeed / total; }
+  }
+  release(state, s, (dx / l) * speed, (dy / l) * speed, vz, out, 'shot', null, type);
   const shot = newShot(state, shooterId, s.side, from, d, type);
   if (stickBlock && checker !== null) {
     // Blocked at the checker's stick as it leaves his blade: the puck stays where it was let go and comes off the stick
