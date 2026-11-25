@@ -92,8 +92,24 @@ function declaredStyle(def: PlayerDef, group: 'F' | 'D'): Style | null {
   return null;
 }
 
+/**
+ * The secondary his habits were built with (Task 14b, Task 13b review Minor 11): the style k of his group, not his
+ * primary, whose blend blendHabits(primary, k) is nearest his habits, if nearer than his primary's habits alone; else
+ * null. His habits do not move with his attributes, so this anchors the secondary as his type anchors the primary.
+ */
+function builtSecondary(def: PlayerDef, primary: Style, group: 'F' | 'D'): Style | null {
+  const dist = (h: Required<Tendencies>): number => { let d = 0; for (const k of HABITS) d += Math.abs((def.tendencies[k] ?? 0.5) - h[k]); return d; };
+  let best: Style | null = null, bd = dist(STYLES[primary].habits);
+  for (const k of stylesOf(group)) {
+    if (k === primary) continue;
+    const d = dist(blendHabits(primary, k));
+    if (d < bd) { bd = d; best = k; }
+  }
+  return best;
+}
+
 /** styleOf's reading of `def` (no override): primary and secondary, their scores, and the declared style's score. */
-function readStyles(def: PlayerDef, group: 'F' | 'D'): { primary: Style; ps: number; next: Style | null; ns: number; declared: Style | null; ds: number; best: Style; bs: number } {
+function readStyles(def: PlayerDef, group: 'F' | 'D'): { primary: Style; ps: number; next: Style | null; ns: number; declared: Style | null; ds: number; best: Style; bs: number; secondary: Style | null; ss: number; built: Style | null } {
   let mean = 0;
   for (const a of SKATER_ATTRS) mean += def.attrs[a];
   mean /= SKATER_ATTRS.length;
@@ -112,22 +128,34 @@ function readStyles(def: PlayerDef, group: 'F' | 'D'): { primary: Style; ps: num
   const ps = primary === declared ? ds : bs;
   let next: Style | null = null, ns = -Infinity;
   for (const [k, v] of scores) if (k !== primary && v > ns) { next = k; ns = v; }
-  return { primary, ps, next, ns, declared, ds, best: best!, bs };
+  // The secondary (Task 14b): the one his habits were built with stays his secondary unless another scores keepMargin
+  // more, and it stays while it scores secondaryWithin - secondaryMargin of the primary; with none built in, the next best
+  // becomes his secondary only from secondaryWithin + secondaryMargin.
+  const built = builtSecondary(def, primary, group);
+  let sec: Style | null = next, ss = ns;
+  if (built !== null) {
+    const bv = scores.find(([k]) => k === built)![1];
+    if (ns <= bv + S.keepMargin) { sec = built; ss = bv; }
+  }
+  const from = built !== null && sec === built ? S.secondaryWithin - S.secondaryMargin : S.secondaryWithin + S.secondaryMargin;
+  const secondary = sec !== null && ss >= from * ps ? sec : null;
+  return { primary, ps, next, ns, declared, ds, best: best!, bs, secondary, ss, built };
 }
 
 /**
  * His style: `def.style` when set; otherwise each style of his group is scored by how well his attributes match its attrBias
  * (mean of bias-weighted attribute differences from his own mean) and his habits match its habits (1 - mean absolute difference).
  * The primary is the style his type declares unless another scores TUNING.styles.keepMargin more (Task 13b; then the
- * best); the next best is secondary when its score is at least secondaryWithin (0.85) of the primary's. Goalies: null.
+ * best). The secondary (Task 14b) is the one his habits were built with (builtSecondary) unless another scores keepMargin
+ * more, kept while it scores at least secondaryWithin - secondaryMargin of the primary's; with none built in, the next
+ * best from secondaryWithin + secondaryMargin. Goalies: null.
  */
 export function styleOf(def: PlayerDef): { primary: Style; secondary: Style | null; label: string } | null {
   const group = groupOf(def.position);
   if (group === null) return null;
   if (def.style) return { primary: def.style.primary, secondary: def.style.secondary, label: styleLabel(def.style.primary, def.style.secondary) };
   const r = readStyles(def, group);
-  const secondary = r.next !== null && r.ns >= S.secondaryWithin * r.ps ? r.next : null;
-  return { primary: r.primary, secondary, label: styleLabel(r.primary, secondary) };
+  return { primary: r.primary, secondary: r.secondary, label: styleLabel(r.primary, r.secondary) };
 }
 
 /**
@@ -136,9 +164,9 @@ export function styleOf(def: PlayerDef): { primary: Style; secondary: Style | nu
  * `secondaryRatio`, the next style's score over the primary's (a secondary from TUNING.styles.secondaryWithin), and
  * `secondaryTie`, how much the next style outscores the one after it (which of the two is his secondary).
  */
-export function styleGaps(def: PlayerDef): { challenger: number; secondaryRatio: number; secondaryTie: number } {
+export function styleGaps(def: PlayerDef): { challenger: number; secondaryRatio: number; secondaryTie: number; secondaryFrom: number; builtChallenger: number } {
   const group = groupOf(def.position);
-  if (group === null) return { challenger: NaN, secondaryRatio: NaN, secondaryTie: NaN };
+  if (group === null) return { challenger: NaN, secondaryRatio: NaN, secondaryTie: NaN, secondaryFrom: NaN, builtChallenger: NaN };
   const r = readStyles(def, group);
   let other = -Infinity, third = -Infinity;
   const mean = SKATER_ATTRS.reduce((t, a) => t + def.attrs[a], 0) / SKATER_ATTRS.length;
@@ -147,5 +175,10 @@ export function styleGaps(def: PlayerDef): { challenger: number; secondaryRatio:
     if (k !== r.declared) other = Math.max(other, v);
     if (k !== r.primary && k !== r.next) third = Math.max(third, v);
   }
-  return { challenger: r.declared === null ? NaN : other - r.ds, secondaryRatio: r.ns / r.ps, secondaryTie: r.ns - third };
+  // Task 14b: `secondaryRatio` is now the secondary candidate's (the built one, or the next best) score over the primary's,
+  // `secondaryFrom` the ratio it must reach, `builtChallenger` the next best's score less the built secondary's (NaN with none).
+  const builtScore = r.built === null ? NaN : styleScore(def, r.built, mean);
+  const cand = r.built !== null && r.ns <= builtScore + S.keepMargin;
+  const from = cand ? S.secondaryWithin - S.secondaryMargin : S.secondaryWithin + S.secondaryMargin;
+  return { challenger: r.declared === null ? NaN : other - r.ds, secondaryRatio: (cand ? builtScore : r.ns) / r.ps, secondaryTie: r.ns - third, secondaryFrom: from, builtChallenger: r.built === null || r.next === r.built ? NaN : r.ns - builtScore };
 }

@@ -972,9 +972,12 @@ export const TUNING = deepFreeze({
    * how well his habits match its habits (1 - the mean absolute difference); the next best is his secondary when its
    * score is at least secondaryWithin of the best. Task 13b: his declared style (his type's) is kept as primary unless
    * another scores keepMargin more (it flipped on a one-point change near a tie; 6.5% of generated skaters read as
-   * another primary than their type).
+   * another primary than their type). Task 14b (Task 13b review, Minor 11): the secondary has a margin too: the one his
+   * habits were built with (styles.ts builtSecondary) is kept unless another scores keepMargin more, and shown while it
+   * scores secondaryWithin - secondaryMargin of the primary; with none built in, another is shown only from
+   * secondaryWithin + secondaryMargin.
    */
-  styles: { secondaryChance: 0.6, secondaryShare: 1 / 3, secondaryBias: 0.5, attrWeight: 0.5, attrSpan: 40, secondaryWithin: 0.85, keepMargin: 0.05 },
+  styles: { secondaryChance: 0.6, secondaryShare: 1 / 3, secondaryBias: 0.5, attrWeight: 0.5, attrSpan: 40, secondaryWithin: 0.85, keepMargin: 0.05, secondaryMargin: 0.05 },
 
   /**
    * Badges (badges.ts, Task 12): each badge's one effect, small, read where the badge acts (one guarded line there).

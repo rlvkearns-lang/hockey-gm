@@ -75,7 +75,7 @@ describe('style labels with a margin (Task 13b)', () => {
     expect(off / ps.length).toBeLessThan(0.02);
   });
   it('a one-point change in any single attribute flips no label that was not within its margin', () => {
-    const M = TUNING.styles.keepMargin, W = TUNING.styles.secondaryWithin, NEAR = 0.015;
+    const M = TUNING.styles.keepMargin, NEAR = 0.015;
     let cases = 0, flips = 0;
     for (const p of skaters()) {
       const before = styleOf(p)!;
@@ -86,9 +86,12 @@ describe('style labels with a margin (Task 13b)', () => {
         if (after.label === before.label) continue;
         flips++;
         const g = styleGaps(p);
-        // Either the primary's challenger stood within NEAR of beating it by the margin, or the secondary within NEAR of its
-        // threshold, or two styles within NEAR of each other for the secondary (no declared secondary to keep).
-        expect(Math.abs(g.challenger - M) <= NEAR || Math.abs(g.secondaryRatio - W) <= NEAR || g.secondaryTie <= NEAR, `${p.id} ${a} ${dv}: ${before.label} -> ${after.label}`).toBe(true);
+        // Either the primary's challenger stood within NEAR of beating it by the margin, or the secondary within NEAR of
+        // the threshold it must hold (Task 14b: secondaryWithin less or plus secondaryMargin, by whether his habits were
+        // built with it), or another style within NEAR of beating his built secondary by the margin, or (the built one
+        // beaten or none built in) two styles within NEAR of each other for the secondary.
+        const secFlip = Math.abs(g.secondaryRatio - g.secondaryFrom) <= NEAR || Math.abs(g.builtChallenger - M) <= NEAR || (g.secondaryFrom > TUNING.styles.secondaryWithin && g.secondaryTie <= NEAR);
+        expect(Math.abs(g.challenger - M) <= NEAR || secFlip, `${p.id} ${a} ${dv}: ${before.label} -> ${after.label}`).toBe(true);
       }
     }
     expect(cases).toBeGreaterThan(5000);
