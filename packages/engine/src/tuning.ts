@@ -599,8 +599,12 @@ export const TUNING = deepFreeze({
    * tired times as much: a tired line defends worse.
    */
   hardClear: {
-    speed: { base: 22, perPoint: 0.08 }, glassWall: 3.5, glassAhead: 14, glassMaxRx: -4, glassZ: 1.6, aimY: 9,
-    flip: { speed: { base: 12, perPoint: 0.05 }, peak: 3 }, landKeep: 0.5,
+    // Task 14b (section 4): speed base 22 -> 25 m/s and the flip's 12 -> 14 (a hard clear off the glass at 60 to 70 mph,
+    // was 50 to 60): icing on seeds 1-16 read 3.4 a game against the guard's 4 (se 0.35; 5.5 on the 1,000-game set,
+    // against 4 to 12, middle 8); with these 5.1, hard clears 15.4 -> 12.2 a game (the valuation reads the same plan, so
+    // the icing it risks is priced in).
+    speed: { base: 25, perPoint: 0.08 }, glassWall: 3.5, glassAhead: 14, glassMaxRx: -4, glassZ: 1.6, aimY: 9,
+    flip: { speed: { base: 14, perPoint: 0.05 }, peak: 3 }, landKeep: 0.5,
     knock: { maxZ: 1.8, factor: 1, keep: 2, minSpeed: 12 },
     change: 0.03, tiredSpan: 0.4, tiredLoss: 1, lateLead: 0.03,
     /** It is an option only under pressure (pressureFrom or more) with no safe outlet: no pass that works safePass of the time to a man with openSpace m of ice. */
