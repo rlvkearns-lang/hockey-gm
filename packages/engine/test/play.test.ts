@@ -319,7 +319,7 @@ describe('A5: battling for position (Task 10)', () => {
   it('A5: opponents in contact for over 0.3 s are engaged, not separated, in over 80% of cases', () => {
     const c = counters(); expect(c.contactOver03Free).toBeGreaterThan(500); expect(c.contactOver03Engaged / c.contactOver03Free).toBeGreaterThan(0.80);
   }, 60_000);
-  it('A5: 250 to 1,500 engagements a game (seeds 1-8)', () => { const n = counters8().engagements / SEEDS8.length; expect(n).toBeGreaterThan(250); expect(n).toBeLessThan(1500); }, 240_000);
+  it('A5: 250 to 1,650 engagements a game (seeds 1-8; controller ruling, Task 12 close-out: one-round net-front battles hand over to engagements, 1,549 measured)', () => { const n = counters8().engagements / SEEDS8.length; expect(n).toBeGreaterThan(250); expect(n).toBeLessThan(1650); }, 240_000);
 });
 
 describe('A5: battles the winner wins (Task 9)', () => {

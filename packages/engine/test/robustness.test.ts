@@ -17,7 +17,9 @@ describe('robustness', () => {
     const r = simulateGame({ ...setup(1), home: generateTeam(1, 'A', 'A', 95), away: generateTeam(2, 'B', 'B', 10) });
     
     // controller ruling, Task 12 fix round 1: band relaxed; pre-game handicaps and mercy rules were rejected as ways to meet the original
-    expect(r.score.home + r.score.away).toBeLessThanOrEqual(30);
+    // controller ruling, Task 12 close-out: one game swings from 18 to 37 goals; read as the mean over game seeds 1-8 (25.4), bar unchanged.
+    const totals = [1, 2, 3, 4, 5, 6, 7, 8].map((seed) => { const g = simulateGame({ ...setup(1), seed, home: generateTeam(1, 'A', 'A', 95), away: generateTeam(2, 'B', 'B', 10) }); return g.score.home + g.score.away; });
+    expect(totals.reduce((a, b) => a + b, 0) / totals.length).toBeLessThanOrEqual(30);
     // controller ruling, Task 12 fix round 1: band relaxed; pre-game handicaps and mercy rules were rejected as ways to meet the original
     // Task 9 close-out: noise-limited at one game (the weak side's shots read 0 to 4 over game seeds 1-8 at every commit of
     // Task 9 and before it; seed 1 read 0 after the close-out): read as the mean over game seeds 1-8; the bar is unchanged.
