@@ -54,11 +54,11 @@ const BLADE_STEP = 0.4;
 const SPOT_SETTLE = 0.05;
 /**
  * The most a hand-over moves the puck to the taker's blade (m). Task 14 (thin guard: hand-overs read 1.199 to 1.30 m
- * against the 1.2 m no-teleport bar): 1.0, not the bar itself. The winner moves on the tick the puck is put on his
+ * against the 1.2 m no-teleport bar): 1.05, not the bar itself. The winner moves on the tick the puck is put on his
  * blade (up to 0.2 m as he comes away), so a puck handed over from exactly 1.2 m could travel further than that; from
- * beyond 1.0 m it squirts loose along the boards instead.
+ * beyond 1.05 m it squirts loose along the boards instead.
  */
-const HAND_OVER = 1.0;
+const HAND_OVER = 1.05;
 /** How hard they skate (fraction of top speed) while shoving and digging. */
 const PIN_SPEED_CAP = 0.4;
 const DIG_SPEED_CAP = 0.3;

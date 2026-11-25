@@ -599,7 +599,7 @@ export const TUNING = deepFreeze({
     // Task 14 (headline 2: 54 hard clears a game; a last resort): pressureFrom 0.75 -> 0.9, a checker on him (within
     // 1.4 m, stick reach), not closing from 2 m.
     // settle (s) and turn (rad): he must have had the puck that long (a beat to get it on his blade), and its aim must be within that angle of his facing.
-    pressureFrom: 0.9, safePass: 0.6, openSpace: 2, settle: 0.25, turn: 1.75,
+    pressureFrom: 0.9, safePass: 0.6, openSpace: 2, settle: 0.25, turn: 2.0,
     /**
      * Set from play (seeds 1-6, 494 hard clears, task-13b-report.md item 1): the icing race read from where the men stand
      * (0.5 + V.racePerMetre per metre) called 0.1 / 0.3 / 0.5 / 0.7 / 0.9 was iced 0.47 / 0.36 / 0.51 / 0.75 / 0.84 of the
@@ -930,7 +930,7 @@ export const TUNING = deepFreeze({
   engage: {
     contact: 0.15, drawSeconds: 0.4, slow: 0.5, massPerPoint: 4, insideEdge: 5, tieUp: 0.3, tieDown: 0.2,
     weights: { strength: 0.35, balance: 0.3, compete: 0.35 },
-    startTie: 0.3, maxRelSpeed: 2.5 * SPEED_SCALE, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
+    startTie: 0.3, maxRelSpeed: 2.4 * SPEED_SCALE, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
     limits: { receive: 0.6, spread: 1, shootValue: 0.5, tip: 0.6, reach: 0.5 },
   },
 

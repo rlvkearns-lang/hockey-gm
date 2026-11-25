@@ -144,7 +144,7 @@ describe('engagements: battling for position (Task 10)', () => {
     expect(tipChanceFor(h)).toBeLessThan(tipChance(def({})) * 0.5); expect(tipChanceFor(h)).toBeGreaterThanOrEqual(0.03);
     expect(shotSpreadFor(h)).toBeCloseTo(shotSpreadFor(tiedUp(0)) * 2, 6);
   });
-  it('a tied-up man cannot simply skate away; a free one can', () => { expect(metresApartAfter(tiedUp(1), 1)).toBeLessThan(1.0); expect(metresApartAfter(tiedUp(0), 1)).toBeGreaterThan(2.5); });
+  it('a tied-up man cannot simply skate away; a free one can', () => { expect(metresApartAfter(tiedUp(1), 1)).toBeLessThan(1.0); expect(metresApartAfter(tiedUp(0), 1)).toBeGreaterThan(2.3); }); // Task 14: 2.3 m (was 2.5): his push fades toward top speed (skating at real effort), so a free man is 2.499 m away after a second
   it('he can fight through: with the puck arriving behind his man, a free-enough attacker gets loose within 3 s in 25% to 75% of tries', () => {
     const s = foughtThroughShare(even, even, 400); expect(s).toBeGreaterThan(0.25); expect(s).toBeLessThan(0.75);
   });

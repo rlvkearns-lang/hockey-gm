@@ -156,8 +156,8 @@ function clearOfNets(from: Vec2, x: number, y: number, margin: number): boolean 
 /**
  * Where to skate on the way from `from` to `to` so as to go round a net frame rather than into it: `to` itself when
  * the straight line clears both frames (grown by `margin`), else a corner of the frame in the way on `from`'s side of
- * it (`margin` + `round` out from the frame): the corner at the far end if it can be reached in a straight line, else
- * the near one. Writes `out` and returns it.
+ * it (`margin` + `round` out from the frame): the corner at the end his target lies beyond if it can be reached in a straight line, else
+ * the other one. Writes `out` and returns it.
  */
 export function routeAroundNets(from: Vec2, to: Vec2, margin: number, round: number, out: Vec2): Vec2 {
   out.x = to.x;
@@ -170,8 +170,11 @@ export function routeAroundNets(from: Vec2, to: Vec2, margin: number, round: num
   const m = margin + round;
   const y = side * (RINK.netHalfWidth + m);
   const front = end * (RINK.goalLineX - m), back = end * (NET_BACK + m);
-  const behind = from.x * end > RINK.goalLineX + RINK.netDepth / 2;
-  const far = behind ? front : back, near = behind ? back : front;
+  // Task 14: the far end is the one his target lies beyond (it was read off where he stands: a man beside the frame
+  // heading across the front was sent to the back corner, and from behind the goal line to the front one again: he
+  // went back and forth beside the post for a whole faceoff setup).
+  const toFront = to.x * end < RINK.goalLineX + RINK.netDepth / 2;
+  const far = toFront ? front : back, near = toFront ? back : front;
   out.x = clearOfNets(from, far, y, margin) ? far : near;
   out.y = y;
   return out;

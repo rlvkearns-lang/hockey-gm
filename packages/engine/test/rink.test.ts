@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { zoneOf, resolveBoards, resolveNets, clipToNets, FACEOFF_DOTS, RINK } from '../src/rink';
+import { routeAroundNets as routeAroundNets } from '../src/rink';
 
 describe('rink', () => {
   it('zoneOf follows the attack direction', () => {
@@ -38,5 +39,14 @@ describe('net frames', () => {
     const pos = { x: -(RINK.goalLineX + RINK.netDepth + 0.3), y: 0 }, vel = { x: 3, y: 0 };
     resolveNets(pos, vel, 0.4);
     expect(pos.x).toBeCloseTo(-(RINK.goalLineX + RINK.netDepth + 0.4), 9); expect(vel.x).toBe(0);
+  });
+  // Task 14: a defenceman beside the net heading across the front to his faceoff spot went back and forth beside the
+  // post for the whole setup (the far corner was read off where he stood, not where he was going).
+  it('a man beside the net frame heading across the front goes round the front corner, wherever beside it he stands', () => {
+    const to = { x: -24, y: -11.9 };
+    for (const x of [-27.2, -27.4, -27.6, -27.8, -28.0]) {
+      const out = routeAroundNets({ x, y: 1.6 }, to, 0.43, 0.4, { x: 0, y: 0 });
+      expect(out.x, `from x ${x}`).toBeGreaterThan(-RINK.goalLineX); expect(out.y).toBeGreaterThan(RINK.netHalfWidth);
+    }
   });
 });

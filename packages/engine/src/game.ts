@@ -132,6 +132,7 @@ const CARRY_TURN = 0.2;
 const CARRY_STEP = 0.4;
 const frameProbe = { x: 0, y: 0 };
 const takenScratch = { x: 0, y: 0 };
+const goalieLeg = { x: 0, y: 0 };
 /** The point of the segment (ax, ay)-(bx, by) nearest (px, py), written into `out`. */
 function nearestOnSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number, out: { x: number; y: number }): { x: number; y: number } {
   const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
@@ -358,7 +359,12 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
         // Against his own goalie's body he goes round it too (else the goalie and the frame can pin him in the crease).
         if (waypoint.x === t.x && waypoint.y === t.y) {
           goaliePair[0] = state.goalies.home; goaliePair[1] = state.goalies.away;
-          routeAroundGoalies(s.pos, t, onIceMoves[i]!.radius, goaliePair, waypoint);
+          // Task 14: and the way round the goalie may itself graze a post (a man beside the net heading across the
+          // front: he stood against the post for a whole faceoff setup, seed 1): that leg goes round the frame too.
+          if (routeAroundGoalies(s.pos, t, onIceMoves[i]!.radius, goaliePair, waypoint)) {
+            goalieLeg.x = waypoint.x; goalieLeg.y = waypoint.y;
+            routeAroundNets(s.pos, goalieLeg, onIceMoves[i]!.radius + ROUTE_SLACK, ROUTE_ROUND, waypoint);
+          }
         }
       }
       // Staggered by a hit (Task 9): he skates at most staggerCap of his top speed for a moment, whatever drives him.
