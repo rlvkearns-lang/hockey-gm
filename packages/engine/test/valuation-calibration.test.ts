@@ -16,7 +16,9 @@ import { AFTER_KEYS, afterShares, attemptsOf, distanceFit, trafficLift, type Att
 const LONG = 900_000;
 const BV = TUNING.badges.value;
 let cache: Attempt[] | null = null;
-const attempts = (): Attempt[] => (cache ??= Array.from({ length: 32 }, (_, i) => attemptsOf(gameSetup(i + 1))).flat());
+// Task 14 (Task 13b review, Important 2): 64 games, not 32, so the tighter tolerances below are read, not noise.
+const GAMES = 64;
+const attempts = (): Attempt[] => (cache ??= Array.from({ length: GAMES }, (_, i) => attemptsOf(gameSetup(i + 1))).flat());
 
 describe('the valuation matches execution (Task 13b)', () => {
   // Tolerance 0.04 on each factor (with 40,000 paired shots a factor's error is about 0.01 to 0.02).
@@ -30,33 +32,39 @@ describe('the valuation matches execution (Task 13b)', () => {
       expect(Math.abs(m.lift - valued[c]), `${c}: measured ${m.lift.toFixed(3)} (${m.with} / ${m.without}), valued ${valued[c].toFixed(3)}`).toBeLessThanOrEqual(0.04);
     }
   }, LONG);
-  // Tolerance: two standard errors of the measured lift, at least 0.02.
+  // Tolerance: two standard errors of the measured lift, at least 0.02. (Red on purpose from Task 13b until Task 14 fitted V.traffic to the lift.)
   it('traffic: TUNING.value.traffic is within two standard errors (at least 0.02) of the lift a man in front gives far shots', () => {
     const t = trafficLift(attempts());
     expect(t.with.n).toBeGreaterThan(60); expect(t.without.n).toBeGreaterThan(200);
     expect(Math.abs(t.lift - TUNING.value.traffic), `lift ${t.lift.toFixed(3)} (se ${t.se.toFixed(3)}), valued ${TUNING.value.traffic}`).toBeLessThanOrEqual(Math.max(0.02, 2 * t.se));
   }, LONG);
-  // Tolerance 0.12 on each share. (Two standard errors on 250 to 700 outcomes are 0.04 to 0.06; at Task 13b's hand-off
-  // the largest gaps are 0.11 (held rush) and 0.09 (rebound keep), left for Task 14 to refit after it tunes: refitting
-  // them here took a fifth of the attempts away.)
-  it('what follows a shot: each TUNING.value.after keep and rush share is within 0.12 of what follows in play', () => {
+  // Tolerance 0.05 on each share (Task 14, Task 13b review Important 2: it was 0.12, wide enough to pass the 0.11 and
+  // 0.09 gaps Task 13b handed over; two standard errors on 700 to 1,700 outcomes are 0.02 to 0.04).
+  it('what follows a shot: each TUNING.value.after keep and rush share is within 0.05 of what follows in play', () => {
     const m = afterShares(attempts());
     for (const k of AFTER_KEYS) {
       const v = TUNING.value.after[k];
-      expect(m[k].n, k).toBeGreaterThan(150);
-      expect(Math.abs(m[k].keep - v.keep), `${k} keep: measured ${m[k].keep.toFixed(3)}, valued ${v.keep}`).toBeLessThanOrEqual(0.12);
-      expect(Math.abs(m[k].rush - v.rush), `${k} rush: measured ${m[k].rush.toFixed(3)}, valued ${v.rush}`).toBeLessThanOrEqual(0.12);
+      expect(m[k].n, k).toBeGreaterThan(300);
+      expect(Math.abs(m[k].keep - v.keep), `${k} keep: measured ${m[k].keep.toFixed(3)}, valued ${v.keep}`).toBeLessThanOrEqual(0.05);
+      expect(Math.abs(m[k].rush - v.rush), `${k} rush: measured ${m[k].rush.toFixed(3)}, valued ${v.rush}`).toBeLessThanOrEqual(0.05);
     }
   }, LONG);
-  // Tolerance: measured over valued between 0.4 and 2 in every distance band with 50 or more free shots. (At Task 13b's
-  // hand-off: 0-5 m 0.50, 5-8 m 0.72, 8-11 m 1.02; beyond 11 m too few free shots to read.)
-  it('goal chance by distance: a free shot scores between 0.4 and 2 times what the valuation gives it, in each band', () => {
-    const bands = distanceFit(attempts()).filter((b) => b.n >= 50);
+  // Tolerance (Task 14, Task 13b review Important 2: it was 0.4 to 2): in every distance band with 100 or more free
+  // shots, measured over valued within 0.8 to 1.25, or, where the band's sample cannot read that finely, the gap within
+  // two standard errors of the measured rate; and over all free shots together (the sample that can be read) within 0.8
+  // to 1.25 outright.
+  it('goal chance by distance: a free shot scores 0.8 to 1.25 times what the valuation gives it, in each band and over all', () => {
+    const bands = distanceFit(attempts()).filter((b) => b.n >= 100);
     expect(bands.length).toBeGreaterThanOrEqual(3);
+    let n = 0, goals = 0, valued = 0;
     for (const b of bands) {
-      const r = b.measured / b.valued;
-      expect(r, `${b.from}-${b.to} m: measured ${b.measured.toFixed(3)} of ${b.n}, valued ${b.valued.toFixed(3)}`).toBeGreaterThanOrEqual(0.4);
-      expect(r).toBeLessThanOrEqual(2);
+      const r = b.measured / b.valued, se = Math.sqrt((b.measured * (1 - b.measured)) / b.n);
+      n += b.n; goals += b.measured * b.n; valued += b.valued * b.n;
+      const ok = (r >= 0.8 && r <= 1.25) || Math.abs(b.measured - b.valued) <= 2 * se;
+      expect(ok, `${b.from}-${b.to} m: measured ${b.measured.toFixed(3)} of ${b.n} (se ${se.toFixed(3)}), valued ${b.valued.toFixed(3)}, ratio ${r.toFixed(2)}`).toBe(true);
     }
+    expect(n).toBeGreaterThan(1000);
+    expect(goals / valued, `all free shots: ${goals.toFixed(0)} goals of ${n}, valued ${valued.toFixed(1)}`).toBeGreaterThanOrEqual(0.8);
+    expect(goals / valued).toBeLessThanOrEqual(1.25);
   }, LONG);
 });
