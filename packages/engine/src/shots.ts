@@ -16,6 +16,7 @@ import { dist as dist_, hypot2 as hypot2_, type Vec2 } from './vec';
 import { datan2 as datan2_, dcos as dcos_, dsin as dsin_ } from './dmath';
 import { clamp as clamp_, findSkater as findSkater_, other as other_ } from './util';
 import { hasBadge } from './badges';
+import { bodyRadius } from './skating';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const recordTouch = recordTouch_;
 const stepPuck = stepPuck_;
@@ -135,8 +136,35 @@ const NO_PUCK_EVENTS: PuckEvent[] = [];
  * puck moves further in a tick than its speed allows). Writes the puck's position before the step into `prev` (the
  * stick, block or save point when there is one). Returns the step's puck events and whether it reached the net.
  */
+const SCREEN = TUNING.goalie.screen;
+
+/**
+ * Task 13b: one tick of the goalie's sight of a shot on its way to him (state.shotInFlight, not yet faced): counted in
+ * shot.sight.ticks, and in shot.sight.blocked when an attacker's body (his radius plus SCREEN.pad) is across the line from
+ * the goalie to the puck, more than SCREEN.near m in front of him and short of the puck (not the shooter, not the tipper).
+ */
+export function watchSight(state: GameState, defs: Map<string, PlayerDef>): void {
+  const shot = state.shotInFlight;
+  if (shot === null || shot.faced || shot.beat === true) return;
+  const g = state.goalies[other(shot.side)].pos, p = state.puck.pos;
+  const lx = p.x - g.x, ly = p.y - g.y, l = hypot2(lx, ly);
+  const sight = shot.sight ?? (shot.sight = { ticks: 0, blocked: 0 });
+  sight.ticks++;
+  if (l <= SCREEN.near) return;
+  const ux = lx / l, uy = ly / l;
+  for (const s of state.skaters) {
+    if (!s.onIce || s.side !== shot.side || s.downT > 0 || s.id === shot.shooterId || s.id === shot.tippedBy) continue;
+    const dx = s.pos.x - g.x, dy = s.pos.y - g.y;
+    const along = dx * ux + dy * uy;
+    if (along < SCREEN.near || along > l) continue;
+    const d = defs.get(s.id);
+    if (Math.abs(dx * uy - dy * ux) <= (d ? bodyRadius(d.weightKg) : 0.38) + SCREEN.pad) { sight.blocked++; return; }
+  }
+}
+
 export function moveLoosePuck(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, out: GameEvent[], prev: Vec2): { puckEvents: PuckEvent[]; onNet: boolean } {
   const pk = state.puck;
+  watchSight(state, defs);
   let moved = !tryTip(state, defs, rng, out);
   if (moved) {
     tryBlock(state, defs, rng, out);

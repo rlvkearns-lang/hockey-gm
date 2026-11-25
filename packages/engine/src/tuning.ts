@@ -131,10 +131,11 @@ export const TUNING = deepFreeze({
 
   /**
    * Commitment (commit.ts). A held spot is re-issued without a trigger only after holdSeconds and once the wanted spot
-   * is more than moveEnough (m) from it; a team's committed phase follows the raw one after it has differed for
+   * is more than moveEnough (m) from it (moveEnoughNet for the attackers' net-front man, Task 13b: he works to stay
+   * in the goalie's sight line, on the line from the puck to the net); a team's committed phase follows the raw one after it has differed for
    * phaseDelay (s); a loose-puck chaser hands over only to a teammate closer to the puck by more than chaserMargin (m).
    */
-  commit: { holdSeconds: 0.4, moveEnough: 1.5, phaseDelay: 0.5, chaserMargin: 1 },
+  commit: { holdSeconds: 0.4, moveEnough: 1.5, phaseDelay: 0.5, chaserMargin: 1, moveEnoughNet: 0.4 },
   /**
    * Effort (commit.ts): the share of top speed each effort wants. A positional job sprints to a spot more than
    * sprintFrom (m) away and glides within glideWithin, else skates. Below sprintMinEnergy only the puck jobs sprint.
@@ -199,6 +200,13 @@ export const TUNING = deepFreeze({
      * centre). A pass across the slot to a man whose threat is over oneTimerThreat is a one-timer pass; his first decision
      * values the shot oneTimerBonus higher.
      */
+    /**
+     * traffic, Task 13b: NOT refitted (task-13b-report.md, item 3, a concern for the controller). With the screen played
+     * as the share of the goalie's sight blocked, play gives a lift of 0.02 to 0.065 between runs (se 0.013 to 0.028 on 32
+     * games; scripts/fit-valuation.ts); a screen squarely in his eyes from 12 m scores 4.3 times a clean shot
+     * (test/badge-lab.ts labScreen). Set to the lift (0.04 or 0.06), point shots fall by a fifth and tips under 2 a game
+     * and net presence at point-shot saves under 40% (item 3's guards). test/valuation-calibration.test.ts reads the gap.
+     */
     traffic: 0.1, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
     /**
      * What follows in the zone he attacks (Task 8 fix round), measured in play at 43d6dcf, seeds 1-16
@@ -210,6 +218,9 @@ export const TUNING = deepFreeze({
       // Measured again in the Task 8b close-out (seeds 1-12, task-8-follow-measure.ts; the engine shoots half as often and
       // from set-up possessions now). At 43d6dcf: carry 0.51 / 0.07, passFailed 0.29 / 0.32, held 0.41 / 0.19, steered
       // 0.42 / 0.15, rebound 0.32 / 0.13, blocked 0.24 / 0.34, wide 0.28 / 0.15.
+      // Task 13b: re-measured by test/valuation-calibration.test.ts (test/valuation-fit.ts afterShares, the definitions of
+      // task-8-follow-measure.ts). Not refitted here: refitting them at 7f1a4b9's play took a fifth of the attempts away
+      // (task-13b-report.md, item 4); Task 14 refits them after it tunes.
       carry: { keep: 0.51, rush: 0.06 },
       passFailed: { keep: 0.32, rush: 0.26 },
       held: { keep: 0.39, rush: 0.24 },
@@ -582,7 +593,13 @@ export const TUNING = deepFreeze({
     /** How long (s) he shows a save pose; while in it his next save is harder (save.recovering, scaled by how much is left). */
     poseSeconds: 0.6,
     /** An attacker screens him within `off` (m) of a shot's line, `near` to `far` (m) in front of him. */
-    screen: { off: 0.6, near: 0.8, far: 4 },
+    /**
+     * Task 13b: every tick of a shot's flight his sight line to the puck is blocked when an attacker's body (his radius
+     * plus `pad` m) is across it, more than `near` m in front of him and short of the puck (shots.ts watchSight, attackers
+     * only, the shooter and the tipper not). The share of the flight blocked makes him react later (times 1 - react *
+     * share) and read it worse (save.screened * share off the log-odds).
+     */
+    screen: { off: 0.6, near: 0.8, far: 4, pad: 0.1, react: 1 },
     /** Top speed along his arc (m/s): base plus per point of lateral. */
     speed: { base: 1.5, perPoint: 0.035 },
     /** How fast he turns square to the puck (rad/s): base plus per point of positioning. */
@@ -953,7 +970,12 @@ export const TUNING = deepFreeze({
      * shooters): a one-timer from the slot 1.053; a slapshot from the point 1.081; a wrist shot with a checker 1.2 m off
      * (pressure about 1) 1.136, so quickRelease is per unit of pressure; a rebound shot from 5 m 1.003 (from that close the
      * spread barely matters); a wrist shot from the point with a Net-Front Finisher screening 1.087 (his tips 6.7% -> 9.7%).
+     * Task 13b, re-measured with real shot speeds and the screen as a share of sight (test/badge-lab.ts, 40,000 paired
+     * shots each): one-timer 1.048, slapshot 1.074, Quick Release with nobody near 1.076 (the goalie's 0.9 reaction: it
+     * was valued 1) and with a checker 1.2 m off (pressure 0.95) 1.098, so quickReleaseCalm * (1 + quickRelease *
+     * pressure) with 1.08 and 0.02; rebound 1.006; Net-Front Finisher screening 1.185 (a screen now hides more of the
+     * shot, so his tips count for more). Re-measured by test/valuation-calibration.test.ts.
      */
-    value: { oneTimer: 1.05, heavySlap: 1.08, quickRelease: 0.14, finisherRebound: 1.0, finisherScreen: 1.09 },
+    value: { oneTimer: 1.05, heavySlap: 1.08, quickReleaseCalm: 1.08, quickRelease: 0.02, finisherRebound: 1.0, finisherScreen: 1.19 },
   },
 });

@@ -99,6 +99,12 @@ export type SaveInput = {
   /** From the release to the net (m). */
   distance: number;
   screened: boolean;
+  /**
+   * Task 13b: the share (0 to 1) of the shot's flight an attacker blocked his sight of it. He reacts later (the time he
+   * had to see it times 1 - TUNING.goalie.screen.react * share) and reads it worse (G.save.screened * share off the
+   * log-odds). Absent: 1 when `screened`, else 0.
+   */
+  screenShare?: number;
   goalieMovingSpeed: number;
   /** Height (m) at which the puck reaches the goal line. */
   height: number;
@@ -120,14 +126,16 @@ export function saveChance(input: SaveInput): number {
   let skill = 0, w = 0;
   for (const [k, wt] of Object.entries(G.saveSkill) as [keyof GoalieAttrs, number][]) { skill += a[k] * wt; w += wt; }
   skill /= w;
-  const reaction = Math.min(1, input.distance / Math.max(1, input.shotSpeed)) * (input.quickRelease === true ? TUNING.badges.quickReleaseReaction : 1);
+  const screen = input.screenShare ?? (input.screened ? 1 : 0);
+  const reaction = Math.min(1, input.distance / Math.max(1, input.shotSpeed)) * (input.quickRelease === true ? TUNING.badges.quickReleaseReaction : 1)
+    * (1 - G.screen.react * screen);
   const lm = input.lateralMiss;
   // Skill counts nearly linearly around 70 (less above it than below) and flattens out toward the extremes.
   const per = skill >= 70 ? G.save.perPointAbove : G.save.perPoint;
   const skillTerm = per * G.save.skillSpan * dtanh((skill - 70) / G.save.skillSpan);
   const logit = G.save.base + G.save.perReactionSecond * reaction + skillTerm + (input.night ?? 0) + (input.gloveHand === true ? TUNING.badges.gloveSave : 0)
     + Math.min(G.save.slowMax, G.save.perSlowSpeed * Math.max(0, G.save.slowFrom - input.shotSpeed)) * clamp(input.distance / G.save.slowFull, 0, 1)
-    - (input.screened ? G.save.screened : 0)
+    - G.save.screened * screen
     - (input.tipped ? G.save.tipped : 0)
     - G.save.recovering * clamp(input.recovering ?? 0, 0, 1)
     - G.save.perMovingSpeed * input.goalieMovingSpeed
@@ -371,6 +379,15 @@ function recoveringOf(g: GoalieState): number {
 }
 
 /**
+ * Task 13b: the share of a shot's flight his sight of it was blocked (shot.sight, shots.ts watchSight); a shot with no
+ * sight record (built by hand) is a full screen when `screened`, else none.
+ */
+function screenShareOf(shot: ShotInFlight, screened: boolean): number {
+  const s = shot.sight;
+  return s !== undefined && s.ticks > 0 ? s.blocked / s.ticks : screened ? 1 : 0;
+}
+
+/**
  * Whether an attacker of `att` (other than `shooterId` and the man who tipped it, `tippedBy`: Task 8 review, Minor 2) screens a shot meeting the goalie at (cx, cy) along (ux, uy)
  * (its unit direction): within SCREEN_OFF (0.6 m) of its line, between SCREEN_NEAR (0.8 m) and SCREEN_FAR (4 m) in front
  * of the goalie.
@@ -432,9 +449,10 @@ export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   const squareErr = Math.abs(wrapAngle(datan2(f.y - g.pos.y, f.x - g.pos.x) - g.facing));
   const ga = goalieAttrs(defs, g.id);
   const tipped = shot.tippedBy !== null;
+  const screen = screenShareOf(shot, screened);
   const p = saveChance({
     goalie: ga, lateralMiss: Math.abs(cy - g.pos.y) * Math.abs(vx) / v + squareErr * G.squareMissPerRad, shotSpeed: speed,
-    distance: hypot2(nx - f.x, ly - f.y), screened, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: cz,
+    distance: hypot2(nx - f.x, ly - f.y), screened, screenShare: screen, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: cz,
     night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
     quickRelease: quickOf(defs, shot), gloveHand: gloveSide(defs.get(g.id), g, cy, cz, end),
   });
@@ -449,7 +467,7 @@ export function faceShot(state: GameState, defs: Map<string, PlayerDef>, rng: Rn
   }
   out.push(gameEvent(state, {
     type: 'shot', side: shot.side, playerId: shooterId, otherId: g.id, pos: at,
-    detail: { distance: shot.fromDist, releaseTick: shot.tick, speed, cross, shotType: shot.shotType, tippedFrom: tipped ? shot.shooterId : null, screened, rebound: shot.rebound },
+    detail: { distance: shot.fromDist, releaseTick: shot.tick, speed, cross, shotType: shot.shotType, tippedFrom: tipped ? shot.shooterId : null, screened, rebound: shot.rebound, screen },
   }));
   shot.screened = screened;
   if (!saved) {
@@ -586,9 +604,10 @@ export function resolveOnNet(
   // A shot whose line passes beyond his reach cannot be saved (Task 8 review, Minor 1): a save needs his body, glove or pad there.
   // A puck that was not shot is played with stick or pad by its speed and how square he is to it (slideStopChance), not as
   // a shot (Task 8b review, Important 2); beyond his reach neither can be stopped.
+  const screen = shot ? screenShareOf(shot, screened) : 0;
   const p = offLine > SAVE_REACH ? 0 : !shot ? slideStopChance(ev.speed, offLine + squareErr * G.squareMissPerRad) : saveChance({
     goalie: ga, lateralMiss: offLine + squareErr * G.squareMissPerRad, shotSpeed: ev.speed, distance: reactDistance,
-    screened, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
+    screened, screenShare: screen, goalieMovingSpeed: hypot2(g.vel.x, g.vel.y), height: ev.z,
     night: state.goalieNight[defSide], tipped, recovering: recoveringOf(g),
     quickRelease: quickOf(defs, shot), gloveHand: gloveSide(defs.get(g.id), g, ev.y, ev.z, end),
   });
@@ -596,7 +615,7 @@ export function resolveOnNet(
   if (shot) {
     out.push(gameEvent(state, {
       type: 'shot', side: attSide, playerId: shooterId, otherId: g.id, pos: state.puck.pos,
-      detail: { distance: shot.fromDist, releaseTick: shot.tick, speed: ev.speed, cross, shotType: shot.shotType, tippedFrom: tipped ? shot.shooterId : null, screened, rebound: shot.rebound },
+      detail: { distance: shot.fromDist, releaseTick: shot.tick, speed: ev.speed, cross, shotType: shot.shotType, tippedFrom: tipped ? shot.shooterId : null, screened, rebound: shot.rebound, screen },
     }));
     shot.screened = screened;
   }

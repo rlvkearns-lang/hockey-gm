@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config';
  */
 export const SLOW_TESTS = [
   'test/calibration.test.ts', 'test/robustness.test.ts',
-  'test/look-interval.test.ts', 'test/tactics-slow.test.ts', 'test/tactics-defence.test.ts', 'test/certainty-entry.test.ts', 'test/certainty-jobs.test.ts',
+  'test/look-interval.test.ts', 'test/tactics-slow.test.ts', 'test/valuation-calibration.test.ts', 'test/tactics-defence.test.ts', 'test/certainty-entry.test.ts', 'test/certainty-jobs.test.ts',
 ];
 
 export default defineConfig({ test: { include: ['test/**/*.test.ts'], exclude: SLOW_TESTS } });

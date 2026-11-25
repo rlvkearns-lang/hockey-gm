@@ -249,6 +249,11 @@ export type ShotInFlight = {
   rebound: boolean;
   /** The goalie was screened when it reached him (set when he faces it). */
   screened: boolean;
+  /**
+   * Task 13b: his sight of it on its way: the ticks he watched it and the ticks an attacker's body was in his sight line
+   * to it (shots.ts watchSight). Absent on a shot built without it (counted as unseen-blocked 0).
+   */
+  sight?: { ticks: number; blocked: number };
   /** The goalie has faced it at his plane and it beat him: it goes on into the net (goalie.ts faceShot). */
   faced: boolean;
   /** Where it met him, once faced (for its `goal` event). */
@@ -547,7 +552,11 @@ export type EventDetails = {
    * `screened`: an attacker screened the goalie; `rebound`: released within 3 s of a save on that net.
    * (releaseTick is never null now: a puck that slides in with no shot has no `shot` event.)
    */
-  shot: { distance: number; releaseTick: number | null; speed: number; cross: Crossing; shotType: ShotType | null; tippedFrom: string | null; screened: boolean; rebound: boolean };
+  shot: {
+    distance: number; releaseTick: number | null; speed: number; cross: Crossing; shotType: ShotType | null; tippedFrom: string | null; screened: boolean; rebound: boolean;
+    /** Task 13b: the share (0 to 1) of its flight an attacker's body blocked the goalie's sight of it. */
+    screen?: number;
+  };
   /** The goalie (playerId) stopped otherId's shot with `pose`, where it met him (`cross`, `pos`), and held it, steered it to a corner or left a rebound (`kind`). */
   save: { pose: SavePose; kind: SaveKind; cross: Crossing };
   /** releaseTick null: it went in with no shot (a pass or loose puck): then `cross` is where it crossed the line, against the goalie. */

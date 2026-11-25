@@ -903,7 +903,7 @@ function netFrontMate(state: GameState, s: SkaterState): SkaterState | null {
  * Task 12 close-out: the shot badges as execution plays them, so that the carrier's valuation matches it. Each factor
  * is the badge's measured lift in the chance a shot scores (TUNING.badges.value, set from executed shots): a One-Timer
  * man's one-timer, a Heavy Slapshot man's slapshot (from slapFrom m or more under slapPressure), a Quick Release man's
- * shot by his pressure, a Net-Front Finisher's rebound shot, and a shot from the point with a Net-Front Finisher
+ * shot (Task 13b: quickReleaseCalm with nobody near him, the goalie's slower reaction, times 1 + quickRelease * pressure), a Net-Front Finisher's rebound shot, and a shot from the point with a Net-Front Finisher
  * screening in front (his tips).
  */
 function shotBadgeFactor(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, dNet: number, pressure: number, front: SkaterState | null): number {
@@ -913,7 +913,7 @@ function shotBadgeFactor(state: GameState, s: SkaterState, me: PlayerDef, defs: 
     const ot = state.oneTimerTaken;
     if (ot !== null && ot.id === s.id && state.tick - ot.tick <= ST.oneTimerTicks) { if (hasBadge(me, 'One-Timer')) k *= BV.oneTimer; }
     else if (dNet >= ST.slapFrom && pressure < ST.slapPressure && hasBadge(me, 'Heavy Slapshot')) k *= BV.heavySlap;
-    if (hasBadge(me, 'Quick Release')) k *= 1 + BV.quickRelease * pressure;
+    if (hasBadge(me, 'Quick Release')) k *= BV.quickReleaseCalm * (1 + BV.quickRelease * pressure);
     const ls = state.lastSave;
     if (ls !== null && ls.side !== s.side && (state.tick - ls.tick) * DT <= TUNING.rebound.windowSeconds && hasBadge(me, 'Net-Front Finisher')) k *= BV.finisherRebound;
   }

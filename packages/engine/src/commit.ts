@@ -158,7 +158,9 @@ export function commitTo(state: GameState, i: number, want: Want, trigger: Repla
     // A puck or man he no longer follows holds him to nothing once the hold has passed.
     const dx = want.pos.x - s.target.x, dy = want.pos.y - s.target.y;
     // So does a job that now follows something else (a spot, the puck, a man).
-    issue = dx * dx + dy * dy > C.moveEnough * C.moveEnough || (plan.follow !== 'spot' && plan.job !== want.job) || plan.follow !== want.follow;
+    // (Task 13b: the net-front man keeps to the goalie's eyes: his spot is re-issued once it is moveEnoughNet away.)
+    const enough = plan.job === 'netFront' && want.job === 'netFront' ? C.moveEnoughNet : C.moveEnough;
+    issue = dx * dx + dy * dy > enough * enough || (plan.follow !== 'spot' && plan.job !== want.job) || plan.follow !== want.follow;
   }
   if (issue) {
     if (plan.job !== want.job) { plan.job = want.job; plan.jobTick = tick; }
