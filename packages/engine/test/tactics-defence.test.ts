@@ -35,6 +35,20 @@ function pairsMean(t: Partial<Tactics>, read: (m: ReturnType<typeof tacticMeasur
   return sum / CERTAINTY_PAIRS;
 }
 
+/**
+ * Task 13 review, Minor 2 (Task 13b item 7e): as pairsMean, but the counts are pooled over the CERTAINTY_PAIRS pairs and
+ * the measure is read once on the sums (the ruling's "pooled"), so a pair with few events weighs as little as it says.
+ */
+function pairsPooled(t: Partial<Tactics>, read: (m: ReturnType<typeof tacticMeasures>) => number, games = 2): number {
+  let sum: ReturnType<typeof tacticCounts> | null = null;
+  for (let k = 1; k <= CERTAINTY_PAIRS; k++) {
+    const s: GameSetup = { home: generateTeam(2 * k + 1, 'A', 'AAA'), away: generateTeam(2 * k + 2, 'B', 'BBB'), seed: 1, chemistry: [] };
+    const c = tacticCounts(withTactics(s, 'home', t), 'home', games);
+    if (sum === null) sum = { ...c }; else for (const key of Object.keys(c) as (keyof typeof c)[]) sum[key] += c[key];
+  }
+  return read(tacticMeasures(sum!));
+}
+
 describe('tactics: two teams look different (defence, pinching)', () => {
   it('a pressure team presses the carrier in its zone more than a collapse team and gives up relatively more from the slot', () => {
     const pr = home({ defence: 'pressure' }, 8), co = home({ defence: 'collapse' }, 8);
@@ -42,7 +56,8 @@ describe('tactics: two teams look different (defence, pinching)', () => {
     expect(pr.dzoneTwoShare).toBeGreaterThan(co.dzoneTwoShare);
     // Task 13 close-out ruling 2: on gameSetup(1) this read flipped with every change of play (1.256 / 1.232 before Task
     // 13, 1.000 / 1.142 after it); read as the mean over six generated team pairs (0.775 / 0.656 at Task 13's close-out).
-    expect(pairsMean({ defence: 'pressure' }, (m) => m.slotToPoint)).toBeGreaterThan(pairsMean({ defence: 'collapse' }, (m) => m.slotToPoint));
+    // Task 13 review, Minor 2: the counts pooled over the pairs, not a mean of per-pair ratios; same bar.
+    expect(pairsPooled({ defence: 'pressure' }, (m) => m.slotToPoint)).toBeGreaterThan(pairsPooled({ defence: 'collapse' }, (m) => m.slotToPoint));
   }, LONG);
   it('against a carrier behind the net a pressure team chases (twice as often as a collapse team, and over half the time) and a collapse team holds the front', () => {
     // Task 11 close-out ruling 2: the brief's "over 0.7" is replaced by what matters, pressure at least twice collapse and

@@ -7,7 +7,7 @@ import { RINK } from '../src/rink';
 import { puckOutOfPlay } from '../src/referee';
 import {
   carryTo, count, def, defs, dumpedInWith, icedWithWingerOffside, icingAfter, live, moveOut, offsideWinger, onIce, place, refereeUntilCall, setup,
-  shootDownIce, shotFrom, skater, stateWith, tactics,
+  letGo, shootDownIce, shotFrom, skater, stateWith, tactics,
 } from './helpers';
 
 /** Whole-game tests take about 1 s; this leaves room for a loaded machine. */
@@ -122,6 +122,16 @@ describe('referee', () => {
     it('put out by a defender, or off the goalie, in his own zone: faceoff at that end-zone dot', () => {
       expect(puckOutOfPlay(outFrom('away-LD', 24, -5), 'glass').detail.spot).toEqual({ x: 21.03, y: -6.7 });
       expect(puckOutOfPlay(outFrom('away-G', 26.5, 0.4), 'netting').detail.spot).toEqual({ x: 21.03, y: 6.7 });
+    });
+    // Task 13 review, Minor 3 (Task 13b item 7c): where it was last played is where it left his stick, not where he skated
+    // to while it flew.
+    it('the spot comes from where it was last played (its release), not from where its last toucher stands at the whistle', () => {
+      const st = stateWith({ carrier: 'home', puckX: -9, puckY: 3, carrierSlot: 'LD' });
+      letGo(st, 'home-LD', 25, 0, 6);
+      const ld = st.skaters.find((s) => s.id === 'home-LD')!;
+      ld.pos = { x: -5, y: 3 };
+      st.puck = { pos: { x: 30.4, y: 3 }, z: 2.5, vel: { x: 0, y: 0 }, vz: 0 };
+      expect(puckOutOfPlay(st, 'netting').detail.spot).toEqual({ x: -21.03, y: 6.7 });
     });
     it('put out from the neutral zone: faceoff at the nearest neutral-zone dot', () => {
       expect(puckOutOfPlay(outFrom('away-C', -3, -5), 'bench').detail.spot).toEqual({ x: -6.1, y: -6.7 });

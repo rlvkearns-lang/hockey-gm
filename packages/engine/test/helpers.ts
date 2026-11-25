@@ -234,7 +234,7 @@ export function stateWith(o: { carrier: Side | null; puckX: number; puckY?: numb
     onIce: { home: SKATER_SLOTS.map((s) => skaterId('home', s)), away: SKATER_SLOTS.map((s) => skaterId('away', s)) },
     pickupBlock: null, pendingPass: null, shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 },
     touches: { side: null, ids: [], ticks: [] }, lastAttackTouch: { home: null, away: null },
-    noChange: null, delayedOffside: null, icingWatch: null, hardClear: null, lastRelease: null, contestCooldowns: [],
+    noChange: null, delayedOffside: null, icingWatch: null, hardClear: null, lastPlayedAt: null, lastRelease: null, contestCooldowns: [],
     tiedUpUntil: [], reboundEdge: null, turnoverWatch: null, lastSave: null, staggered: [], engagements: [],
     bench: {
       home: { forwards: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0, 0] }, defence: { cur: 0, changing: false, shiftStart: 0, toi: [0, 0, 0] } },
@@ -1324,6 +1324,7 @@ export function detailKey(e: GameEvent): string {
   switch (e.type) {
     case 'hit': return e.detail.result;
     case 'freeze': return e.detail.cause;
+    case 'outOfPlay': return e.detail.where;
     case 'takeaway': case 'giveaway': case 'turnover': return e.detail.how;
     case 'battle': return e.detail.how;
     case 'save': return `${e.detail.pose}:${e.detail.kind}`;
@@ -1334,8 +1335,8 @@ export function detailKey(e: GameEvent): string {
   }
 }
 
-/** Event types whose detail is counted too (e.g. `hit:landed`, `freeze:trapped`, `takeaway:poke`). */
-const DETAILED = new Set(['hit', 'freeze', 'takeaway', 'giveaway', 'turnover', 'battle', 'save', 'pass', 'lineChange']);
+/** Event types whose detail is counted too (e.g. `hit:landed`, `freeze:trapped`, `takeaway:poke`, `outOfPlay:glass`). */
+const DETAILED = new Set(['hit', 'freeze', 'takeaway', 'giveaway', 'turnover', 'battle', 'save', 'pass', 'lineChange', 'outOfPlay']);
 
 /**
  * Calibration game `i`: two generated teams (home roster seed 2i + 1 at `homeOverall`, away 2i + 2 at `awayOverall`,

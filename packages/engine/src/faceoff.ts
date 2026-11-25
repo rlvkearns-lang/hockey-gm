@@ -4,7 +4,7 @@ import { clearContests, effective, winProb } from './contests/core';
 import { gameEvent } from './events';
 import { holdJob, setFace, setTeamPhase, speedFor } from './commit';
 import { datan2, dcos, dsin } from './dmath';
-import { resolveBoards } from './rink';
+import { resolveBoards, RINK } from './rink';
 import type { Rng } from './rng';
 import { wrapAngle } from './skating';
 import { TUNING } from './tuning';
@@ -40,22 +40,57 @@ const FACE_WITHIN = TUNING.faceoff.lineup.faceWithin;
 const FACE_AHEAD = TUNING.faceoff.lineup.faceAhead;
 const SPRINT_FROM = TUNING.faceoff.lineup.sprintFrom;
 
+type Spot = { back: number; left: number };
 /**
- * Line-up spots, metres behind the dot toward his own end (`back`) and to his left (`left`): the centre over the dot,
- * the wingers on the circle, the defencemen behind. Everyone is on his own side of the dot.
+ * Line-up spots at a neutral-zone dot, metres behind the dot toward his own end (`back`) and to his left (`left`): the
+ * centre over the dot, the wingers beside it, the defencemen behind. Everyone is on his own side of the dot.
  */
-const LINEUP: Record<Exclude<Position, 'G'>, { back: number; left: number }> = {
+const LINEUP: Record<Exclude<Position, 'G'>, Spot> = {
   C: { back: 0.6, left: 0 },
   LW: { back: 0.9, left: 4.6 },
   RW: { back: 0.9, left: -4.6 },
   LD: { back: 5, left: 2.5 },
   RD: { back: 5, left: -2.5 },
 };
+/**
+ * At a circle (centre ice and the end zones; Task 13b, Task 13 review Minors 1 and 7) only the centres are inside it:
+ * the wingers stand on the hash marks HASH_OUT m to the side, outside it by more than the line-up tolerance (0.6 m).
+ */
+const HASH_OUT = 5.2;
+const CENTRE_LINEUP: Record<Exclude<Position, 'G'>, Spot> = { ...LINEUP, LW: { back: 0.9, left: HASH_OUT }, RW: { back: 0.9, left: -HASH_OUT } };
+/**
+ * An end-zone draw (Task 13b): attack-relative across (`ly`, + toward the boards nearest the dot) for the defencemen.
+ * Attacking: the defencemen at the points, ATTACK_D_RX (rx) just inside the blue line, the one on the draw's side at
+ * ATTACK_D_WALL from the middle, the other ATTACK_D_MID toward the middle. Defending: the boards-side defenceman
+ * DEF_D_BACK m behind the boards-side winger; the other in front of his net, DEF_NET_RX (rx) and DEF_NET_LY across on
+ * the draw's side.
+ */
+const ATTACK_D_RX = RINK.blueLineX + 0.9, ATTACK_D_WALL = 10.5, ATTACK_D_MID = -1;
+const DEF_D_BACK = 3.0, DEF_NET_RX = -(RINK.goalLineX - 2.8), DEF_NET_LY = 1.5;
 
-/** His line-up spot for the draw at `spot` (attacking toward `dir`; "left" is +y when attacking +x), inside the boards. */
+/**
+ * His line-up spot for the draw at `spot` (attacking toward `dir`; "left" is +y when attacking +x), inside the boards:
+ * the neutral-zone table (LINEUP), CENTRE_LINEUP at centre ice, and at an end-zone dot the wingers on the hash marks and
+ * the defencemen as ATTACK_D_* (his team attacks that zone) or DEF_* (it defends it).
+ */
 export function faceoffPosition(spot: Vec2, slot: Position | null, dir: 1 | -1): Vec2 {
-  const l = LINEUP[slot === null || slot === 'G' ? 'C' : slot];
-  const pos = { x: spot.x - dir * l.back, y: spot.y + dir * l.left };
+  const k = slot === null || slot === 'G' ? 'C' : slot;
+  const end = Math.abs(spot.x) > RINK.blueLineX;
+  let pos: Vec2;
+  if (end && (k === 'LD' || k === 'RD')) {
+    // Attack-relative: rx toward the net he attacks, ly to his left; `wall` is +1 when the dot is on his left.
+    const dly = spot.y * dir, wall = dly >= 0 ? 1 : -1;
+    // The defenceman whose side is the draw's side takes the boards.
+    const boards = (k === 'LD') === (wall === 1);
+    let rx: number, ly: number;
+    if (spot.x * dir > 0) { rx = ATTACK_D_RX; ly = boards ? wall * ATTACK_D_WALL : wall * ATTACK_D_MID; }
+    else if (boards) { rx = spot.x * dir - DEF_D_BACK; ly = dly + wall * HASH_OUT; }
+    else { rx = DEF_NET_RX; ly = wall * DEF_NET_LY; }
+    pos = { x: rx * dir, y: ly * dir };
+  } else {
+    const l = (end || (spot.x === 0 && spot.y === 0) ? CENTRE_LINEUP : LINEUP)[k];
+    pos = { x: spot.x - dir * l.back, y: spot.y + dir * l.left };
+  }
   resolveBoards(pos, { x: 0, y: 0 }, 0.5, 0);
   return pos;
 }
@@ -98,6 +133,7 @@ export function stopPlay(state: GameState, spot: Vec2): void {
   state.delayedOffside = null;
   state.icingWatch = null;
   state.hardClear = null;
+  state.lastPlayedAt = null;
   state.lastRelease = null;
   state.tiedUpUntil = [];
   state.staggered = [];
@@ -127,6 +163,7 @@ export function setupFaceoff(state: GameState, spot: Vec2): void {
   state.delayedOffside = null;
   state.icingWatch = null;
   state.hardClear = null;
+  state.lastPlayedAt = null;
   headForLineup(state);
 }
 

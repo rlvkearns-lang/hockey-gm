@@ -12,6 +12,7 @@
  * he took it; a point pass that slides out and is picked up outside is a completed pass but not a completed point pass.
  */
 import { createGame } from '../src/game';
+import { FACEOFF_MAX_SECONDS } from '../src/faceoff';
 import { movementOf, bodyRadius } from '../src/skating';
 import { RINK } from '../src/rink';
 import { TUNING } from '../src/tuning';
@@ -41,7 +42,7 @@ export type PlayCounterKey =
   | 'engagedTicks' | 'contactOver03Free' | 'contactOver03Engaged' | 'coverTicks' | 'coverDist' | 'coverNearTicks' | 'coverNearDist' | 'engagements'
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
-  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals' | 'icings' | 'hardClears' | 'faceoffs'
+  | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals' | 'icings' | 'hardClears' | 'faceoffs' | 'faceoffCapped'
   | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
   | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear'
   | 'protectSpells' | 'protectEngaged'
@@ -62,7 +63,7 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'engagedTicks', 'contactOver03Free', 'contactOver03Engaged', 'coverTicks', 'coverDist', 'coverNearTicks', 'coverNearDist', 'engagements',
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
-  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals', 'icings', 'hardClears', 'faceoffs',
+  'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals', 'icings', 'hardClears', 'faceoffs', 'faceoffCapped',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
   'netFrontHolds', 'netFrontHoldsLong', 'pointShotSaves', 'pointShotSavesNear',
   'protectSpells', 'protectEngaged',
@@ -181,6 +182,7 @@ export function createObserver(setup: GameSetup): Observer {
 
   const c = emptyCounters();
   let maxJump = 0;
+  let setupTicks = 0, prevPhase: GameState['phase'] = 'faceoffSetup';
   /** Each skater's speed and target on the tick he was last seen on the ice. */
   const prev = new Map<string, { tick: number; speed: number; tx: number; ty: number }>();
   /** Last tick each skater was counted at top speed (a run goes on while this is the previous tick). */
@@ -679,6 +681,10 @@ export function createObserver(setup: GameSetup): Observer {
 
   return {
     tick(st, events) {
+      // A setup that ran to the safety limit (faceoff.ts FACEOFF_MAX_SECONDS) before the drop (Task 13b, review Minor 4).
+      if (st.phase === 'faceoffSetup') setupTicks++;
+      else { if (prevPhase === 'faceoffSetup' && st.phase === 'live' && setupTicks * DT >= FACEOFF_MAX_SECONDS - 1e-6) c.faceoffCapped++; setupTicks = 0; }
+      prevPhase = st.phase;
       if (st.phase === 'live') { c.liveTicks++; if (st.engagements.length > 0) c.engagedTicks++; }
       for (const e of events) if (e.type === 'engagement') c.engagements++;
       netFront(st, events);

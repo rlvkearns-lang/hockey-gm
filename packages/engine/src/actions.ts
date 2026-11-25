@@ -70,10 +70,12 @@ export function pressureOn(state: GameState, s: SkaterState): number {
 /** Longest touch chain kept: the scorer, two assists, and room for repeats. */
 const MAX_TOUCHES = 6;
 
-/** `id` of `side` has the puck now: a new team starts a new chain; a new player of the same team joins it. */
+/** `id` of `side` has the puck now (where it is now is where it was last played): a new team starts a new chain; a new player of the same team joins it. */
 export function recordTouch(state: GameState, id: string, side: Side): void {
   state.icingWatch = null;
   state.hardClear = null;
+  const lp = state.puck.pos;
+  if (state.lastPlayedAt === null) state.lastPlayedAt = { x: lp.x, y: lp.y }; else { state.lastPlayedAt.x = lp.x; state.lastPlayedAt.y = lp.y; }
   const t = state.touches;
   state.lastAttackTouch[side] = id;
   if (t.side !== side) { t.side = side; t.ids.length = 0; t.ticks.length = 0; t.ids.push(id); t.ticks.push(state.tick); return; }

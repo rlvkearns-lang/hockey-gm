@@ -191,7 +191,7 @@ function initialState(setup: GameSetup): GameState {
     goalies: { home: goalieAt(setup.home.lines.goalie, dir), away: goalieAt(setup.away.lines.goalie, dir === 1 ? -1 : 1) },
     contests: [], score: { home: 0, away: 0 }, faceoffSpot: { x: 0, y: 0 }, onIce, pickupBlock: null, pendingPass: null,
     shotInFlight: null, teamJump: { home: 0, away: 0 }, goalieNight: { home: 0, away: 0 }, screenedUntilTick: { home: 0, away: 0 }, touches: { side: null, ids: [], ticks: [] },
-    lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null, hardClear: null,
+    lastAttackTouch: { home: null, away: null }, noChange: null, delayedOffside: null, icingWatch: null, hardClear: null, lastPlayedAt: null,
     lastRelease: null, contestCooldowns: [], tiedUpUntil: [], staggered: [], engagements: [], reboundEdge: null, turnoverWatch: null, lastSave: null,
     bench: initialBench(setup),
     plans: initialPlans(skaters.length),

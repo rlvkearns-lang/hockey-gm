@@ -168,7 +168,8 @@ function nearestDot(dots: Vec2[], p: Vec2): Vec2 {
 
 /**
  * The puck went out of play (puck.ts `outOfPlay`, `where` it went): play stops for a faceoff where the rules put it.
- * Where it was last played is where its last toucher (a skater or a goalie) is. Put out by an attacker from the zone he
+ * Where it was last played: where it was when last touched (state.lastPlayedAt: a release, a deflection, a save; Task
+ * 13b), or else where its last toucher (a skater or a goalie) is. Put out by an attacker from the zone he
  * attacks: the neutral-zone dot outside that blue line on the side it was played. Otherwise the dot nearest where it was
  * last played: in an end zone that zone's dot, in the neutral zone a neutral-zone dot (never the centre dot). (A
  * defender putting it over the glass from his own zone is a delay-of-game penalty in the rules: Part B.)
@@ -176,7 +177,8 @@ function nearestDot(dots: Vec2[], p: Vec2): Vec2 {
 export function puckOutOfPlay(state: GameState, where: 'glass' | 'netting' | 'bench'): GameEventOf<'outOfPlay'> {
   const t = state.lastTouch;
   let at: Vec2 = state.puck.pos;
-  if (t !== null) {
+  if (state.lastPlayedAt !== null) at = state.lastPlayedAt;
+  else if (t !== null) {
     const s = findSkater(state, t.id);
     if (s) at = s.pos;
     else for (const side of SIDES) if (state.goalies[side].id === t.id) at = state.goalies[side].pos;

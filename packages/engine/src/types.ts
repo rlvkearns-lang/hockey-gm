@@ -476,6 +476,11 @@ export type GameState = {
    * within reach gets one try to knock it down (`tried`). Cleared at any touch and at a whistle.
    */
   hardClear: { side: Side; fromId: string; tried: string[] } | null;
+  /**
+   * Where the puck was last played (Task 13b, Task 13 review Minor 3): the puck's position at the last touch (a release,
+   * a deflection, a pickup) or a goalie's save. Read for the faceoff spot when it goes out of play. Null after a whistle.
+   */
+  lastPlayedAt: Vec2 | null;
   /** Each team's line rotation (see bench.ts). */
   bench: Record<Side, BenchState>;
   /** What each skater has committed to: `plans[i]` belongs to `skaters[i]` (commit.ts). */

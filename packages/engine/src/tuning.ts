@@ -565,7 +565,11 @@ export const TUNING = deepFreeze({
     squareRate: { base: 2, perPoint: 0.06 },
     /** Depth out from the goal line (m): min with the puck `near` m away or closer, growing perMetre per metre, at most max. */
     depth: { min: 0.4, max: 1.3, near: 2, perMetre: 0.06 },
-    /** He covers a loose puck slower than speed (m/s), within reach (m) of him and in his crease, when an opponent is within threat (m) of it. */
+    /**
+     * He covers a loose puck slower than speed (m/s), within reach (m) of him, when an opponent is within threat (m) of
+     * it: in his crease, or (Task 13) just outside it with his body in it (never behind his goal line); no higher than
+     * maxZ (m). Under that pressure he also skates to a slow loose puck in his crease to cover it.
+     */
     cover: { speed: 3, reach: 1.0, threat: 2.5, maxZ: 0.3 },
     /**
      * A puck that was not shot (a pass, a centring feed, a loose puck) sliding over his goal line between the posts (Task 8b

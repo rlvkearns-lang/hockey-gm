@@ -298,6 +298,8 @@ describe('icing and the hard clear (Task 13b)', () => {
     expect(c.icings / n).toBeGreaterThanOrEqual(4); expect(c.icings / n).toBeLessThanOrEqual(12);
     expect(c.hardClears / n).toBeGreaterThan(5);
   }, 240_000);
+  // Task 13 review, Minor 4: the line-up's safety limit (25 s) is never what drops the puck.
+  it('no faceoff setup runs to the safety limit (seeds 1-16)', () => { expect(counters16().faceoffs).toBeGreaterThan(500); expect(counters16().faceoffCapped).toBe(0); }, 240_000);
 });
 
 describe('A5: battling for position (Task 10)', () => {

@@ -53,6 +53,7 @@ console.log('\ndiagnostics, per game (both teams)');
 row('missed shots / posts', `${f(perGame('miss'))} / ${f(perGame('post'))}`);
 row('passes / dumps', `${f(perGame('pass') - perGame('pass:dump'))} / ${f(perGame('pass:dump'))}`);
 row('freezes save/cover/trap', `${f(perGame('freeze:save'))} / ${f(perGame('freeze:cover'))} / ${f(perGame('freeze:trapped'))}`);
+row('out of play glass/netting/bench', `${f(perGame('outOfPlay:glass'))} / ${f(perGame('outOfPlay:netting'))} / ${f(perGame('outOfPlay:bench'))} (all ${f(perGame('outOfPlay'))})`);
 row('hits landed/absorbed/bounced', `${f(perGame('hit:landed'))} / ${f(perGame('hit:absorbed'))} / ${f(perGame('hit:bounced'))}`);
 row('turnovers pk/pkL/hit/bat/batL', ['poke', 'pokeLoose', 'hit', 'battle', 'battleLoose'].map((d) => f(perGame(`turnover:${d}`))).join(' / '));
 row('turnovers intercept/deflect', ['intercepted', 'deflected'].map((d) => f(perGame(`turnover:${d}`))).join(' / '));
