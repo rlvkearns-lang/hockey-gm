@@ -106,12 +106,7 @@ describe('tactics: the players bend them', () => {
     const c = tacticCounts(allOfType(gameSetup(1), 'home', 'Playmaker', { zoneEntry: 'dump' }), 'home', 4);
     expect(c.carryIns / (c.dumpIns + c.carryIns)).toBeGreaterThan(0.25);
   }, LONG);
-  it('with the same tactic a line of grinders dumps more than a skilled line, by less than the tactic itself moves it', () => {
-    const share = (type: string) => tacticMeasures(tacticCounts(allOfType(gameSetup(1), 'home', type, { zoneEntry: 'mixed' }), 'home', 4)).dumpInShare;
-    const grind = share('Grinder'), skill = share('Playmaker');
-    expect(grind).toBeGreaterThan(skill);
-    expect(grind / skill).toBeLessThan(home({ zoneEntry: 'dump' }, 8).dumpInShare / home({ zoneEntry: 'carry' }, 8).dumpInShare);
-  }, LONG);
+  // 'with the same tactic a line of grinders dumps more...' (24 games) is in tactics-slow.test.ts (calibration suite, Task 13b).
 });
 
 describe('tactics: two teams look different', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createGame, createGameWith, simulateGame } from '../src/game';
+import { createGame, simulateGame } from '../src/game';
 import { gameSetup, sum } from './helpers';
 import { countGames, measureGames, observeGame, pairCertainty } from './measures';
 import type { GameSetup, TeamDef } from '../src/types';
@@ -254,28 +254,7 @@ describe('A4: saves, rebounds and tips (Task 8)', () => {
   }, 60_000);
 });
 
-describe('A3: decisions at decision points (Task 8 fix round 2)', () => {
-  // A pick drawn on a clock is a rate nobody chose: the carrier draws at decision points, and how often he looks for one
-  // (lookTicks, 6 by default) barely moves what he does.
-  // Close-out: read on seeds 1-16. With half the shots, eight games' attempts move by about 6% from one run to another
-  // by themselves (988 / 872 / 922 at 3 / 6 / 12 ticks on seeds 1-8; 1,926 / 1,824 / 1,814 on seeds 1-16). The bar is unchanged.
-  it('A3: halving or doubling the look interval changes shots and passes a game by under 10% (seeds 1-16)', () => {
-    const per = (lookTicks: number): { shots: number; passes: number } => {
-      let shots = 0, passes = 0;
-      for (let seed = 1; seed <= 16; seed++) {
-        const g = createGameWith(gameSetup(seed), { lookTicks });
-        while (!g.done) g.step();
-        for (const e of g.result().events) { if (e.type === 'release' && e.detail.kind === 'shot') shots++; if (e.type === 'pass' && e.detail.kind === 'pass') passes++; }
-      }
-      return { shots, passes };
-    };
-    const base = per(6);
-    for (const lt of [3, 12]) {
-      const o = per(lt);
-      expect(Math.abs(o.shots / base.shots - 1)).toBeLessThan(0.10); expect(Math.abs(o.passes / base.passes - 1)).toBeLessThan(0.10);
-    }
-  }, 900_000);
-});
+// 'A3: decisions at decision points' (48 games) is in look-interval.test.ts, in the calibration (slow) suite (Task 13b).
 
 describe('A2/A4: the net front (Task 8 fix round 2)', () => {
   // Close-out ruling 4: pooled over seeds 1-8, and 45% for now (it reads 48 to 49%: a quarter of the spells end with a pass
