@@ -88,6 +88,12 @@ export function resolveBoards(pos: Vec2, vel: Vec2, radius: number, restitution:
 
 const NET_BACK = RINK.goalLineX + RINK.netDepth;
 
+/** Whether `q` is inside a net frame grown by `r` (m): behind the goal line, short of the back of the net, between the posts. */
+export function inNetFrame(q: Vec2, r: number): boolean {
+  const x = q.x * (q.x >= 0 ? 1 : -1);
+  return x > RINK.goalLineX - r && x < RINK.goalLineX + RINK.netDepth + r && Math.abs(q.y) < RINK.netHalfWidth + r;
+}
+
 /**
  * Keep a circular body out of both net frames (the box from the goal line to the back of the net, between the posts),
  * grown by its radius. It is pushed out through the nearest face (it can only enter a few cm per tick, so that is the

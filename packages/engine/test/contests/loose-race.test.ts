@@ -77,6 +77,30 @@ describe('loose-puck races', () => {
       expect(r.puckStepAtEnd).toBeLessThanOrEqual(0.9 + 0.6 + 0.2); }
     expect(won).toBeGreaterThan(100);
   });
+  // Task 14b: a race won for a puck lying inside a net frame (in the goal mouth behind the line, a slow puck) put it on
+  // the winner's blade outside the frame, a 1.56 m jump (calibration game 129 of the first 300). As tryPickup: nobody
+  // takes a puck inside a frame; the race runs out instead.
+  it('nobody wins a race for a puck lying inside a net frame', () => {
+    let ends = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const st = stateWith({ carrier: null, puckX: 27.3, puckY: 0.5 });
+      for (const s of st.skaters) s.onIce = s.id === 'home-C' || s.id === 'away-C';
+      st.onIce = { home: ['home-C'], away: ['away-C'] };
+      const put = (id: string, x: number, y: number, facing: number): void => { const s = st.skaters.find((k) => k.id === id)!; s.pos = { x, y }; s.target = { x, y }; s.vel = { x: 0, y: 0 }; s.facing = facing; };
+      put('home-C', 26.76, -0.16, 0.52); put('away-C', 21, 4, -0.4);
+      const ds = new Map(defs); for (const id of ['home-C', 'away-C']) ds.set(id, { ...even, id, position: 'C' });
+      const rng = createRng(seed); const events: GameEvent[] = [];
+      const c = startContest(st, ds, rng, looseRaceContest, ['home-C', 'away-C'], events);
+      st.puck.vel = { x: 0, y: 0 };
+      for (let k = 0; k < 90; k++) {
+        st.tick++;
+        contestTick(st, ds, rng, DT, events);
+        const end = events.find((e): e is GameEventOf<'contestEnd'> => e.type === 'contestEnd' && e.detail.contestId === c.id);
+        if (end) { ends++; expect(end.detail.puck).not.toBe('toWinner'); break; }
+      }
+    }
+    expect(ends).toBeGreaterThan(30);
+  });
   it('the race takes time and shows who is ahead', () => {
     const r = runRace({ aLead: 0.3 });
     expect(r.stages).toEqual(['race', 'resolve']);

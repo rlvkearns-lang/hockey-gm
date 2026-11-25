@@ -16,7 +16,7 @@ import { goaliePlaysPass as goaliePlaysPass_, goalieTick as goalieTick_, scoreFa
 import { moveLoosePuck as moveLoosePuck_, trackShot as trackShot_ } from './shots';
 import type { PuckEvent } from './puck';
 import { puckOutOfPlay as puckOutOfPlay_, refereeTick as refereeTick_ } from './referee';
-import { clipToNets as clipToNets_, FACEOFF_DOTS as FACEOFF_DOTS_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_, routeAroundNets as routeAroundNets_ } from './rink';
+import { clipToNets as clipToNets_, FACEOFF_DOTS as FACEOFF_DOTS_, inNetFrame as inNetFrame_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_, routeAroundNets as routeAroundNets_ } from './rink';
 import { createRng as createRng_, restoreRng as restoreRng_, type Rng } from './rng';
 import { TUNING as TUNING_ } from './tuning';
 import { movementOf as movementOf_, stepSkater as stepSkater_, type Drive, type Movement } from './skating';
@@ -104,6 +104,7 @@ const datan2 = datan2_;
 const dcos = dcos_;
 const dsin = dsin_;
 const PUCK_RADIUS = PUCK_RADIUS_;
+const inNetFrame = inNetFrame_;
 const SIDES = SIDES_;
 
 export type Game = {
@@ -475,8 +476,7 @@ function run(setup: GameSetup, state: GameState, rng: Rng, events: GameEvent[], 
 
   /** Whether `q` is inside a net frame grown by the puck's radius. */
   function inFrame(q: { x: number; y: number }): boolean {
-    const x = q.x * (q.x >= 0 ? 1 : -1), r = PUCK_RADIUS;
-    return x > RINK.goalLineX - r && x < RINK.goalLineX + RINK.netDepth + r && Math.abs(q.y) < RINK.netHalfWidth + r;
+    return inNetFrame(q, PUCK_RADIUS);
   }
 
   /** Moves `q`, when it is inside a net frame grown by the puck's radius, out through the nearest of its back and sides. */

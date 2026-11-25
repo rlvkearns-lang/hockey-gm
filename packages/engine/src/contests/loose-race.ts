@@ -1,12 +1,13 @@
 import { blockPickup } from '../actions';
 import { bladePos } from '../blade';
 import { DT } from '../constants';
-import { distToBoards } from '../rink';
+import { distToBoards, inNetFrame } from '../rink';
 import { movementOf, wrapAngle, type Movement } from '../skating';
 import { isTiedUp, steeredByContest } from '../team-play';
 import { TUNING } from '../tuning';
 import type { ContestOutcome, ContestStateOf, GameState, PlayerDef, SkaterState } from '../types';
 import { dist, hypot2, type Vec2 } from '../vec';
+import { PUCK_RADIUS } from '../util';
 import {
   contestRating, enterStage, isFree, onCooldown, puckHeldByContest, setCooldown, skaterById, STAGE_EPS, winProb,
   type Contest, type ContestCtx, type ContestResult,
@@ -209,10 +210,15 @@ export const looseRaceContest: Contest<'looseRace'> = {
 const bladeScratch: Vec2 = { x: 0, y: 0 };
 /**
  * Whether the winner `w` can take the puck at `p` (Task 6, as game.ts tryPickup): his blade within
- * TUNING.blade.pickupReach of it, or it in his feet (centre within IN_FEET) with the blade within MAX_KICK of it.
+ * TUNING.blade.pickupReach of it, or it in his feet (centre within IN_FEET) with the blade within MAX_KICK of it; never a
+ * puck or a blade inside a net frame.
  */
 function canTake(ctx: ContestCtx, w: SkaterState, p: Vec2): boolean {
+  // (Task 14b: as tryPickup, not a puck inside a net frame, nor with his blade inside one: taken there, the puck was put
+  // on his blade outside the frame, a 1.56 m jump in the calibration set.)
+  if (inNetFrame(p, PUCK_RADIUS)) return false;
   const b = bladePos(w.pos, w.facing, ctx.defs.get(w.id)!.shoots, bladeScratch);
+  if (inNetFrame(b, PUCK_RADIUS)) return false;
   const db = dist(b, p);
   // A tied-up man (Task 10) reaches less far: times 1 - TUNING.engage.limits.reach * his tie.
   return db <= TUNING.blade.pickupReach * (1 - TUNING.engage.limits.reach * tieOf(ctx.state, w.id)) || (dist(w.pos, p) <= IN_FEET && db <= MAX_KICK);
