@@ -104,7 +104,7 @@ export const TUNING = deepFreeze({
      */
     teamJumpSd: 3,
     /** Each goalie's night (a hot or cold game): a normal shift of his save log-odds with this standard deviation. */
-    goalieSd: 0.3, // Task 14 (parity): 0.2 -> 0.3; the 76 beat the 66 in 0.83 of 300 games (band 0.70 to 0.80)
+    goalieSd: 0.35, // Task 14 (parity): 0.2 -> 0.35; the 76 beat the 66 in 0.83 of 300 games (band 0.70 to 0.80)
   },
 
   /**
@@ -665,7 +665,7 @@ export const TUNING = deepFreeze({
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.29,
+      base: 2.32,
       perReactionSecond: 1.75,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
@@ -1031,6 +1031,6 @@ export const TUNING = deepFreeze({
      * pressure) with 1.08 and 0.02; rebound 1.006; Net-Front Finisher screening 1.185 (a screen now hides more of the
      * shot, so his tips count for more). Re-measured by test/valuation-calibration.test.ts.
      */
-    value: { oneTimer: 1.05, heavySlap: 1.08, quickReleaseCalm: 1.08, quickRelease: 0.02, finisherRebound: 1.0, finisherScreen: 1.19 },
+    value: { oneTimer: 1.05, heavySlap: 1.08, quickReleaseCalm: 1.08, quickRelease: 0.02, finisherRebound: 1.0, finisherScreen: 1.15 },
   },
 });

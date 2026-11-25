@@ -696,7 +696,11 @@ export function createObserver(setup: GameSetup): Observer {
         // Task 14: the same on the tick that battle ends with the puck squirting off his blade (beyond the hand-over
         // reach, board-battle.ts HAND_OVER): its last carried step was made this tick, before the contest was removed.
         if (w === undefined) for (const e of events) if (e.type === 'contestEnd' && e.detail.kind === 'boardBattle' && e.detail.winnerId !== null && e.detail.puck === 'unchanged') w = skaterById(st, e.detail.winnerId);
-        excess = w !== undefined ? move - Math.max(vmax, speedOf(w.vel)) * DT - CARRY_TURN : move - vmax * DT;
+        // Task 14: and on the tick a carrier loses it (a hit, a poke): the puck made its last carried step on his blade
+        // this tick before it came loose (one such tick in 300 games read 0.051 m over its loose speed).
+        const lost = prevPuck.carrier !== null ? skaterById(st, prevPuck.carrier) : undefined;
+        excess = w !== undefined ? move - Math.max(vmax, speedOf(w.vel)) * DT - CARRY_TURN
+          : lost !== undefined ? move - Math.max(vmax, speedOf(lost.vel)) * DT - CARRY_TURN : move - vmax * DT;
       }
       if (excess > limit + 1e-9) c.puckJumpTicks++;
       if (excess > maxJump) maxJump = excess;
