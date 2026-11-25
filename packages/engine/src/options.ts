@@ -250,6 +250,10 @@ export function patienceOf(state: GameState, s: SkaterState, me: PlayerDef, oddM
     let mates = 0;
     for (const m of state.skaters) if (m.onIce && m.side === s.side && m !== s && !m.leaving && m.pos.x * dir > BLUE) mates++;
     by = PT.situation.alone + (PT.situation.setUp - PT.situation.alone) * clamp(mates / PT.setUp, 0, 1);
+    // Task 14: at the point (TUNING.options.farShot m or more from the net) with his net-front man in front, the shot
+    // through traffic is the look the possession was building: he is situation.pointTraffic times as patient.
+    const rx = s.pos.x * dir, ly = s.pos.y * dir;
+    if (hyp(GOAL - rx, ly) >= FAR_SHOT && netFrontMate(state, s) !== null) by *= PT.situation.pointTraffic;
   }
   return clamp((PT.base - PT.perShoot * (me.tendencies.shoot - 0.5)) * by * tacticFactor, 0, PT.max);
 }

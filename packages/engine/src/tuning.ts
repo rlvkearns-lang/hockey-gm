@@ -228,7 +228,7 @@ export const TUNING = deepFreeze({
      * (test/badge-lab.ts labScreen). Set to the lift (0.04 or 0.06), point shots fall by a fifth and tips under 2 a game
      * and net presence at point-shot saves under 40% (item 3's guards). test/valuation-calibration.test.ts reads the gap.
      */
-    traffic: 0.1, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
+    traffic: 0.055, oneTimerThreat: 0.06, oneTimerBonus: 0.1,
     /**
      * What follows in the zone he attacks (Task 8 fix round), measured in play at 43d6dcf, seeds 1-16
      * (task-8-report.md, "Fix round 1"): `keep`, the share of cases in which his team (or nobody) has the puck in the zone
@@ -244,14 +244,14 @@ export const TUNING = deepFreeze({
       // (task-13b-report.md, item 4); Task 14 refits them after it tunes.
       carry: { keep: 0.51, rush: 0.06 },
       passFailed: { keep: 0.32, rush: 0.26 },
-      held: { keep: 0.39, rush: 0.24 },
-      steered: { keep: 0.36, rush: 0.12 },
-      rebound: { keep: 0.24, rush: 0.05 },
-      blocked: { keep: 0.31, rush: 0.23 },
-      wide: { keep: 0.32, rush: 0.15 },
+      held: { keep: 0.46, rush: 0.11 },
+      steered: { keep: 0.34, rush: 0.12 },
+      rebound: { keep: 0.18, rush: 0.07 },
+      blocked: { keep: 0.30, rush: 0.23 },
+      wide: { keep: 0.31, rush: 0.14 },
     },
     stick: 0.034, shadowed: 0.5, turnoverCost: 0.6, hold: 0.003, holdCap: 10,
-    goal: 0.2, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
+    goal: 0.158, habitShift: 0.03, offside: 0.03, icing: 0.05, raceBase: 0.35, racePerMetre: 0.06, raceMax: 0.85,
   },
 
   /**
@@ -277,7 +277,7 @@ export const TUNING = deepFreeze({
     farShot: 11, trafficNear: 3,
     /** A rebound lands about rebound.out m out; each metre nearer it than the other side's nearest man is worth rebound.edge of the chance of getting it (options.ts shotAfter). */
     rebound: { out: 2.5, edge: 0.15 },
-    threat: { base: 0.005, ice: 0.035, shot: 0.23 },
+    threat: { base: 0.005, ice: 0.035, shot: 0.181 },
     openAt: { min: 0.6, from: 1, over: 4 },
     pass: {
       base: 0.97, perMetre: 0.006, from: 12, pressure: 0.3, pressurePerPoint: 0.002, settle: 1, settleMin: 0.9,
@@ -335,7 +335,14 @@ export const TUNING = deepFreeze({
    *   shoot from the point less, rush least).
    * Set once so Task 8b's guards pass; Task 14 tunes it to NHL attempt numbers (see task-8b-report.md).
    */
-  patience: { base: 1.3, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5 }, max: 2 },
+  /**
+   * Task 14: situation.pointTraffic (declared with the dial, like the tactic factor): a man at the point (options.farShot
+   * m or more out) with his net-front man in front of the net is that much as patient. The valuation's traffic
+   * (V.traffic) is now the measured lift of a man in front (0.06: 7.8% against 1.5% of unblocked far attempts), which
+   * by itself no longer clears a possession valued at patience times the slot look; the screen being set is what he
+   * was waiting for.
+   */
+  patience: { base: 1.48, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5, pointTraffic: 0.35 }, max: 2 },
 
   /**
    * Team tactics (tactics.ts, Task 11). Every factor a tactic applies is here; tactics shade option values and jobs and
@@ -658,8 +665,8 @@ export const TUNING = deepFreeze({
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.0,
-      perReactionSecond: 2.5,
+      base: 2.13,
+      perReactionSecond: 3.2,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
        * per * skillSpan * tanh((skill - 70) / skillSpan): a weak goalie leaks more than a strong one gains.
@@ -667,7 +674,7 @@ export const TUNING = deepFreeze({
       perPoint: 0.025,
       perPointAbove: 0.015,
       skillSpan: 25,
-      screened: 0.6,
+      screened: 1.0,
       /** Per m/s he is still moving when the puck arrives. */
       perMovingSpeed: 0.25,
       /** Per metre the shot passes wide of his centre beyond his body's reach, and again (steeper) beyond his stretch. */
@@ -729,7 +736,7 @@ export const TUNING = deepFreeze({
    * out, an attacker's blade within reach (m) of its path; turned by gauss * turn (rad), vz changed by gauss * lift (m/s),
    * keeping `keep` of its speed.
    */
-  tip: { base: 0.10, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
+  tip: { base: 0.15, perPoint: 0.004, reach: 0.9, maxZ: 1.2, minDistance: 9, turn: 0.12, lift: 2.5, keep: 0.85, netRange: 4.5 },
 
   /**
    * Shot blocks (goalie.ts): below maxZ (m), by a defender within path (m) of its path, more than clearOfShooter (m) from

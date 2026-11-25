@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { chooseOption, listOptions, readSituation, threat, topKindShare, type Option } from '../src/options';
+import { chooseOption, listOptions, patienceOf, readSituation, threat, topKindShare, type Option } from '../src/options';
+import { TUNING } from '../src/tuning';
 import { decideCarrier, type Decision } from '../src/brain';
 import { contestTick } from '../src/contests/core';
 import { executeRim, executeShot } from '../src/actions';
@@ -250,6 +251,18 @@ describe('patience and pressured shots (Task 8b)', () => {
     }
     const bare = shoots(setUp('point')), screened = shoots(setUp('point', true)), slot = shoots(setUp('slot'));
     expect(bare).toBeLessThan(0.10); expect(screened).toBeGreaterThanOrEqual(bare * 3); expect(screened).toBeGreaterThan(0.05); expect(slot).toBeGreaterThanOrEqual(0.60);
+  });
+  // Task 14 (headline 4): the valuation's traffic is the measured lift (V.traffic), so what makes a point man shoot
+  // through a screen is declared with the rest of his patience: with his net-front man set in front, that is the look
+  // his possession was building, and he is TUNING.patience.situation.pointTraffic times as patient as without.
+  it('a point man with his net-front man set in front is less patient: that is the look he was waiting for', () => {
+    const me = def({});
+    const of = (st: GameState): number => patienceOf(st, st.skaters.find((k) => k.id === st.carrierId)!, me, false);
+    expect(of(setUp('point', true))).toBeCloseTo(of(setUp('point')) * TUNING.patience.situation.pointTraffic, 9);
+    expect(TUNING.patience.situation.pointTraffic).toBeLessThan(0.8); expect(TUNING.patience.situation.pointTraffic).toBeGreaterThan(0.2);
+    // In the slot the net-front man changes nothing: the dial is about the shot from the point.
+    const slot = setUp('slot'); const withMan = setUp('slot'); place(withMan, 'home:LW', 25.3, 0.3); setJob(withMan, 'home-LW', 'netFront');
+    expect(of(withMan)).toBeCloseTo(of(slot), 9);
   });
   it('patience follows the shoot habit: a shooter lets the bare point shot go more often than a pass-first player', () => {
     const shooter = def({ tendencies: { ...def().tendencies, shoot: 0.9 } }), passer = def({ tendencies: { ...def().tendencies, shoot: 0.2 } });
