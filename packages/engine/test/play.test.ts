@@ -139,9 +139,12 @@ describe('A3: decisions with the puck (Task 5)', () => {
   // fewer pucks changing hands (poke takes 35 -> 12 a game, hits that free the puck 41 -> 23) there are fewer "gained the
   // puck" decisions, which never count as flips (flips per other decision only 0.515 -> 0.531). Task 14 revisits.
   it('A3: the carrier keeps his mind: under 37% of his decisions change what he is doing (seeds 1-16)', () => { expect(counters16().carrierFlips / counters16().carrierDecisions).toBeLessThan(0.37); }, 240_000);
-  it('A2/A3: behind the net is used: at least 8 possessions there, 2 passes out front and 0.3 wraparounds a game', () => {
-    expect(m().behindNetPossessionsPerGame).toBeGreaterThanOrEqual(8); expect(m().passesOutFrontPerGame).toBeGreaterThanOrEqual(2); expect(m().wrapAttemptsPerGame).toBeGreaterThanOrEqual(0.3);
-  }, 60_000);
+  // Task 14b (section 4; a sample change for the controller to ratify, bars unchanged): read on seeds 1-16. On seeds 1-3
+  // passes out front read 1.67 (se 0.25 over those three games: red by 1.3 se); on seeds 1-16 3.0 (se 0.39), possessions
+  // 18.3 (se 1.2), wraparounds 1.56 (se 0.27).
+  it('A2/A3: behind the net is used: at least 8 possessions there, 2 passes out front and 0.3 wraparounds a game (seeds 1-16)', () => {
+    expect(m16().behindNetPossessionsPerGame).toBeGreaterThanOrEqual(8); expect(m16().passesOutFrontPerGame).toBeGreaterThanOrEqual(2); expect(m16().wrapAttemptsPerGame).toBeGreaterThanOrEqual(0.3);
+  }, 240_000);
 });
 
 describe('A3: passes that can be received, the puck on the blade (Task 6)', () => {
@@ -159,7 +162,9 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   // valuation now sees it as execution does; completion still reads 0.701 pooled over seeds 1-16, so the bar is the
   // earlier ruled 0.70.
   it('A3: passes are completed 70% to 85% of the time (was 86.5%), seeds 1-16 pooled', () => { expect(m16().passCompletion).toBeGreaterThan(0.70); expect(m16().passCompletion).toBeLessThan(0.85); }, 240_000);
-  it('A3: 600 to 900 passes a game', () => { expect(counters().passes / 3).toBeGreaterThan(600); expect(counters().passes / 3).toBeLessThan(900); }, 60_000);
+  // Task 14b (section 4; sample change for ratification, bar unchanged): seeds 1-16 (620 on seeds 1-3, se 16: 1.3 se
+  // inside the bar; 642 on seeds 1-16, se 5).
+  it('A3: 600 to 900 passes a game (seeds 1-16)', () => { expect(counters16().passes / 16).toBeGreaterThan(600); expect(counters16().passes / 16).toBeLessThan(900); }, 240_000);
   // A pickup: a loose puck or a pass taken (tryPickup) or a pass picked off; the move beyond the puck's own travel that
   // tick. Contest hand-overs (races, battles) have their own measures.
   // Task 6 review, Minor 8: the carried puck's step limit keeps it to about 0.4 m (it read 1.18 before that limit).
@@ -216,7 +221,9 @@ describe('A4: attempts (Task 7)', () => {
       for (const p of r.players) expect(p.attempts, p.id).toBe(credited(p.id));
     }
   }, 60_000);
-  it('A4: defencemen shoot: at least 6 attempts a team a game from the defence (was 2)', () => { expect(m().defenceAttemptsPerTeam).toBeGreaterThanOrEqual(6); }, 60_000);
+  // Task 14b (section 4; sample change for ratification, bar unchanged): seeds 1-16 (7.8 on seeds 1-3 with se 1.3; 7.8 on
+  // seeds 1-16 with se 0.47).
+  it('A4: defencemen shoot: at least 6 attempts a team a game from the defence (was 2; seeds 1-16)', () => { expect(m16().defenceAttemptsPerTeam).toBeGreaterThanOrEqual(6); }, 240_000);
   it('A4: attempts are 42 to 75 a team a game and shots on goal 22 to 40 (guard rail, not the target)', () => {
     // Task 10 close-out ruling 6: attempts are read pooled over seeds 1-8 (51.0 on seeds 1-3 against 45).
     // Task 12 close-out ruling 2: the floor is 42 until Task 14 (Task 12's styles changed the test rosters: 46.6 -> 44.7
@@ -343,7 +350,9 @@ describe('A5: battling for position (Task 10)', () => {
 });
 
 describe('A5: battles the winner wins (Task 9)', () => {
-  it('A5: the battle winner comes away with it in over 60% of decided battles (was 23%)', () => { expect(m().battleWinnerCameAwayShare).toBeGreaterThan(0.60); }, 60_000);
+  // Task 14b (section 4; sample change for ratification, bar unchanged): seeds 1-16 (0.658 on seeds 1-3 with se 0.042;
+  // 0.684 on seeds 1-16 with se 0.015).
+  it('A5: the battle winner comes away with it in over 60% of decided battles (was 23%; seeds 1-16)', () => { expect(m16().battleWinnerCameAwayShare).toBeGreaterThan(0.60); }, 240_000);
   it('A5: when a battle gives the puck to someone, it is the winner in over 85% (was 4%)', () => { expect(m().battleToWinnerIsWinnerShare).toBeGreaterThan(0.85); }, 60_000);
   it('A5: fewer battles end with nobody winning: under 14 a game (was 36)', () => { expect(m().battlesNoWinnerPerGame).toBeLessThan(14); }, 60_000);
   // Task 14b (controller ruling, section 3): read on seeds 1-16 (three games hold about 55 landed hits: it read 0.278 on
