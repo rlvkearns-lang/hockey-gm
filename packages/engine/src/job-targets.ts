@@ -836,6 +836,8 @@ function takeCarrier(state: GameState, s: SkaterState, out: Want, tactics: Tacti
       out.markId = null;
       out.through = false;
       out.effort = 'sprint';
+      // (Task 14b: he stops at the post: gliding on, a man who had been riding the carrier went behind the line after him.)
+      out.slow = 'stop';
       return true;
     }
   }

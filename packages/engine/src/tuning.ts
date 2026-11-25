@@ -373,6 +373,11 @@ export const TUNING = deepFreeze({
    *   defencemen's attempts rose 1.26 times, against the brief's 1.4).
    * - patience: TUNING.patience's tactic factor by offence (rush 0.5: at 0.8 a cycle team's possessions in the zone were
    *   1.14 times a rush team's, at 0.6 1.19, against the brief's 1.2).
+   *   Task 14b (headline 6, tactics balance; 300 games a variant against an equal team on the default tactics): rush 0.5
+   *   -> 0.7 with rushShot 1.3 -> 1.1 (a rush team's attempts 80 -> 69 a team, win share 0.605 -> 0.600: the rush still
+   *   wins, see task-14b-report.md; 0.8 broke the cycle-over-rush zone-time ratio, 4.79 against 4.43 s); pointShots'
+   *   pointShot 4 -> 2.5 (attempts 72 -> 66, its ratios held); passiveF1.trapGap 0.6 -> 0.8 (a trap took 9 attempts a
+   *   game off the other team and won 0.612; 0.568 at 0.8, 0.505 at 1.0).
    * - pointIn (m): with pointShots the point men hold this much further in.
    * - joinRush: the joinRush tendency a defenceman needs for the dJoin job (rush tactic: `rush`; otherwise `other`).
    * - passiveF1 (rx, m): with a passive forecheck the first forechecker holds at the top of the circles (`hold`, on the
@@ -396,13 +401,13 @@ export const TUNING = deepFreeze({
     bend: { perHabit: 2, min: 0.2 },
     offence: {
       cycle: { lowCycle: 1.3, pointPass: 1, pointShot: 0.8, rushShot: 1, hold: 1.2 },
-      pointShots: { lowCycle: 1, pointPass: 2, pointShot: 4, rushShot: 1, hold: 1 },
-      rush: { lowCycle: 0.8, pointPass: 0.9, pointShot: 1, rushShot: 1.3, hold: 0.8 },
+      pointShots: { lowCycle: 1, pointPass: 2, pointShot: 2.5, rushShot: 1, hold: 1 },
+      rush: { lowCycle: 0.8, pointPass: 0.9, pointShot: 1, rushShot: 1.1, hold: 0.8 },
     },
-    patience: { cycle: 1, pointShots: 1, rush: 0.5 },
+    patience: { cycle: 1, pointShots: 1, rush: 0.7 },
     pointIn: 1,
     joinRush: { rush: 0.45, other: 0.6 },
-    passiveF1: { hold: 15.5, holdLy: 6, trapGap: 0.6 },
+    passiveF1: { hold: 15.5, holdLy: 6, trapGap: 0.8 },
     pressure: { gap: 1.2, second: 2.2 },
     pinch: { often: 9, sometimes: 6, rarely: 3 },
     pinchEager: { often: 5, sometimes: 0, rarely: -4 },

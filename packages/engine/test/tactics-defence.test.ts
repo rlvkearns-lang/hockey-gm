@@ -57,7 +57,9 @@ describe('tactics: two teams look different (defence, pinching)', () => {
     // Task 13 close-out ruling 2: on gameSetup(1) this read flipped with every change of play (1.256 / 1.232 before Task
     // 13, 1.000 / 1.142 after it); read as the mean over six generated team pairs (0.775 / 0.656 at Task 13's close-out).
     // Task 13 review, Minor 2: the counts pooled over the pairs, not a mean of per-pair ratios; same bar.
-    expect(pairsPooled({ defence: 'pressure' }, (m) => m.slotToPoint)).toBeGreaterThan(pairsPooled({ defence: 'collapse' }, (m) => m.slotToPoint));
+    // Task 14b (section 2): failed once in four slow runs at 12 games a variant; four games a pair (24), pooled; same bar.
+    const sp = pairsPooled({ defence: 'pressure' }, (m) => m.slotToPoint, 4), sc = pairsPooled({ defence: 'collapse' }, (m) => m.slotToPoint, 4);
+    expect(sp).toBeGreaterThan(sc);
   }, LONG);
   it('against a carrier behind the net a pressure team chases (twice as often as a collapse team, and over half the time) and a collapse team holds the front', () => {
     // Task 11 close-out ruling 2: the brief's "over 0.7" is replaced by what matters, pressure at least twice collapse and
@@ -67,7 +69,9 @@ describe('tactics: two teams look different (defence, pinching)', () => {
     // Task 13 close-out ruling 2: on gameSetup(1), seeds 1-16, collapse crept up to 0.313 with pressure 0.589 as play
     // changed (0.224 / 0.603 before Task 13); read as the mean over six generated team pairs (0.250 / 0.619 at Task 13's
     // close-out; four games a pair read 0.288 / 0.621). Bars unchanged.
-    const pr = pairsMean({ defence: 'pressure' }, (m) => m.chaseShare), co = pairsMean({ defence: 'collapse' }, (m) => m.chaseShare);
+    // Task 14b (section 2): failed once in four slow runs (0.586 against 0.679 for twice collapse) as a mean of per-pair
+    // shares over 12 games; now the counts pooled over the six pairs, four games a pair (24); same bars.
+    const pr = pairsPooled({ defence: 'pressure' }, (m) => m.chaseShare, 4), co = pairsPooled({ defence: 'collapse' }, (m) => m.chaseShare, 4);
     expect(pr).toBeGreaterThan(0.5); expect(pr).toBeGreaterThanOrEqual(2 * co); expect(co).toBeLessThan(0.3);
   }, 1_200_000);
   it('point men pinch more when told to, and only with a forward above them', () => {
