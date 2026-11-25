@@ -5,6 +5,7 @@ import { bodyRadius as bodyRadius_, movementOf as movementOf_ } from './skating'
 import type { GameEvent, GameEventOf, GameState, PlayerDef, Side, SkaterState } from './types';
 import type { Vec2 } from './vec';
 import { findSkater as findSkater_, PUCK_RADIUS as PUCK_RADIUS_, SIDES as SIDES_ } from './util';
+import { TUNING } from './tuning';
 // Local bindings of the imports used in hot paths (a call through an imported binding costs more under the test runner).
 const gameEvent = gameEvent_;
 const stopPlay = stopPlay_;
@@ -20,8 +21,8 @@ const BLUE = RINK.blueLineX;
 const GOAL = RINK.goalLineX;
 /** Attack-relative x of the end-zone faceoff dots: the line the hybrid-icing race is to. */
 const DOT_LINE = Math.abs(FACEOFF_DOTS.end[0]!.x);
-/** A typical skater (every attribute 70, 85 kg), used when refereeTick is given no player definitions. */
-const TYPICAL = { radius: 0.38, topSpeed: 8.74, accel: 9.2 };
+/** A typical skater (every attribute 70, 85 kg), used when refereeTick is given no player definitions (Task 13b: real speeds). */
+const TYPICAL = { radius: 0.38, topSpeed: TUNING.skating.topSpeed.base + 70 * TUNING.skating.topSpeed.perPoint, accel: TUNING.skating.accel.base + 70 * TUNING.skating.accel.perPoint };
 
 type Racer = { topSpeed: number; accel: number };
 

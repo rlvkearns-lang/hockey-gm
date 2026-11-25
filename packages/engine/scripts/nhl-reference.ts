@@ -30,6 +30,8 @@ const HR_2025 = 'all situations 2024-25 per Hockey-Reference as quoted by a web 
 /** Baseline box-score takeaways and giveaways per team per game (docs/superpowers/reviews/engine-scorecard-baseline.md): Task 14 keeps them within 30%. */
 const BASELINE = { takeaways: 6.32, giveaways: 5.03 };
 const OPEN = Infinity;
+/** NHL EDGE puck and player tracking (nhl.com/nhl-edge: skating speed, 20+ and 22+ mph bursts, shot speed), from memory. */
+const EDGE = 'NHL EDGE tracking (nhl.com/nhl-edge), from memory';
 
 export const NHL_REFERENCE: readonly Reference[] = [
   // ---- totals (design, Re-tune A) ----
@@ -64,5 +66,14 @@ export const NHL_REFERENCE: readonly Reference[] = [
   { key: 'behindNetPossessionsPerGame', label: 'possessions behind the net', nhl: null, band: [8, OPEN], unit: 'per game', source: 'ours: carriers use the space behind the net (the office) several times a game', season: null, verified: false },
   { key: 'passesOutFrontPerGame', label: 'passes out front from behind the net', nhl: null, band: [2, OPEN], unit: 'per game', source: 'ours: a carrier behind the net looks for the man in front', season: null, verified: false },
   { key: 'wrapAttemptsPerGame', label: 'wraparounds', nhl: null, band: [0.5, OPEN], unit: 'per game', source: 'ours: a wraparound now and then', season: null, verified: false },
+  // ---- real-world scale (Task 13b; the owner: "McDavid can skate up to, what? 24 mph?") ----
+  { key: 'fastestSkaterMph', label: 'top speed of the fastest skater in a game', nhl: 23.0, band: [22, 24.5], unit: 'mph, held 0.5 s, mean of the games', source: `${EDGE}: the fastest skater in a game is usually 22 to 24 mph; the league's fastest top out near 24 to 25 mph`, season: '2023-24', verified: false },
+  { key: 'bursts20PerGame', label: 'bursts over 20 mph', nhl: 50, band: [20, 120], unit: 'per game, both teams', source: `${EDGE}: per-player season counts of 20+ mph bursts (a few hundred for the fastest, a few dozen for most) scaled to one game of 36 skaters; a rough figure`, season: '2023-24', verified: false },
+  { key: 'bursts22PerGame', label: 'bursts over 22 mph', nhl: 6, band: [1, 20], unit: 'per game, both teams', source: `${EDGE}: 22+ mph bursts are rare (dozens a season for the fastest skaters); a rough figure`, season: '2023-24', verified: false },
+  { key: 'shotMphWrist', label: 'wrist and snap shot speed', nhl: null, band: [70, 85], unit: 'mph, mean at release', source: `ours: ${EDGE} publishes the hardest shots (95 to 105 mph) and counts over 90 mph, not means by type; a wrist or snap shot is about 70 to 90 mph`, season: null, verified: false },
+  { key: 'shotMphSlap', label: 'slapshot speed', nhl: null, band: [85, 100], unit: 'mph, mean at release', source: `ours: slapshots about 85 to 100+ mph (${EDGE}: the hardest about 100 to 105)`, season: null, verified: false },
+  { key: 'shotMphMaxSlap', label: 'hardest slapshot', nhl: 101, band: [95, 110], unit: 'mph, the largest of the set', source: `${EDGE}: hardest shot of a season about 100 to 105 mph (skills-competition records near 108)`, season: '2023-24', verified: false },
+  { key: 'shotMphOneTimer', label: 'one-timer speed', nhl: null, band: [80, 98], unit: 'mph, mean at release', source: 'ours: near slapshot speed', season: null, verified: false },
+  { key: 'shotMphBackhand', label: 'backhand speed', nhl: null, band: [45, 70], unit: 'mph, mean at release', source: 'ours: a backhand is well under a wrist shot', season: null, verified: false },
   { key: 'puckJumpsPerGame', label: 'puck jumps', nhl: null, band: [0, 0.001], unit: 'per game', source: 'ours: the puck never moves further in a tick than its speed allows (must be 0; any jump in 1,000 games reads out)', season: null, verified: false },
 ];

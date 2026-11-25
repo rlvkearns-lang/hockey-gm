@@ -43,6 +43,8 @@ export type PlayCounterKey =
   | 'ozoneCarrierTicks' | 'ozoneCarrierPressed'
   | 'breakawayBackPasses' | 'carrierDecisions' | 'carrierFlips' | 'normalDecisionPoints' | 'normalCertain' | 'normalCapBinds'
   | 'carryTicks' | 'carryWrongSide' | 'pickupSnapMax' | 'carryStepMax' | 'passGoals' | 'icings' | 'hardClears' | 'faceoffs' | 'faceoffCapped'
+  | 'fastestMph' | 'bursts20' | 'bursts22' | 'shotsWrist' | 'shotsSlap' | 'shotsOneTimer' | 'shotsBackhand'
+  | 'mphWrist' | 'mphSlap' | 'mphOneTimer' | 'mphBackhand' | 'maxMphWrist' | 'maxMphSlap' | 'maxMphOneTimer' | 'maxMphBackhand'
   | 'tips' | 'savesHeld' | 'savesSteered' | 'savesRebound' | 'saveJumpTicks' | 'goalsFromRebound' | 'goalsFromTip'
   | 'netFrontHolds' | 'netFrontHoldsLong' | 'pointShotSaves' | 'pointShotSavesNear'
   | 'protectSpells' | 'protectEngaged'
@@ -64,6 +66,8 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
   'ozoneCarrierTicks', 'ozoneCarrierPressed',
   'breakawayBackPasses', 'carrierDecisions', 'carrierFlips', 'normalDecisionPoints', 'normalCertain', 'normalCapBinds',
   'carryTicks', 'carryWrongSide', 'pickupSnapMax', 'carryStepMax', 'passGoals', 'icings', 'hardClears', 'faceoffs', 'faceoffCapped',
+  'fastestMph', 'bursts20', 'bursts22', 'shotsWrist', 'shotsSlap', 'shotsOneTimer', 'shotsBackhand',
+  'mphWrist', 'mphSlap', 'mphOneTimer', 'mphBackhand', 'maxMphWrist', 'maxMphSlap', 'maxMphOneTimer', 'maxMphBackhand',
   'tips', 'savesHeld', 'savesSteered', 'savesRebound', 'saveJumpTicks', 'goalsFromRebound', 'goalsFromTip',
   'netFrontHolds', 'netFrontHoldsLong', 'pointShotSaves', 'pointShotSavesNear',
   'protectSpells', 'protectEngaged',
@@ -71,12 +75,20 @@ export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
 ];
 
 /** Counters that hold a largest value, not a sum: games combine by taking the largest. */
-const MAX_KEYS: ReadonlySet<PlayCounterKey> = new Set<PlayCounterKey>(['pickupSnapMax', 'carryStepMax']);
+const MAX_KEYS: ReadonlySet<PlayCounterKey> = new Set<PlayCounterKey>(['pickupSnapMax', 'carryStepMax', 'fastestMph', 'maxMphWrist', 'maxMphSlap', 'maxMphOneTimer', 'maxMphBackhand']);
 /** Adds counter `k` of one game (`v`) into the running total `c`. */
 const addInto = (c: PlayCounters, k: PlayCounterKey, v: number): void => { c[k] = MAX_KEYS.has(k) ? Math.max(c[k], v) : c[k] + v; };
 
 export type PlayMeasures = {
   stationaryShare: number; glideShare: number; topSpeedShare: number; sprintRunSeconds: number; backwardShareWithPuck: number; retargetShare: number;
+  /**
+   * Real-world scale (Task 13b): the fastest skater's top speed in a game (mph, held for SUSTAIN_TICKS: a push or a hit
+   * does not count), the mean of the games' and the largest; bursts over 20 and over 22 mph a game (both teams: a skater
+   * going over the speed, again after dropping 1 mph under it); mean and largest release speed (mph) by shot type.
+   */
+  fastestSkaterMph: number; fastestSkaterMphMax: number; bursts20PerGame: number; bursts22PerGame: number;
+  shotMphWrist: number; shotMphSlap: number; shotMphOneTimer: number; shotMphBackhand: number;
+  shotMphMaxWrist: number; shotMphMaxSlap: number; shotMphMaxOneTimer: number; shotMphMaxBackhand: number;
   passCompletion: number; pointPassesPerGame: number; pointPassKeptShare: number; pointPassCompletion: number;
   attemptsPerTeam: number; defenceAttemptsPerTeam: number; reboundChancesPerGame: number;
   battleWinnerCameAwayShare: number; battleToWinnerIsWinnerShare: number; battlesNoWinnerPerGame: number; knockdownShare: number;
@@ -98,6 +110,9 @@ const GLIDE_MIN_SPEED = 2;
 /** m/s per second: a glide changes speed by less than this. */
 const GLIDE_MAX_ACCEL = 1;
 const RETARGET_M = 0.05;
+/** Real-world scale (Task 13b): metres per second to miles per hour, and how long (ticks) a speed must be held to count as his top speed. */
+const MPH = 2.23694;
+const SUSTAIN_TICKS = 30;
 const POINT_PASS_FROM_RX = RINK.blueLineX;
 const POINT_PASS_BEHIND = 3;
 /** The puck is still in while its rx is above this (the blue line less the puck's width). */
@@ -182,6 +197,7 @@ export function createObserver(setup: GameSetup): Observer {
 
   const c = emptyCounters();
   let maxJump = 0;
+  const rings = new Map<string, { v: Float64Array; i: number; n: number; b20: boolean; b22: boolean }>();
   let setupTicks = 0, prevPhase: GameState['phase'] = 'faceoffSetup';
   /** Each skater's speed and target on the tick he was last seen on the ice. */
   const prev = new Map<string, { tick: number; speed: number; tx: number; ty: number }>();
@@ -276,6 +292,14 @@ export function createObserver(setup: GameSetup): Observer {
           lastRel = { side: e.side, kind: e.detail.kind };
           if (e.detail.kind !== 'shot' || e.playerId === null) break;
           c.attempts++;
+          {
+            // Real-world scale (Task 13b): release speed by type.
+            const v = Math.hypot(e.detail.vel.x, e.detail.vel.y, e.detail.vel.z) * MPH, t = e.detail.shotType;
+            if (t === 'wrist') { c.shotsWrist++; c.mphWrist += v; c.maxMphWrist = Math.max(c.maxMphWrist, v); }
+            else if (t === 'slap') { c.shotsSlap++; c.mphSlap += v; c.maxMphSlap = Math.max(c.maxMphSlap, v); }
+            else if (t === 'oneTimer') { c.shotsOneTimer++; c.mphOneTimer += v; c.maxMphOneTimer = Math.max(c.maxMphOneTimer, v); }
+            else if (t === 'backhand') { c.shotsBackhand++; c.mphBackhand += v; c.maxMphBackhand = Math.max(c.maxMphBackhand, v); }
+          }
           if (e.detail.shotType === 'backhand') c.attemptsBackhand++;
           // Task 8b: its source (the shooter's situation on the tick before he let it go: carrierMind) and whether a checker
           // was within stick reach of him then.
@@ -374,6 +398,16 @@ export function createObserver(setup: GameSetup): Observer {
     for (const s of st.skaters) {
       if (!s.onIce) continue;
       const speed = speedOf(s.vel);
+      if (live) {
+        // Real-world scale (Task 13b): his speed held over the last SUSTAIN_TICKS, and his bursts over 20 and 22 mph.
+        let r = rings.get(s.id);
+        if (r === undefined) { r = { v: new Float64Array(SUSTAIN_TICKS), i: 0, n: 0, b20: false, b22: false }; rings.set(s.id, r); }
+        r.v[r.i] = speed; r.i = (r.i + 1) % SUSTAIN_TICKS; if (r.n < SUSTAIN_TICKS) r.n++;
+        if (r.n === SUSTAIN_TICKS) { let lo = Infinity; for (let k = 0; k < SUSTAIN_TICKS; k++) if (r.v[k]! < lo) lo = r.v[k]!; if (lo * MPH > c.fastestMph) c.fastestMph = lo * MPH; }
+        const mph = speed * MPH;
+        if (mph > 20 && !r.b20) { c.bursts20++; r.b20 = true; } else if (mph < 19) r.b20 = false;
+        if (mph > 22 && !r.b22) { c.bursts22++; r.b22 = true; } else if (mph < 21) r.b22 = false;
+      } else { const r = rings.get(s.id); if (r !== undefined) r.n = 0; }
       const p = prev.get(s.id);
       const before = p !== undefined && p.tick === tick - 1 ? p : null;
       const i = st.skaters.indexOf(s);
@@ -744,6 +778,10 @@ export function measuresOf(games: { counters: PlayCounters; maxPuckJump: number 
     puckJumpsPerGame: perGame(c.puckJumpTicks),
     maxPuckJump: games.reduce((a, g) => Math.max(a, g.maxPuckJump), 0),
     carrierPressedShare: ratio(c.ozoneCarrierPressed, c.ozoneCarrierTicks),
+    fastestSkaterMph: ratio(games.reduce((a, g) => a + (g.counters.fastestMph ?? 0), 0), n), fastestSkaterMphMax: c.fastestMph,
+    bursts20PerGame: perGame(c.bursts20), bursts22PerGame: perGame(c.bursts22),
+    shotMphWrist: ratio(c.mphWrist, c.shotsWrist), shotMphSlap: ratio(c.mphSlap, c.shotsSlap), shotMphOneTimer: ratio(c.mphOneTimer, c.shotsOneTimer), shotMphBackhand: ratio(c.mphBackhand, c.shotsBackhand),
+    shotMphMaxWrist: c.maxMphWrist, shotMphMaxSlap: c.maxMphSlap, shotMphMaxOneTimer: c.maxMphOneTimer, shotMphMaxBackhand: c.maxMphBackhand,
   };
 }
 

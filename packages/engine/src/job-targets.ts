@@ -11,7 +11,7 @@ import { composite as composite_ } from './attributes';
 import { DT } from './constants';
 import { dangerMan as dangerMan_, laneOpen as laneOpen_, passLaneWidth as passLaneWidth_, spaceAt as spaceAt_ } from './lanes';
 import { clipToNets as clipToNets_, RINK as RINK_, resolveBoards as resolveBoards_, resolveNets as resolveNets_ } from './rink';
-import { TUNING } from './tuning';
+import { SPEED_SCALE, TUNING } from './tuning';
 import { BLADE } from './blade';
 import { dcos as dcos_, dsin as dsin_ } from './dmath';
 import { ICE_DECAY as PUCK_DECAY } from './puck';
@@ -82,8 +82,8 @@ const TRAIL_IN = 10;
 const PRESS_LANE = 1.2;
 /** A chaser leads a moving puck by at most this many seconds. */
 const MAX_LEAD_SECONDS = 1.2;
-/** Speed (m/s) used to estimate how long a chaser needs to reach the puck. */
-const CHASE_SPEED = 8;
+/** Speed (m/s) used to estimate how long a chaser needs to reach the puck (Task 13b: times SPEED_SCALE, was 8). */
+const CHASE_SPEED = 8 * SPEED_SCALE;
 /** A chaser whose straight line to the puck passes within this far (m) of a net frame goes round the frame's corner. */
 const NET_ROUTE_MARGIN = 0.7;
 /** Candidate spots are kept this far (m) inside the boards and this far clear of the net frames. */

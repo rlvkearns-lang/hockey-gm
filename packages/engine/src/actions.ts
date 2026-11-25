@@ -215,7 +215,11 @@ export function goalieShade(state: GameState, attackingSide: Side): number {
 }
 
 /** Shot type effects (TUNING.shot.types): speed and spread multipliers. */
-const TYPE_SPEED: Record<ShotType, number> = { wrist: 1, slap: SHOT.types.slap.speed, oneTimer: SHOT.types.oneTimer.speed, backhand: SHOT.types.backhand.speed, wraparound: 1 };
+/** Each type's speed (m/s): base plus per point of shootingPower (Task 13b, real-world scale). */
+const TYPE_SPEED: Record<ShotType, { base: number; perPoint: number }> = {
+  wrist: SHOT.speed, slap: SHOT.types.slap.speed, oneTimer: SHOT.types.oneTimer.speed,
+  backhand: { base: SHOT.speed.base * SHOT.types.backhand.speed, perPoint: SHOT.speed.perPoint * SHOT.types.backhand.speed }, wraparound: SHOT.speed,
+};
 const TYPE_SPREAD: Record<ShotType, number> = { wrist: 1, slap: SHOT.types.slap.spread, oneTimer: SHOT.types.oneTimer.spread, backhand: SHOT.types.backhand.spread, wraparound: 1 };
 const netScratch: Vec2 = { x: 0, y: 0 };
 
@@ -287,9 +291,10 @@ export function spreadOf(me: PlayerDef, d: number, pressure: number, type: ShotT
     + pressure * SHOT.spread.pressure * pr) * ts * rb * (1 + SHOT.rushed.spread * rushed) * (1 + TUNING.engage.limits.spread * tie);
 }
 
-/** A shot's speed (m/s) by `me` of `type`, before rushing: TUNING.shot.speed for his power, times the type's; Heavy Slapshot's slapshot times heavySlapSpeed. */
+/** A shot's speed (m/s) by `me` of `type`, before rushing: the type's speed for his power (TYPE_SPEED); Heavy Slapshot's slapshot times heavySlapSpeed. */
 export function shotSpeedOf(me: PlayerDef, type: ShotType): number {
-  return (SHOT.speed.base + me.attrs.shootingPower * SHOT.speed.perPoint) * TYPE_SPEED[type] * (type === 'slap' && hasBadge(me, 'Heavy Slapshot') ? BADGE.heavySlapSpeed : 1);
+  const t = TYPE_SPEED[type];
+  return (t.base + me.attrs.shootingPower * t.perPoint) * (type === 'slap' && hasBadge(me, 'Heavy Slapshot') ? BADGE.heavySlapSpeed : 1);
 }
 
 /** Whether a shot `side` lets go now is a rebound shot: within TUNING.rebound.windowSeconds of a save on the net it attacks (Task 8). */
@@ -310,7 +315,7 @@ const rushProbe: ShotRush = { checker: null, rushed: 0, stick: 0 };
 /**
  * Shoot at the attacked net: aim at a spot inside it (more often on the side the goalie leaves open), missed by a
  * normal spread from shootingAccuracy, distance and pressure, or now and then mishit wide or high (TUNING.shot.wild).
- * Speed TUNING.shot.speed (base + per point of power), lifted so it arrives at the aimed height. Its type (`shotType`,
+ * Speed by type and power (shotSpeedOf), lifted so it arrives at the aimed height. Its type (`shotType`,
  * or shotTypeFor when not given) scales its speed and spread (TUNING.shot.types); a wraparound goes along the ice at the
  * near post at TUNING.shot.types.wraparound.speed. No event yet: the release is recorded in `state.shotInFlight`, and
  * what happens to the puck decides whether it is a shot on goal, a miss, a post or a block. Its `release` event (with its
@@ -535,8 +540,9 @@ export function executeHardClear(state: GameState, fromId: string, defs: Map<str
  * A hard clear on its way (state.hardClear), below TUNING.hardClear.knock.maxZ and at knock.minSpeed or more: each opponent (on the ice, not
  * leaving, not down, not steered by a contest) whose stick blade came within TUNING.pass.stickLane of its path this tick
  * (from `prev` to now) gets one try with stickInterceptChance, or with his body within TUNING.pass.interceptRange of it
- * one with interceptChance, each times knock.factor. On success it drops dead at his feet (knock.keep m/s on along its
- * line), his touch (no more icing watch), and a `turnover` (how `deflected`) is returned.
+ * one with interceptChance, each times knock.factor. On success it drops dead where its path came nearest his stick (or
+ * body) this tick (knock.keep m/s on along its line), his touch (no more icing watch), and a `turnover` (how
+ * `deflected`) is returned.
  */
 export function tryKnockDown(state: GameState, defs: Map<string, PlayerDef>, rng: Rng, prev: Vec2): GameEvent | null {
   const hc = state.hardClear;
@@ -549,12 +555,16 @@ export function tryKnockDown(state: GameState, defs: Map<string, PlayerDef>, rng
     if (!o.onIce || o.leaving || o.downT > 0 || o.side === hc.side || hc.tried.includes(o.id) || steeredByContest(state, o)) continue;
     const d = defs.get(o.id)!;
     const blade = bladePos(o.pos, o.facing, d.shoots, bladeScratch);
-    let chance: number;
-    if (segDistXY(blade.x, blade.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.stickLane) chance = stickInterceptChance(d, speed);
-    else if (segDistXY(o.pos.x, o.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.interceptRange) chance = interceptChance(d, speed);
+    let chance: number, at: Vec2;
+    if (segDistXY(blade.x, blade.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.stickLane) { chance = stickInterceptChance(d, speed); at = blade; }
+    else if (segDistXY(o.pos.x, o.pos.y, prev.x, prev.y, p.pos.x, p.pos.y) <= PASS.interceptRange) { chance = interceptChance(d, speed); at = o.pos; }
     else continue;
     hc.tried.push(o.id);
     if (!rng.chance(clamp(chance * HC.knock.factor, 0.03, 0.97))) continue;
+    // It drops where its path came nearest his stick (or body) this tick, not where it would have flown on to.
+    const mx = p.pos.x - prev.x, my = p.pos.y - prev.y, m2 = mx * mx + my * my;
+    const t = m2 === 0 ? 0 : clamp(((at.x - prev.x) * mx + (at.y - prev.y) * my) / m2, 0, 1);
+    p.pos.x = prev.x + mx * t; p.pos.y = prev.y + my * t;
     const k = HC.knock.keep / (speed || 1);
     p.vel.x *= k; p.vel.y *= k;
     p.z = 0; p.vz = 0;

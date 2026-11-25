@@ -22,6 +22,13 @@ function deepFreeze<T>(o: T): DeepReadonly<T> {
  * Internal and frozen: it is not part of the public surface (index.ts), and nothing can change it at run time (some
  * values are baked into module constants at import, so a change would only half take effect).
  */
+/**
+ * Task 13b (real-world scale): an average skater's top speed now over before (9.94 / 8.74 m/s at every rating 70). The
+ * constants that assumed the old speeds are scaled by it where they are speeds (m/s), accelerations or times-for-a-
+ * distance (listed where each is set).
+ */
+export const SPEED_SCALE = 9.94 / 8.74;
+
 export const TUNING = deepFreeze({
   /** The carrier's decision (brain.ts). */
   brain: {
@@ -68,8 +75,9 @@ export const TUNING = deepFreeze({
     /**
      * Outside the offensive zone with a teammate wholly in it, he carries (or backs away shielding it) no closer than this
      * (m) to the blue line. Task 8b: 2 (was 1: the puck, 0.9 m ahead of him on his blade, slid over the line as he stopped).
+     * Task 13b: times SPEED_SCALE, as his stopping distance.
      */
-    holdUpGap: 2,
+    holdUpGap: 2 * SPEED_SCALE,
     /** A teammate counts as in the zone if he will be wholly in it this many seconds from now at his speed. */
     offsideLookahead: 0.5,
     /**
@@ -103,12 +111,20 @@ export const TUNING = deepFreeze({
    * turned (as dexp(-carveLoss * turn)). backward is his backward top speed as a share of forward (per point of agility).
    */
   skating: {
-    topSpeed: { base: 7.62, perPoint: 0.016 },
-    accel: { base: 7.8, perPoint: 0.02 },
+    /**
+     * Task 13b (real-world scale, the owner's request): top speed 8.90 m/s (19.9 mph) at speed 40, 9.60 (21.5 mph) at
+     * 60, 9.94 (22.2 mph) at 70 (the mean of generated skaters), 10.29 (23.0 mph) at 80, 10.95 (24.5 mph) at 99. It was
+     * 7.62 + 0.016 per point (8.26 to 9.20 m/s, 18.5 to 20.6 mph). SPEED_SCALE (below: 9.94 / 8.74 at 70) scales what
+     * goes with it so the feel holds: accel, easeDecel and brake times SPEED_SCALE (the same time to top speed and to
+     * stop; stopping distances times SPEED_SCALE), carve times SPEED_SCALE^2 (the same turn radius at top speed).
+     * glideDecel (the ice's drag on a glide) is physical and unchanged.
+     */
+    topSpeed: { base: 7.51, perPoint: 0.03475 },
+    accel: { base: 7.8 * SPEED_SCALE, perPoint: 0.02 * SPEED_SCALE },
     glideDecel: 0.6,
-    easeDecel: 2.5,
-    brake: { base: 6, perPoint: 0.03 },
-    carve: { base: 4.5, perPoint: 0.05 },
+    easeDecel: 2.5 * SPEED_SCALE,
+    brake: { base: 6 * SPEED_SCALE, perPoint: 0.03 * SPEED_SCALE },
+    carve: { base: 4.5 * SPEED_SCALE * SPEED_SCALE, perPoint: 0.05 * SPEED_SCALE * SPEED_SCALE },
     carveLoss: 0.1,
     backward: { base: 0.6, perPoint: 0.0012 },
   },
@@ -375,8 +391,9 @@ export const TUNING = deepFreeze({
     /**
      * Builder's constants (Task 7; moved here, review Minor 5): an opponent reaches for a lane at closeSpeed (m/s); his body
      * within bodyInLane (m) of a lane ahead of the puck stands in it; he closes on a receiver at contestClose (m/s).
+     * (Task 13b: the two speeds times SPEED_SCALE.)
      */
-    closeSpeed: 4, bodyInLane: 0.3, contestClose: 1,
+    closeSpeed: 4 * SPEED_SCALE, bodyInLane: 0.3, contestClose: 1 * SPEED_SCALE,
     /** Speed (m/s): base plus per point of passing. */
     speed: { base: 13, perPoint: 0.09 },
     /** Direction error (rad, one standard deviation): a floor, per point of passing below 100, and at full pressure. */
@@ -443,8 +460,12 @@ export const TUNING = deepFreeze({
 
   /** Shots (actions.ts). */
   shot: {
-    /** Speed (m/s): base plus per point of shootingPower. */
-    speed: { base: 29, perPoint: 0.1 },
+    /**
+     * Speed (m/s) of a wrist or snap shot: base plus per point of shootingPower. Task 13b (real-world scale): 31.3 m/s
+     * (70 mph) at power 40, 35.8 (80 mph) at 70, 40.2 (90 mph) at 99; it was 29 + 0.1 per point (65 to 87 mph) for every
+     * type. Slapshots and one-timers have their own (types).
+     */
+    speed: { base: 25.3, perPoint: 0.15 },
     /** Spread at the net (m, one standard deviation): a floor, per point of accuracy below 100, per metre out, at full pressure. */
     spread: { base: 0.15, perPoint: 0.0025, perMetre: 0.006, pressure: 0.2 },
     /**
@@ -474,13 +495,16 @@ export const TUNING = deepFreeze({
     openSidePull: 0.6,
     openSideMax: 0.8,
     /**
-     * Shot types (Task 7, actions.ts executeShot): speed and spread (sigma) multipliers. A wraparound goes `speed` m/s
+     * Shot types (Task 7, actions.ts executeShot): speed (a slapshot's and a one-timer's their own, base plus per point of
+     * shootingPower; a backhand's times a wrist shot's) and spread (sigma) multipliers. A wraparound goes `speed` m/s
      * along the ice at the near post. A slapshot is taken from slapFrom m or more under slapPressure; a one-timer within
      * oneTimerTicks of taking a one-timer pass; a wraparound within wrapPost m of a post off a wrap.
      */
     types: {
-      slap: { speed: 1.12, spread: 1.15 },
-      oneTimer: { speed: 1.05, spread: 1.25 },
+      /** Task 13b: a slapshot 37.5 m/s (84 mph) at power 40, 42 (94 mph) at 70, 46.4 (104 mph) at 99; a one-timer about 1.5 m/s under it. */
+      slap: { speed: { base: 31.5, perPoint: 0.15 }, spread: 1.15 },
+      oneTimer: { speed: { base: 30, perPoint: 0.15 }, spread: 1.25 },
+      /** A backhand: `speed` times a wrist shot's. */
       backhand: { speed: 0.75, spread: 1.4 },
       wraparound: { speed: 9 },
       slapFrom: 11, slapPressure: 0.3, oneTimerTicks: 2, wrapPost: 1.2,
@@ -705,8 +729,8 @@ export const TUNING = deepFreeze({
   hit: {
     /** A skater thinks about a hit on an opponent this close (m)... */
     triggerRange: 1.8,
-    /** ...whom he is closing on faster than this (m/s)... */
-    minClosing: 7.5,
+    /** ...whom he is closing on faster than this (m/s; Task 13b: times SPEED_SCALE)... */
+    minClosing: 7.5 * SPEED_SCALE,
     /** ...who has the puck or let it go less than this long ago (s)... */
     releaseWindowSeconds: 0.3,
     /** ...and makes up his mind (one draw against hitAttemptChance) at most once per this many seconds. */
@@ -714,10 +738,11 @@ export const TUNING = deepFreeze({
     /**
      * Target speed (m/s) assumed for his side of the momentum term, and the term's scale in rating points (Task 12
      * close-out: 30 -> 50, with attrScale below; a hitter closing at minClosing or more had about 20 points on an even man
-     * from momentum alone, so any style difference put the pair over 0.75).
+     * from momentum alone, so any style difference put the pair over 0.75). Task 13b: braceSpeed and momentumScale times
+     * SPEED_SCALE (the same rating points for the same closing as a share of top speed).
      */
-    braceSpeed: 2,
-    momentumScale: 50,
+    braceSpeed: 2 * SPEED_SCALE,
+    momentumScale: 50 * SPEED_SCALE,
     /** A failed hit bounces the hitter off (down for a moment) with this chance at an even contest, scaled by 2 * (1 - his chance of landing it). */
     bounceChance: 0.1,
     hitter: { bodyChecking: 0.5, strength: 0.3, balance: 0.2 } as SkaterWeights,
@@ -800,10 +825,10 @@ export const TUNING = deepFreeze({
     maxPuckSpeed: 12,
     boardsClear: 1.2,
     /** ...that each side's first man would reach within raceWindow s of the other's, both within raceHorizon s. */
-    raceWindow: 0.4,
-    raceHorizon: 1.5,
-    /** Rating points per second of arrival-time difference. */
-    edgePerSecond: 130,
+    raceWindow: 0.4 / SPEED_SCALE,
+    raceHorizon: 1.5 / SPEED_SCALE,
+    /** Rating points per second of arrival-time difference (Task 13b: the three times scaled by SPEED_SCALE, the same distances). */
+    edgePerSecond: 130 * SPEED_SCALE,
     /** Each man gives up this much of his winning chance to a bounce off both sticks, which nobody gets (see raceChances). */
     bounceBand: 0.08,
     /** The man who won the last net-front round has this edge for the rebound. */
@@ -834,7 +859,7 @@ export const TUNING = deepFreeze({
 
   /**
    * Engagements (engagements.ts, Task 10): two opponents whose bodies come within `contact` (m, beyond their radii) battle
-   * for position, when they meet at under maxRelSpeed (m/s) one against the other (faster, they glance off or it is a hit);
+   * for position, when they meet at under maxRelSpeed (m/s; Task 13b: times SPEED_SCALE) one against the other (faster, they glance off or it is a hit);
    * coming together ties each up by startTie (so getting loose takes two draws won in a row). One draw every
    * drawSeconds: the loser's tie rises by tieUp, the winner's falls by tieDown; two wins in a
    * row take inside position. A draw is winProb of the `weights` composite difference, plus mass difference / massPerPoint,
@@ -847,7 +872,7 @@ export const TUNING = deepFreeze({
   engage: {
     contact: 0.15, drawSeconds: 0.4, slow: 0.5, massPerPoint: 4, insideEdge: 5, tieUp: 0.3, tieDown: 0.2,
     weights: { strength: 0.35, balance: 0.3, compete: 0.35 },
-    startTie: 0.3, maxRelSpeed: 3.5, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
+    startTie: 0.3, maxRelSpeed: 3.5 * SPEED_SCALE, releaseGap: 1.0, freeAt: 0.15, breakAway: 3, netRange: 6, eventSeconds: 0.3,
     limits: { receive: 0.6, spread: 1, shootValue: 0.5, tip: 0.6, reach: 0.5 },
   },
 

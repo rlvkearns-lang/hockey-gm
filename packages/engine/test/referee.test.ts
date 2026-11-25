@@ -30,7 +30,7 @@ describe('referee', () => {
     // Home LW in the neutral zone, onside, ahead of the away defencemen in the race to the dot line.
     const race = (leaving: boolean): string | undefined => {
       const st = shotFrom(-5);
-      place(st, 'home:LW', 3, 6);
+      place(st, 'home:LW', 1, 6);
       const lw = st.skaters.find((s) => s.id === 'home-LW')!;
       lw.vel = { x: 7, y: 0 }; lw.facing = 0; lw.target = { x: 28, y: 6 }; lw.leaving = leaving;
       return refereeUntilCall(st)?.type;

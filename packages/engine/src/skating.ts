@@ -1,6 +1,6 @@
 import { hasBadge } from './badges';
 import { resolveBoards as resolveBoards_ } from './rink';
-import { TUNING as TUNING_ } from './tuning';
+import { SPEED_SCALE, TUNING as TUNING_ } from './tuning';
 import { hypot2 as hypot2_ } from './vec';
 import type { PlayerDef, SkaterState, SlowMode } from './types';
 import { datan2 as datan2_, dcos as dcos_, dexp as dexp_, dsin as dsin_ } from './dmath';
@@ -41,8 +41,8 @@ const ARRIVE_SHORT = 0.3;
  * held to (a corner on his route round the net) is reached, not stopped ARRIVE_SHORT short of for good.
  */
 const ARRIVE_CREEP = 2;
-/** Below this speed (m/s) his turn is no longer limited by how hard his edges hold (he turns at turnRate). */
-const CARVE_MIN_SPEED = 1.5;
+/** Below this speed (m/s) his turn is no longer limited by how hard his edges hold (he turns at turnRate). Task 13b: times SPEED_SCALE. */
+const CARVE_MIN_SPEED = 1.5 * SPEED_SCALE;
 /** The smallest sine of the angle to his target used for the turn-reach limit (avoids dividing by zero dead ahead). */
 const MIN_REACH_SIN = 0.05;
 /** Sideways velocity shed per second (skate edges). */

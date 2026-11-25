@@ -1,7 +1,7 @@
 import { hasBadge } from '../badges';
 import { DT } from '../constants';
 import { bodyRadius, movementOf } from '../skating';
-import { TUNING } from '../tuning';
+import { SPEED_SCALE, TUNING } from '../tuning';
 import type { ContestStateOf, GameState, HitDegree, PlayerDef, SkaterState } from '../types';
 import { hypot2 } from '../vec';
 import { datan2, dexp } from '../dmath';
@@ -27,8 +27,8 @@ const THROUGH = 1.5;
 const DOWN_SECONDS: [number, number] = [0.6, 1.4];
 /** A bounced hitter goes down for this long (s). */
 const BOUNCE_DOWN_SECONDS = 0.5;
-/** Speed (m/s) a hit can leave the target with, at most. */
-const MAX_KNOCKED_SPEED = 10;
+/** Speed (m/s) a hit can leave the target with, at most (Task 13b: times SPEED_SCALE, was 10). */
+const MAX_KNOCKED_SPEED = 10 * SPEED_SCALE;
 /** A puck knocked off a hit carrier keeps this share of his velocity, plus a random push (m/s, one standard deviation). */
 const LOOSE_CARRY = 0.6;
 const LOOSE_PUSH = 1.5;

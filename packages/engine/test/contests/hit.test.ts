@@ -1,3 +1,4 @@
+import { SPEED_SCALE } from '../../src/tuning';
 import { describe, it, expect } from 'vitest';
 import { simulateGame } from '../../src/game';
 import { bounceChance, hitAttemptChance, hitChance, hitDegreeChances, staggerCap } from '../../src/contests/hit';
@@ -62,7 +63,9 @@ describe('hits', () => {
     // The rule itself, without noise. Task 12 rescaled the momentum term (scale 12 -> 30, owner steer): this strong
     // matchup at 6 m/s was about 0.83. Task 12 close-out (style parity, the owner's rule that the power forward does not
     // always win): momentumScale 50 and attrScale 0.5, so it is about 0.71.
-    expect(hitChance(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), skaterState({}), def({ balance: 62, strength: 60, weightKg: 80 }), skaterState({}), 6)).toBeCloseTo(0.7062, 4);
+    // Task 13b (real speeds): at 6 * SPEED_SCALE m/s, the same share of top speed as 6 m/s was (momentumScale and
+    // braceSpeed scale with it).
+    expect(hitChance(def({ bodyChecking: 88, strength: 90, weightKg: 104 }), skaterState({}), def({ balance: 62, strength: 60, weightKg: 80 }), skaterState({}), 6 * SPEED_SCALE)).toBeCloseTo(0.7062, 4);
   });
   it('an ordinary mismatch at ordinary speed is an edge, an extreme one at speed a big one, still short of the cap', () => {
     // (Task 12 close-out: momentumScale 50 and attrScale 0.5 for style parity: ordinary 0.58 (was 0.6-0.8), extreme 0.75

@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { len, type Vec2 } from '../src/vec';
 import { movementOf } from '../src/skating';
+import { SPEED_SCALE } from '../src/tuning';
 import { DT } from '../src/constants';
 import type { SlowMode } from '../src/types';
 import { at, backwardSpeedAfter, def, movingAt, retreatMeasure, speedAfter, stepFor } from './helpers';
 
 describe('skating', () => {
-  it('faster players reach a higher top speed', () => { expect(speedAfter(def({ speed: 95 }), 6)).toBeGreaterThan(speedAfter(def({ speed: 50 }), 6) + 0.7); });
+  // Task 13b (real speeds): after 4 s, not 6 (at 10 m/s six seconds from the end boards runs into the far ones).
+  it('faster players reach a higher top speed', () => { expect(speedAfter(def({ speed: 95 }), 4)).toBeGreaterThan(speedAfter(def({ speed: 50 }), 4) + 0.7); });
   it('a skater cannot turn on the spot at speed', () => {
     const s = movingAt(8, 0); s.target = { x: s.pos.x, y: s.pos.y + 20 }; stepFor(s, 0.5);
     expect(s.vel.x).toBeGreaterThan(3);
@@ -26,7 +28,9 @@ describe('skating', () => {
   it('squares up to the spot he faces once his travel is well off it, and says how he skates', () => {
     const s = at(0, 0); s.target = { x: -15, y: 0 }; s.faceTarget = { x: 20, y: 0 }; stepFor(s, 1.5);
     expect(s.mode).toBe('backward');
-    const c = at(0, 0); c.target = { x: 0, y: 15 }; c.faceTarget = { x: 20, y: 0 }; stepFor(c, 1.5);
+    // (Task 13b, real speeds: he gets further up in 1.5 s, so the spot he faces is further off too: 20 m up, facing a
+    // spot 30 m out rather than 15 and 20, the same angles.)
+    const c = at(0, 0); c.target = { x: 0, y: 20 }; c.faceTarget = { x: 30, y: 0 }; stepFor(c, 1.5);
     expect(c.mode).toBe('crossover'); expect(Math.cos(c.facing)).toBeGreaterThan(0.9); expect(c.vel.y).toBeGreaterThan(3);
     const f = at(0, 0); f.target = { x: 15, y: 5 }; f.faceTarget = { x: 20, y: 0 }; stepFor(f, 1);
     expect(f.mode).toBe('forward');
@@ -79,8 +83,9 @@ describe('skating', () => {
     expect(r(70)).toBeGreaterThan(4); expect(r(70)).toBeLessThan(10);
     expect(r(95)).toBeLessThan(r(45) * 0.85);
   });
-  it('backward is clearly slower than forward and under 6.6 m/s', () => {
-    expect(backwardSpeedAfter(4)).toBeLessThan(speedAfter(def({}), 4) * 0.75); expect(backwardSpeedAfter(4)).toBeLessThan(6.6);
+  // Task 13b (real speeds): 6.6 m/s times SPEED_SCALE (backward speed is a share of the forward top speed).
+  it('backward is clearly slower than forward and under 7.5 m/s', () => {
+    expect(backwardSpeedAfter(4)).toBeLessThan(speedAfter(def({}), 4) * 0.75); expect(backwardSpeedAfter(4)).toBeLessThan(6.6 * SPEED_SCALE);
   });
   it('told to stop with his target behind him, he stops and turns instead of carving round', () => {
     const runOn = (slow: SlowMode): number => { const s = movingAt(8, 0); s.target = { x: -10, y: 1 }; let far = 0; for (let t = 0; t < 90; t++) { stepFor(s, DT, fresh, { slow, through: false }); far = Math.max(far, s.pos.x); } return far; };
