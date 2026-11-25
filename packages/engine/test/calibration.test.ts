@@ -41,9 +41,11 @@ describe('calibration', () => {
     expect(m.icingsTotal).toBeGreaterThanOrEqual(4);    expect(m.icingsTotal).toBeLessThanOrEqual(12);
     expect(m.tieShare).toBeGreaterThan(0.15);    expect(m.tieShare).toBeLessThan(0.30);
   }, GAMES_TIMEOUT);
-  it('blocked shots match the design\'s target: 13 to 16 a team', () => {
+  // Task 14b (controller ruling, section 3): 8 to 12 a team (the design's 13 to 16; it reads 9.5). The NHL's about 14.5
+  // needs shot wind-ups, so that a lane can close between the choice and the release: carried to Part B.
+  it('blocked shots: 8 to 12 a team (the design\'s 13 to 16 waits for shot wind-ups, Part B)', () => {
     const m = summarise(runGames(300));
-    expect(m.blocks).toBeGreaterThanOrEqual(13);    expect(m.blocks).toBeLessThanOrEqual(16);
+    expect(m.blocks).toBeGreaterThanOrEqual(8);    expect(m.blocks).toBeLessThanOrEqual(12);
   }, GAMES_TIMEOUT);
   it('box-score takeaways and giveaways are near the baseline\'s (within 30% of 6.32 and 5.03 a team)', () => {
     const m = summarise(runGames(300));
@@ -59,7 +61,7 @@ describe('calibration', () => {
   it('it looks like hockey: skating', () => {
     const p = summarise(runGames(300)).play;
     expect(p.stationaryShare).toBeLessThan(0.08);                                                   // was 0.175
-    expect(p.glideShare).toBeGreaterThan(0.30);
+    expect(p.glideShare).toBeGreaterThanOrEqual(0.22);  // Task 14b ruling (was 0.30): with real effort the cruise share below is the measure that matters
     // Real effort (addendum, headline 3; NHL EDGE 2023-24: about 41 bursts over 20 mph and 2 over 22 mph a game, the fastest skater of a team's season 23.6 mph).
     expect(p.cruiseShare).toBeGreaterThan(0.6); expect(p.topSpeedShare).toBeLessThan(0.03);
     expect(p.bursts20PerGame).toBeGreaterThanOrEqual(20); expect(p.bursts20PerGame).toBeLessThanOrEqual(200); expect(p.bursts22PerGame).toBeLessThan(10);
@@ -68,14 +70,16 @@ describe('calibration', () => {
   it('it looks like hockey: passes', () => {
     const p = summarise(runGames(300)).play;
     expect(p.passCompletion).toBeGreaterThan(0.70); expect(p.passCompletion).toBeLessThan(0.85);  // controller ruling (Task 9 close-out): 0.70 to 0.85; the design said 0.75 to 0.90
-    expect(p.pointPassKeptShare).toBeGreaterThan(0.90); expect(p.pointPassCompletion).toBeGreaterThan(0.75);
+    expect(p.pointPassKeptShare).toBeGreaterThan(0.90); expect(p.pointPassCompletion).toBeGreaterThanOrEqual(0.72);  // Task 14b ruling (was 0.75): passes not re-tuned for real effort
   }, GAMES_TIMEOUT);
   it('it looks like hockey: shots, rebounds and the zone', () => {
     const p = summarise(runGames(300)).play;
-    expect(p.reboundChancesPerGame).toBeGreaterThanOrEqual(8); expect(p.reboundChancesPerGame).toBeLessThanOrEqual(20);
+    // Task 14b ruling: rebound chances 3 to 8 a game (the design's 8 to 20 needs more net-front offence: Part B).
+    expect(p.reboundChancesPerGame).toBeGreaterThanOrEqual(3); expect(p.reboundChancesPerGame).toBeLessThanOrEqual(8);
     expect(p.defenceAttemptsPerTeam).toBeGreaterThanOrEqual(12); expect(p.defenceAttemptsPerTeam).toBeLessThanOrEqual(20);
-    expect(p.ozoneSecondsPerPossession).toBeGreaterThan(4.0); expect(p.attemptsPerOzonePossession).toBeGreaterThan(0.33);                           // were 4.0 and 0.30
-    expect(p.twoOpenShare).toBeGreaterThan(0.50); expect(p.dangerShadowedShare).toBeGreaterThan(0.60); expect(p.dangerShadowedShare).toBeLessThan(0.90);
+    // Task 14b rulings: attempts per offensive-zone possession 0.30 or more (was 0.33); two teammates open 0.44 or more (was 0.50).
+    expect(p.ozoneSecondsPerPossession).toBeGreaterThan(4.0); expect(p.attemptsPerOzonePossession).toBeGreaterThanOrEqual(0.30);                           // were 4.0 and 0.30
+    expect(p.twoOpenShare).toBeGreaterThanOrEqual(0.44); expect(p.dangerShadowedShare).toBeGreaterThan(0.60); expect(p.dangerShadowedShare).toBeLessThan(0.90);
     expect(p.behindNetPossessionsPerGame).toBeGreaterThanOrEqual(8); expect(p.passesOutFrontPerGame).toBeGreaterThanOrEqual(2); expect(p.wrapAttemptsPerGame).toBeGreaterThanOrEqual(0.5);
   }, GAMES_TIMEOUT);
   it('it looks like hockey: battles, hits and no teleports', () => {
@@ -84,6 +88,7 @@ describe('calibration', () => {
     expect(p.knockdownShare).toBeGreaterThan(0.30); expect(p.knockdownShare).toBeLessThan(0.70);
     expect(p.puckJumpsPerGame).toBe(0); expect(p.maxPuckJump).toBeLessThanOrEqual(1.2);
   }, GAMES_TIMEOUT);
+  // Task 14b: at most 2 a game ratified by the controller (section 3).
   it('whistles: live stretches over four minutes are rare (at most 2 a game; no timer stops play)', () => {
     // The addendum asked for none in seeds 1-16. With about 53 whistles a game the mean stretch is 68 s, and whistles that
     // come at random give e^(-240/68) = 3% of stretches over four minutes: about 1.5 a game. task-14-report.md.

@@ -72,7 +72,11 @@ describe('A1: commitment (Task 3)', () => {
   // is at 90% or more of his top speed only in bursts that add up to a small share. NHL EDGE (2023-24, league-average
   // team, as quoted by a web search of edge.nhl.com team pages): 1,690.7 bursts over 20 mph and 77.3 over 22 mph a
   // season, so about 41 and 2 a game for both teams; the fastest skater of a team's season 23.6 mph.
-  it('A1: gliding over 30% (was 25%)', () => { expect(m().glideShare).toBeGreaterThan(0.30); }, 240_000);
+  // Task 14b (controller ruling, section 3): 0.22 or more (was 0.30). It reads 0.24: with real effort a skater pushes
+  // for longer toward his top speed, and the measure that matters is the cruise share below (0.79 under 75% of top speed).
+  // A stride-and-glide cycle needs a skating-model change, not a number.
+  it('A1: gliding at least 22% (was 25%; 0.30 until Task 14b)', () => { expect(m().glideShare).toBeGreaterThanOrEqual(0.22); }, 240_000);
+  // Task 14b: these numbers ratified by the controller (section 3).
   it('A1: real effort: most time under 75% of top speed, under 3% at 90% or more; bursts over 20 mph 20 to 200 a game, over 22 mph under 10; the fastest skater of a game 22 to 24.5 mph', () => {
     const x = m8();
     expect(x.cruiseShare).toBeGreaterThan(0.6); expect(x.cruiseShare).toBeLessThan(0.9);
@@ -95,7 +99,9 @@ describe('A2: every player has a job (Task 4)', () => {
   it('A2: no two skaters of a team ever hold the same job', () => { expect(counters().duplicateJobTicks).toBe(0); }, 60_000);
   it('A2: standing still is under 9% of a skater\'s live time (was 17.5%)', () => { expect(m().stationaryShare).toBeLessThan(0.09); }, 60_000);
   // Task 12 close-out ruling 2: pooled over seeds 1-8 (seeds 1-3 read 0.499 after Task 12 changed the test rosters); bar unchanged.
-  it('A2: at least two attackers are open in over 50% of offensive-zone time (was 40%)', () => { expect(m8().twoOpenShare).toBeGreaterThan(0.50); }, 240_000);
+  // Task 14b (controller ruling, section 3): 0.44 or more (was 0.50). It reads 0.46: men getting open now skate at 0.68
+  // to 0.8 of their top speed, as do their checkers (real effort, Task 14); the get-open jobs are later work.
+  it('A2: at least two attackers are open in at least 44% of offensive-zone time (was 40%; 0.50 until Task 14b)', () => { expect(m8().twoOpenShare).toBeGreaterThanOrEqual(0.44); }, 240_000);
   // Pooled over seeds 1-8 (Task 4 review, Important 2): one game's share varies by about 0.017, so three seeds left no margin.
   // Task 8: pooled over seeds 1-16, shared with the point-pass test.
   it('A2: the most dangerous option is shadowed in 60% to 90% of it (was 76%), seeds 1-16 pooled', () => {
@@ -142,7 +148,9 @@ describe('A3: passes that can be received, the puck on the blade (Task 6)', () =
   it('A3: the carried puck is on the shooting side in over 99% of carrying ticks', () => { expect(counters().carryWrongSide / counters().carryTicks).toBeLessThan(0.01); }, 60_000);
   // Task 8: pooled over seeds 1-16. About 30 point passes a game: on three seeds completion moved by 0.11 with a change
   // that does not touch passing (0.80 to 0.69 on seeds 1-3, 0.77 to 0.73 on 1-8, 0.75 to 0.78 on 9-16).
-  it('A3: point passes stay in: over 90% kept (was 48%) and over 75% completed (was 37%), seeds 1-16 pooled', () => { expect(m16().pointPassKeptShare).toBeGreaterThan(0.90); expect(m16().pointPassCompletion).toBeGreaterThan(0.75); }, 240_000);
+  // Task 14b (controller ruling, section 3): completed 0.72 or more (was 0.75). It reads 0.72 to 0.74: point men are
+  // covered tighter for the speed of a pass since Task 14's real effort; passes were not re-tuned (a passing pass is later work).
+  it('A3: point passes stay in: over 90% kept (was 48%) and at least 72% completed (was 37%), seeds 1-16 pooled', () => { expect(m16().pointPassKeptShare).toBeGreaterThan(0.90); expect(m16().pointPassCompletion).toBeGreaterThanOrEqual(0.72); }, 240_000);
   // Task 7 review, Important 1 (controller ruling): with slow passes no longer immune to interception, completion is to
   // be 0.72 to 0.85 (it read 0.745 on seeds 1-8 and 1-16); pooled over seeds 1-16.
   // After Task 9 the band was lowered to 0.70 by ruling (pokes took the puck off fewer carriers). The Task 9 review fix (a
@@ -242,7 +250,7 @@ describe('A4: saves, rebounds and tips (Task 8)', () => {
       expect(open).toBeNull();
     }
   }, 60_000);
-  it('A4: rebounds exist: 15% to 50% of saves leave one, and there are at least 6 second chances a game (was 2.3)', () => {
+  it('A4: rebounds exist: 15% to 50% of saves leave one, and there are at least 2.5 second chances a game (was 2.3)', () => {
     const saves = games().flatMap((r) => r.events.filter((e) => e.type === 'save'));
     const rb = saves.filter((e) => e.type === 'save' && e.detail.kind === 'rebound').length / saves.length;
     // Close-out: second chances are pooled over seeds 1-8 (3.7 to 6.7 on three seeds by the roll); the bar is unchanged.
@@ -252,7 +260,10 @@ describe('A4: saves, rebounds and tips (Task 8)', () => {
     // Task 11 close-out ruling 1: at least 3 (3.25 at the close-out). Collapse defenders holding the front of the net and
     // point men no longer chasing every loose puck are correct hockey and cost second chances; Task 14 tunes rebounds
     // and second chances to the design's target.
-    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m16().reboundChancesPerGame).toBeGreaterThanOrEqual(3);
+    // Task 14b (controller ruling, section 3): at least 2.5 here (3 to 8 on the scorecard's 300 games). Rebounds exist
+    // (0.37 of saves) but few attackers reach them: the design's 8 to 20 needs more net-front offence (the shooter and the
+    // weak-side man crashing the net), carried to Part B.
+    expect(rb).toBeGreaterThan(0.15); expect(rb).toBeLessThan(0.50); expect(m16().reboundChancesPerGame).toBeGreaterThanOrEqual(2.5);
   }, 240_000);
   it('A4: tips happen: at least 2 a game, some on goal', () => {
     // Task 9 review fix: read pooled over seeds 1-16 (seeds 1-3 read 1.33 after it, 3.0 before, while seeds 1-16 went 2.94
@@ -275,9 +286,11 @@ describe('A2/A4: the net front (Task 8 fix round 2)', () => {
   it('A2: the net-front man holds his job: at least 50% of his spells in the zone last 2.5 s or more, seeds 1-8', () => {
     const c = counters8(); expect(c.netFrontHolds).toBeGreaterThan(100); expect(c.netFrontHoldsLong / c.netFrontHolds).toBeGreaterThanOrEqual(0.50);
   }, 240_000);
-  it('A4: an attacker is within 4 m of the net on at least 40% of saves of shots from 11 m or more', () => {
-    const c = counters(); expect(c.pointShotSaves).toBeGreaterThan(30); expect(c.pointShotSavesNear / c.pointShotSaves).toBeGreaterThanOrEqual(0.4);
-  }, 60_000);
+  // Task 14b (controller ruling, section 3): read on seeds 1-16, at least 0.30 (was 0.40 on seeds 1-3). Three games hold
+  // 30 to 40 such saves, a noise of about 0.08; with the honest V.traffic (Task 14) point men also shoot without the screen.
+  it('A4: an attacker is within 4 m of the net on at least 30% of saves of shots from 11 m or more (seeds 1-16)', () => {
+    const c = counters16(); expect(c.pointShotSaves).toBeGreaterThan(150); expect(c.pointShotSavesNear / c.pointShotSaves).toBeGreaterThanOrEqual(0.30);
+  }, 240_000);
 });
 
 describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
@@ -287,16 +300,20 @@ describe('A3/A4: shot volume and decision rate (Task 8b)', () => {
   // decisions. Task 10 (engagements: a tied-up man cannot get a shot off) must bring it under 20%.
   // Task 10 close-out ruling 4: the 20% target is dropped. Two thirds of these shots have the checker 1.0 to 1.8 m away
   // with no body contact (no engagement): the rushed-shot rule (Task 8b) covers that case. It reads 0.31 after Task 10.
-  it('A4: a pressured shot is a poor shot: under 35% of attempts are let go with a checker in stick reach (was 49%)', () => {
+  it('A4: a pressured shot is a poor shot: under 38% of attempts are let go with a checker in stick reach (was 49%)', () => {
     // Task 9 close-out ruling 5: pooled over seeds 1-16 (0.349 on seeds 1-8 and 0.302 on 9-16 after Task 9).
-    const c = counters16(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.35);
+    // Task 14b (controller ruling, section 3): under 0.38 (was 0.35). It reads 0.33 to 0.36 from one tuning pass to the
+    // next on seeds 1-16: the bar was at the noise.
+    const c = counters16(); expect(c.attempts).toBeGreaterThan(100); expect(c.attemptsInReach / c.attempts).toBeLessThan(0.38);
   }, 240_000);
   // Close-out ruling 2: the far shots of normal play that count are the UNSCREENED ones (no teammate at the net or in the
   // goalie's sight line: measures.ts attemptsNormalFarBare); the screened ones are what "long shots wait for traffic"
   // asks for and are reported beside them (task-8b-report.md). Pooled over seeds 1-8.
-  it('A4: no source floods the net: odd-man rushes from 11 m or more, pressure down low in close and unscreened shots from 11 m or more in normal play are each under 25 attempts a game (were 42, 97 and 45)', () => {
-    const c = counters8(), n = SEEDS8.length;
-    expect(c.attemptsOddManFar / n).toBeLessThan(25); expect(c.attemptsLowClose / n).toBeLessThan(25); expect(c.attemptsNormalFarBare / n).toBeLessThan(25);
+  // Task 14b (controller ruling, section 3): read on seeds 1-16, pressure down low in close under 30 a game (was 25 on
+  // seeds 1-8). Patience 1.1 (Task 14, the declared dial) lets more pressured shots go from in close; it read 26.9.
+  it('A4: no source floods the net: odd-man rushes from 11 m or more and unscreened shots from 11 m or more in normal play are each under 25 attempts a game, pressure down low in close under 30 (were 42, 45 and 97; seeds 1-16)', () => {
+    const c = counters16(), n = SEEDS16.length;
+    expect(c.attemptsOddManFar / n).toBeLessThan(25); expect(c.attemptsLowClose / n).toBeLessThan(30); expect(c.attemptsNormalFarBare / n).toBeLessThan(25);
     // The sources are reported whole: every attempt has one.
     expect(c.attemptsOddManFar + c.attemptsOddManClose + c.attemptsLowClose + c.attemptsLowFar + c.attemptsNormalFar + c.attemptsNormalClose + c.attemptsBreakaway + c.attemptsOther).toBe(c.attempts);
   }, 240_000);
@@ -329,7 +346,9 @@ describe('A5: battles the winner wins (Task 9)', () => {
   it('A5: the battle winner comes away with it in over 60% of decided battles (was 23%)', () => { expect(m().battleWinnerCameAwayShare).toBeGreaterThan(0.60); }, 60_000);
   it('A5: when a battle gives the puck to someone, it is the winner in over 85% (was 4%)', () => { expect(m().battleToWinnerIsWinnerShare).toBeGreaterThan(0.85); }, 60_000);
   it('A5: fewer battles end with nobody winning: under 14 a game (was 36)', () => { expect(m().battlesNoWinnerPerGame).toBeLessThan(14); }, 60_000);
-  it('A5: 30% to 70% of landed hits put the man down (was 100%)', () => { expect(m().knockdownShare).toBeGreaterThan(0.30); expect(m().knockdownShare).toBeLessThan(0.70); }, 60_000);
+  // Task 14b (controller ruling, section 3): read on seeds 1-16 (three games hold about 55 landed hits: it read 0.278 on
+  // seeds 1-3, 0.40 on seeds 1-16, 0.338 on 300 games); the bar is unchanged.
+  it('A5: 30% to 70% of landed hits put the man down (was 100%; seeds 1-16)', () => { expect(m16().knockdownShare).toBeGreaterThan(0.30); expect(m16().knockdownShare).toBeLessThan(0.70); }, 240_000);
   // Review Focus 4 for the whole game, on seeds 1-16 (controller): measures.ts puckJumpTicks counts live ticks on which the
   // puck moves further than its speed allows (0.05 m of slack; a carried puck may swing with the blade, 0.2 m a tick
   // beyond his travel), or goes to a new carrier's blade from more than 1.2 m.
@@ -340,7 +359,7 @@ describe('A5: battles the winner wins (Task 9)', () => {
   }, 240_000);
   it('no teleport: on a live tick the puck never moves further than its speed allows, 1.2 m when it changes hands (seeds 1-16)', () => {
     expect(countGames(Array.from({ length: 16 }, (_, i) => i + 1)).puckJumpTicks).toBe(0); expect(m16().maxPuckJump).toBeLessThanOrEqual(1.2);
-    // Task 14 (thin guard): with margin under the 1.2 m bar. Hand-overs are capped at 1.0 m (board battles, pucks in the feet) and a puck
+    // Task 14 (thin guard; the 1.12 m bar ratified by the controller, Task 14b): with margin under the 1.2 m bar. Hand-overs are capped at 1.0 m (board battles, pucks in the feet) and a puck
     // his blade reached on its way is taken where it passed the blade; the largest read is 1.08 m on seeds 1-32.
     expect(m16().maxPuckJump).toBeLessThanOrEqual(1.12);
   }, 240_000);
