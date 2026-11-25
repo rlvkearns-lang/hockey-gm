@@ -4,6 +4,7 @@ import { createGame, restoreGame, simulateGame } from '../src/game';
 import { FACEOFF_MAX_SECONDS, FACEOFF_MIN_SECONDS, faceoffFacing, faceoffPosition, linedUp, setupFaceoff } from '../src/faceoff';
 import { FACEOFF_DOTS, RINK } from '../src/rink';
 import { wrapAngle } from '../src/skating';
+import { bladePos } from '../src/blade';
 import type { GameEvent, GameSetup, GameState, Position, Side } from '../src/types';
 import type { Vec2 } from '../src/vec';
 import { gameSetup } from './helpers';
@@ -175,6 +176,43 @@ describe('faceoff line-up', () => {
     const resumed = restoreGame(gameSetup(seed), snap.state, snap.events);
     while (!resumed.done) resumed.step();
     expect(resumed.result()).toEqual(straight);
+  }, GAME_TIMEOUT * 2);
+});
+
+// Controller's carried requirement (from Task 7): a won draw is a real moving puck, pulled back from the dot; whoever
+// takes it first takes it on his blade (within 1.2 m of it, the whole-game hand-over bar), never from metres away.
+describe('a won draw', () => {
+  it('the puck slides back from the dot by its speed and the first man to take it has it within 1.2 m of his blade (seeds 1-2)', () => {
+    let draws = 0, worstMove = 0, worstTake = 0;
+    for (const seed of [1, 2]) {
+      const setup = gameSetup(seed);
+      const hand = new Map([...setup.home.players, ...setup.away.players].map((p) => [p.id, p.shoots]));
+      const g = createGame(setup);
+      let following = false, prev = { x: 0, y: 0, speed: 0 };
+      while (!g.done) {
+        const was = g.state.phase;
+        g.step();
+        const s = g.state, p = s.puck;
+        if (was === 'faceoffSetup' && s.phase === 'live') {
+          draws++; following = true;
+          expect(Math.hypot(p.pos.x - s.faceoffSpot.x, p.pos.y - s.faceoffSpot.y)).toBeLessThan(1e-9);
+        } else if (following) {
+          if (s.phase !== 'live' || s.contests.length > 0) { following = false; continue; }
+          const move = Math.hypot(p.pos.x - prev.x, p.pos.y - prev.y) - prev.speed * DT;
+          if (s.carrierId === null) worstMove = Math.max(worstMove, move);
+          else {
+            const c = s.skaters.find((k) => k.id === s.carrierId)!;
+            const b = bladePos(c.pos, c.facing, hand.get(c.id)!, { x: 0, y: 0 });
+            worstTake = Math.max(worstTake, Math.max(0, move) + Math.hypot(b.x - p.pos.x, b.y - p.pos.y));
+            following = false;
+          }
+        }
+        prev = { x: p.pos.x, y: p.pos.y, speed: Math.hypot(p.vel.x, p.vel.y) };
+      }
+    }
+    expect(draws).toBeGreaterThan(60);
+    expect(worstMove).toBeLessThan(0.05);
+    expect(worstTake).toBeLessThan(1.2);
   }, GAME_TIMEOUT * 2);
 });
 
