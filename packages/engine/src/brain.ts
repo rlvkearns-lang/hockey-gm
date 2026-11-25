@@ -103,15 +103,18 @@ function pressureArrives(state: GameState, s: SkaterState, plan: CarrierPlan): b
   return true;
 }
 
+/** Whether his carry has reached its target (within decide.arrive m). */
+function arrived(plan: CarrierPlan, s: SkaterState): boolean {
+  return plan.kind === 'carry' && plan.to !== null && hypot2(plan.to.x - s.pos.x, plan.to.y - s.pos.y) <= D.arrive;
+}
+
 /** His plan's minimum hold (ticks): longer in the zone he attacks, shorter under pressure. */
 function holdTicks(sit: Situation): number {
   return Math.round(((sit.zone === 'O' ? D.holdZone : D.hold) * (1 - D.holdPressure * sit.pressure)) / DT);
 }
 
-/** The decision point the carrier `s`, carrying out `plan`, has reached, or null (brainTick). */
-function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, plan: CarrierPlan, lookTicks: number, tactics?: Tactics): CarrierPlan['why'] | null {
-  // (Always run: it keeps the checker on him up to date.)
-  const pressure = pressureArrives(state, s, plan);
+/** The decision point the carrier `s`, carrying out `plan`, has reached, or null (brainTick). `pressure`: a checker arrived on him this tick (pressureArrives). */
+function decisionPoint(state: GameState, s: SkaterState, me: PlayerDef, defs: Map<string, PlayerDef>, plan: CarrierPlan, pressure: boolean, lookTicks: number, tactics?: Tactics): CarrierPlan['why'] | null {
   const sit = readSituationInto(state, s, decideScratch);
   if (plan.read === undefined || (readKey(sit) !== plan.read && state.tick - plan.tick >= READ_GAP_TICKS)) return 'read';
   // His plan has become impossible: carrying on would put his team offside.
@@ -198,13 +201,18 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
   if (state.carrierId === null) { state.carrierPlan = null; return; }
   const prev = state.carrierPlan;
   const fresh = prev === null || prev.id !== state.carrierId;
-  if (!fresh && state.tick % lookTicks !== 0) return;
   const s = findSkater(state, state.carrierId);
   if (!s || !s.onIce || s.downT > 0) return;
+  // A checker arriving and his carry reaching its target are events: he notices them the tick they happen. Only the
+  // rest (the read of the play changing, a hold running out, something better) waits for his next look (Task 14b: a
+  // checker or a target he noticed up to one look late made how often he looks decide what he did: at 12 ticks a look,
+  // 17% fewer shots off an arrival and three times the hard clears off pressure).
+  const pressure = !fresh && pressureArrives(state, s, prev);
+  if (!fresh && state.tick % lookTicks !== 0 && !pressure && !arrived(prev, s)) return;
   // Shielding it in a board battle (Task 9) he holds it, keeping his plan, until the battle decides what happens to it:
   // no decision (options.ts listOptions offers only protect then).
   if (!fresh && shieldingInBattle(state, s)) return;
-  const why = fresh ? 'gain' : decisionPoint(state, s, defs.get(s.id)!, defs, prev, lookTicks, tactics?.[s.side]);
+  const why = fresh ? 'gain' : decisionPoint(state, s, defs.get(s.id)!, defs, prev, pressure, lookTicks, tactics?.[s.side]);
   if (why === null) return;
   const busy = steeredByContest(state, s);
   const me = defs.get(s.id)!;

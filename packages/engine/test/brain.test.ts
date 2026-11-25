@@ -69,7 +69,7 @@ describe('decision points do not flicker (Task 8b)', () => {
    * The home LW carries low on the wall for `seconds`, the puck put back on his stick whenever he lets it go (his plan
    * is kept), with the away LD `far` (6 m off) or on him (1.4 m off) as `where(t)` says: each decision's trigger.
    */
-  function triggers(seconds: number, where: (t: number) => 'far' | 'on'): string[] {
+  function triggers(seconds: number, where: (t: number) => 'far' | 'on', lookTicks = 6, at: number[] = []): string[] {
     const st = stateWith({ carrier: 'home', puckX: 22, puckY: 9, carrierSlot: 'LW' });
     place(st, 'home:C', 24.5, 0.5); place(st, 'home:RW', 18, -9); place(st, 'home:LD', 10, 7); place(st, 'home:RD', 10, -7);
     place(st, 'away:RD', 24.5, -2); place(st, 'away:C', 18, 0); place(st, 'away:LW', 12, 4); place(st, 'away:RW', 12, -5);
@@ -82,9 +82,9 @@ describe('decision points do not flicker (Task 8b)', () => {
       lw.pos = { ...home }; lw.vel = { x: 0, y: 0 }; st.puck.pos = { ...puck }; st.puck.vel = { x: 0, y: 0 };
       ld.pos = where(t / 30) === 'on' ? { x: home.x + 1.0, y: home.y - 1.0 } : { x: home.x - 1, y: home.y - 6 };
       st.carrierId = 'home-LW'; st.pendingPass = null; st.shotInFlight = null; st.pickupBlock = null; st.phase = 'live';
-      brainTick(st, defs, rng, []);
+      brainTick(st, defs, rng, [], lookTicks);
       const plan = st.carrierPlan;
-      if (plan !== null && plan.tick === st.tick) why.push(plan.why ?? '?');
+      if (plan !== null && plan.tick === st.tick) { why.push(plan.why ?? '?'); at.push(t); }
       // What he let go comes back to him; his plan stays his.
       if (st.carrierId === null && plan !== null) { st.carrierId = 'home-LW'; st.carrierPlan = plan; }
     }
@@ -102,5 +102,39 @@ describe('decision points do not flicker (Task 8b)', () => {
     expect(triggers(4, (t) => (t >= 1 && t < 2 ? 'on' : 'far')).filter((w) => w === 'pressure').length).toBe(1);
     // In and out every 0.2 s for 3 s: the cooldown lets through at most one arrival a second and a half.
     expect(triggers(4, (t) => (t >= 1 && Math.floor(t * 5) % 2 === 0 ? 'on' : 'far')).filter((w) => w === 'pressure').length).toBeLessThanOrEqual(2);
+  });
+  describe('events are noticed when they happen, not at his next look (Task 14b)', () => {
+    // The look-interval check (look-interval.test.ts) read 0.148: at 12 ticks a look a checker or a carry's target was
+    // noticed up to 0.4 s late, so how often he looked decided how often he was caught or arrived (17% fewer shots off an
+    // arrival). A checker arriving and a carry reaching its target are decided on the tick they happen.
+    it('a checker who arrives between two looks is a pressure decision that same tick, at any look interval', () => {
+      for (const lookTicks of [6, 12]) {
+        const at: number[] = [];
+        // The checker arrives at tick 37 of the loop (1.23 s): no multiple of 6 or 12 ticks.
+        const why = triggers(2, (t) => (t >= 37 / 30 ? 'on' : 'far'), lookTicks, at);
+        const i = why.indexOf('pressure');
+        expect(i).toBeGreaterThanOrEqual(0);
+        expect(at[i]).toBe(37);
+      }
+    });
+    it('a carry that reaches its target between two looks is an arrival decision that same tick', () => {
+      for (const lookTicks of [6, 12]) {
+        const st = stateWith({ carrier: 'home', puckX: -10, puckY: 5, carrierSlot: 'C' });
+        const rng = createRng(3);
+        st.tick = 120;
+        brainTick(st, defs, rng, [], lookTicks); // his first plan (a gain); whatever he did, he has it again
+      st.carrierId = 'home-C'; st.pendingPass = null; st.shotInFlight = null; st.pickupBlock = null; st.phase = 'live';
+        const plan = st.carrierPlan!;
+        const c = skater(st, 'home', 'C');
+        plan.kind = 'carry'; plan.lane = 'middle'; plan.until = st.tick + 300; plan.looked = 999;
+        plan.to = { x: c.pos.x + 3, y: c.pos.y };
+        st.tick = 121; brainTick(st, defs, rng, [], lookTicks);
+        expect(st.carrierPlan!.tick).toBe(120); // not there yet, not a look: nothing
+        plan.to = { x: c.pos.x + 1, y: c.pos.y };
+        st.tick = 125; brainTick(st, defs, rng, [], lookTicks);
+        expect(st.carrierPlan!.tick).toBe(125);
+        expect(st.carrierPlan!.why).toBe('arrive');
+      }
+    });
   });
 });
