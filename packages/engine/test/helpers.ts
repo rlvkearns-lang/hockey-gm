@@ -563,7 +563,9 @@ export function afterIcingBy(side: Side): GameState {
     while (!g.done) {
       g.step();
       const icing = g.drainEvents().find((e) => e.type === 'icing' && e.side === side);
-      if (!icing || g.state.skaters.some((s) => s.leaving)) continue;
+      // (Task 14b: and no change under way: one already under way finishes before the drop (bench.ts finishChanges), so a
+      // team caught with four men on at the icing filled its fifth spot, which read as a change.)
+      if (!icing || g.state.skaters.some((s) => s.leaving) || (['home', 'away'] as const).some((t) => g.state.bench[t].forwards.changing || g.state.bench[t].defence.changing)) continue;
       for (const t of ['home', 'away'] as const) for (const u of ['forwards', 'defence'] as const) g.state.bench[t][u].shiftStart -= 1000;
       gamesByState.set(g.state, g);
       return g.state;

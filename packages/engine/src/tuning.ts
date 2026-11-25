@@ -373,9 +373,10 @@ export const TUNING = deepFreeze({
    *   defencemen's attempts rose 1.26 times, against the brief's 1.4).
    * - patience: TUNING.patience's tactic factor by offence (rush 0.5: at 0.8 a cycle team's possessions in the zone were
    *   1.14 times a rush team's, at 0.6 1.19, against the brief's 1.2).
-   *   Task 14b (headline 6, tactics balance; 300 games a variant against an equal team on the default tactics): rush 0.5
-   *   -> 0.7 with rushShot 1.3 -> 1.1 (a rush team's attempts 80 -> 69 a team, win share 0.605 -> 0.600: the rush still
-   *   wins, see task-14b-report.md; 0.8 broke the cycle-over-rush zone-time ratio, 4.79 against 4.43 s); pointShots'
+   *   Task 14b (headline 6, tactics balance; 300 games a variant against an equal team on the default tactics): rushShot
+   *   1.3 -> 1.1. The rush's patience stays 0.5: 0.7 brought its attempts from 80 to 69 a team but its zone time is then
+   *   not 1.2 times shorter than a cycle team's (1.12 to 1.14 over six team pairs and on gameSetup(1)), the Task 11 ratio
+   *   that says the tactic plays differently; see task-14b-report.md; pointShots'
    *   pointShot 4 -> 3 (attempts 72 -> 66 at 2.5; 3 keeps its defencemen's-attempts ratio, 1.4x, after the
    *   interception change); passiveF1.trapGap 0.6 -> 0.8 (a trap took 9 attempts a
    *   game off the other team and won 0.612; 0.568 at 0.8, 0.505 at 1.0).
@@ -405,7 +406,7 @@ export const TUNING = deepFreeze({
       pointShots: { lowCycle: 1, pointPass: 2, pointShot: 3, rushShot: 1, hold: 1 },
       rush: { lowCycle: 0.8, pointPass: 0.9, pointShot: 1, rushShot: 1.1, hold: 0.8 },
     },
-    patience: { cycle: 1, pointShots: 1, rush: 0.7 },
+    patience: { cycle: 1, pointShots: 1, rush: 0.5 },
     pointIn: 1,
     joinRush: { rush: 0.45, other: 0.6 },
     passiveF1: { hold: 15.5, holdLy: 6, trapGap: 0.8 },

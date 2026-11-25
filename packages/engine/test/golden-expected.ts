@@ -23,14 +23,14 @@ export const GOLDEN_EXPECTED: Record<number, Golden> = {
       "1:44074fdf942f31e4",
       "10:6e76f789c8034c15",
       "100:54e163994632da86",
-      "1000:d5f221d1b1b9363c",
-      "10000:95a0b5cdf92a90ec",
-      "50000:7f8c178b05a41599",
-      "100000:c2fd0a1ce8ae9bac"
+      "1000:a7a37671c940e909",
+      "10000:fdea8d70230f02c7",
+      "50000:da058b80a8665eb5",
+      "100000:8398f334bfe6f0fd"
     ],
-    "final": "256588b8358ec0e8",
-    "score": "6-0",
-    "events": 6308
+    "final": "848b7aad654fb811",
+    "score": "3-1",
+    "events": 6010
   },
   "123456": {
     "roster": "3958e1574a710fbc",
