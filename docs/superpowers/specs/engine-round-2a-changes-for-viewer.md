@@ -119,6 +119,10 @@ Record (box score): `PlayerLine` and `TeamLine` gain `attempts`, `missedShots`, 
   a goalie.
 - A hard puck into the boards comes off them slower; a puck out of play lies on the ice at the boards where it left
   for the 1.5 s stoppage.
+- Task 14b: a shot's `release.detail.vel` is at most 48.2 m/s (107.8 mph) in three dimensions, lift included (it was
+  along the ice). `styleOf`'s secondary style (and so the label) is anchored on the habits a player was built with and
+  changes only past a margin: some generated players read a different or no secondary. Races for a puck lying inside a
+  net frame run out instead of handing it over (no 1.5 m puck jump there).
 - Generated rosters are different from before in every game (styles, badges, catching hand, tactics), so every
   sample-dependent number and picture hash changes.
 
