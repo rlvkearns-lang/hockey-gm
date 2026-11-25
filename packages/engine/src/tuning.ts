@@ -342,7 +342,9 @@ export const TUNING = deepFreeze({
    * by itself no longer clears a possession valued at patience times the slot look; the screen being set is what he
    * was waiting for.
    */
-  patience: { base: 1.1, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5, pointTraffic: 0.35 }, max: 2 },
+  // Task 14b: base 1.1 -> 1.05 (1,000 games: attempts 55.5 -> 57.2 a team, against 55 to 62; read on 300 games they sat
+  // at the band's floor by less than their standard error, 0.75).
+  patience: { base: 1.05, perShoot: 0.8, look: 4, setUp: 3, situation: { setUp: 1, rush: 1, alone: 0.5, pointTraffic: 0.35 }, max: 2 },
 
   /**
    * Team tactics (tactics.ts, Task 11). Every factor a tactic applies is here; tactics shade option values and jobs and
@@ -447,7 +449,9 @@ export const TUNING = deepFreeze({
     /** An opponent this close (m) to a pass's path gets his one chance to intercept it. */
     interceptRange: 0.9,
     /** Interception chance: base + perStick * stickChecking + perPositioning * defensivePositioning... */
-    intercept: { base: 0.206, perStick: 0.002, perPositioning: 0.0012 },
+    // Task 14b: base 0.206 -> 0.18 (pass completion 0.702 -> 0.711 on 1,000 games and 0.700 -> 0.724 on seeds 1-16, against
+    // the 0.70 floor; the valuation reads the same interceptChance).
+    intercept: { base: 0.18, perStick: 0.002, perPositioning: 0.0012 },
     /** ...falling linearly from full at interceptSpeed[0] m/s to half at interceptSpeed[1] and above, then clamped to [0.03, 0.97]. */
     interceptSpeed: [12, 22] as [number, number],
     /** Below interceptSpeed[0] the chance rises linearly to slowFactor times as much for a dead puck (Task 7 review). */
@@ -670,7 +674,7 @@ export const TUNING = deepFreeze({
      * counted), plus the goalie-skill term, less the penalties. Clamped to [0.03, 0.97].
      */
     save: {
-      base: 2.36,
+      base: 2.335, // Task 14b: 2.36 -> 2.335 (1,000 games: save % .9198 -> .9179 with patience 1.05, against .915 to .920)
       perReactionSecond: 1.75,
       /**
        * Goalie skill: per point below 70 (perPoint) or above it (perPointAbove) near 70, flattening as
