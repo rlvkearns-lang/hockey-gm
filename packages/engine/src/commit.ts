@@ -123,10 +123,14 @@ export type Want = { job: Job; pos: Vec2; face: Vec2 | null; follow: SkaterPlan[
 /** Jobs that may sprint on empty legs: the puck is at stake. */
 const ALWAYS_SPRINT: ReadonlySet<Job> = new Set<Job>(['chase', 'receive', 'f1']);
 
+/** Task 14: the jobs skated flat out when they sprint (caught offside, he gets back as fast as he can); every other sprint is hard skating (TUNING.effort.sprint). */
+const ALL_OUT: ReadonlySet<Job> = new Set<Job>(['tagUp']);
+
 /** speedCap for an effort and energy: TUNING.effort.glide / skate / sprint; a sprint needs energy >= sprintMinEnergy unless the job is chase, receive or f1. */
 export function speedFor(effort: Effort, job: Job, energy: number): number {
   if (effort === 'glide') return E.glide;
   if (effort === 'skate') return E.skate;
+  if (ALL_OUT.has(job)) return E.allOut;
   return energy >= E.sprintMinEnergy || ALWAYS_SPRINT.has(job) ? E.sprint : E.skate;
 }
 

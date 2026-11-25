@@ -256,7 +256,7 @@ function continueChange(state: GameState, setup: GameSetup, side: Side, unit: Un
       s.target.x = door.x;
       s.target.y = door.y;
       s.faceTarget = null;
-      s.speedCap = 1;
+      s.speedCap = TUNING.effort.sprint; // Task 14: he skates hard to the door, not flat out (it was 1)
       busy = true;
     }
   }
@@ -307,7 +307,7 @@ function stepOn(state: GameState, on: SkaterState, slot: Position, door: Vec2, n
   on.facing = Math.PI / 2;
   on.target = state.phase === 'live' ? { x: door.x, y: door.y } : faceoffPosition(state.faceoffSpot, slot, state.attackDir[on.side]);
   on.faceTarget = null;
-  on.speedCap = state.phase === 'live' ? 1 : 0.8;
+  on.speedCap = TUNING.effort.sprint;
   on.downT = 0;
   on.contestId = null;
   on.shiftStart = now;

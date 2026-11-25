@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { TUNING } from '../src/tuning';
 import { assignJobs, phaseFor, sitBack } from '../src/team-play';
 import { DT } from '../src/constants';
 import { resolveNets } from '../src/rink';
@@ -58,7 +59,7 @@ describe('team play', () => {
   it('effort by need: a skater far from his spot sprints to it, one close to it glides', () => {
     const st = stateWith({ carrier: 'home', puckX: 20 }); const d = skater(st, 'home', 'LD');
     d.pos = { x: -10, y: 8 }; assignJobs(st, defs, tactics);
-    const i = st.skaters.indexOf(d); expect(st.plans[i]!.effort).toBe('sprint'); expect(d.speedCap).toBe(1);
+    const i = st.skaters.indexOf(d); expect(st.plans[i]!.effort).toBe('sprint'); expect(d.speedCap).toBe(TUNING.effort.sprint); // Task 14: a sprint is hard skating, not flat out
     d.pos = { x: d.target.x - 1, y: d.target.y }; st.tick++; assignJobs(st, defs, tactics);
     expect(st.plans[i]!.effort).toBe('glide'); expect(d.speedCap).toBeLessThan(0.6);
   });

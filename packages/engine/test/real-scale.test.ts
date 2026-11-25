@@ -18,7 +18,7 @@ describe('real-world scale (Task 13b)', () => {
     expect(top(70)).toBeGreaterThanOrEqual(21.5); expect(top(70)).toBeLessThanOrEqual(22.5);
     expect(top(99)).toBeGreaterThan(24.2); expect(top(99)).toBeLessThan(24.8);
   });
-  it('time to top speed and turn radius at top speed are what they were (accel and carve scale with it)', () => {
+  it('acceleration from rest and turn radius at top speed are what they were (accel and carve scale with it; Task 14: the push fades toward top speed, skating.test.ts)', () => {
     const m = movementOf(def({}), 1);
     expect(m.topSpeed / m.accel).toBeGreaterThan(0.85); expect(m.topSpeed / m.accel).toBeLessThan(1.0);
     expect((m.topSpeed * m.topSpeed) / m.carve).toBeGreaterThan(9); expect((m.topSpeed * m.topSpeed) / m.carve).toBeLessThan(10);

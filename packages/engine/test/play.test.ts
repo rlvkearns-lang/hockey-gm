@@ -66,9 +66,21 @@ describe('guard rails', () => {
 
 describe('A1: commitment (Task 3)', () => {
   it('A1: targets are held: under 10% of spot ticks see the target move (was 39%)', () => { expect(m().retargetShare).toBeLessThan(0.10); }, 60_000);
-  it('A1: more gliding and more top speed than before: glide over 30% (was 25%), top speed over 17% (was 14%), sprints over 1.2 s (was 0.8)', () => {
-    // Close-out ruling 5: the sprint length is pooled over seeds 1-8 (1.198 s on three seeds was noise); the bar is unchanged.
-    expect(m().glideShare).toBeGreaterThan(0.30); expect(m().topSpeedShare).toBeGreaterThan(0.17); expect(m8().sprintRunSeconds).toBeGreaterThan(1.1); // controller ruling after Task 10: play is more stop-and-start with engagements (1.136 s; 1.211 before them)
+  // Task 14 (controller ruling, addendum headline 3; NHL tracking wins over the earlier bars "top speed share over 0.17"
+  // and "sprint run over 1.1 s", which were set to make skaters commit before real speeds existed). Real effort: a
+  // skater spends most live time gliding or cruising (under 75% of his own top speed), skates hard for a part of it, and
+  // is at 90% or more of his top speed only in bursts that add up to a small share. NHL EDGE (2023-24, league-average
+  // team, as quoted by a web search of edge.nhl.com team pages): 1,690.7 bursts over 20 mph and 77.3 over 22 mph a
+  // season, so about 41 and 2 a game for both teams; the fastest skater of a team's season 23.6 mph.
+  it('A1: gliding over 30% (was 25%)', () => { expect(m().glideShare).toBeGreaterThan(0.30); }, 240_000);
+  it('A1: real effort: most time under 75% of top speed, under 3% at 90% or more; bursts over 20 mph 20 to 200 a game, over 22 mph under 10; the fastest skater of a game 22 to 24.5 mph', () => {
+    const x = m8();
+    expect(x.cruiseShare).toBeGreaterThan(0.6); expect(x.cruiseShare).toBeLessThan(0.9);
+    expect(x.topSpeedShare).toBeLessThan(0.03); expect(x.topSpeedShare).toBeGreaterThan(0);
+    expect(x.bursts20PerGame).toBeGreaterThanOrEqual(20); expect(x.bursts20PerGame).toBeLessThanOrEqual(200);
+    expect(x.bursts22PerGame).toBeLessThan(10);
+    expect(x.fastestSkaterMph).toBeGreaterThanOrEqual(22); expect(x.fastestSkaterMph).toBeLessThanOrEqual(24.5);
+    expect(x.fastestSkaterMphMax).toBeLessThanOrEqual(25.3); // nobody on his feet above the fastest top speed there is (a 99 Burner: 25.2 mph)
   }, 240_000);
   it('A1: skaters never overlap a goalie, and a race win never moves the puck to the winner', () => { expect(counters().goalieOverlapTicks).toBe(0); expect(counters().raceJumpTicks).toBe(0); }, 60_000);
   it('A1: players hold up at the blue line: under 10 offsides a game on seeds 1, 2, 3 and 8 (12 to 18 after Task 2, 7.75 after Task 5)', () => {

@@ -157,7 +157,9 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number, drive: Drive
 
     const along = s.vel.x * fx + s.vel.y * fy;
     const latX = s.vel.x - fx * along, latY = s.vel.y - fy * along;
-    const step = m.accel * dt;
+    // Task 14 (real effort): his push falls off as he nears his top speed (the force-velocity curve of a skating
+    // stride): all of m.accel from rest, 1 - accelFade of it at his top speed. Quick off the mark, seconds to the top.
+    const step = m.accel * dt * Math.max(0, 1 - (S.accelFade * speed) / m.topSpeed);
     const cap = Math.max(0, Math.min(1, s.speedCap));
     if (dt !== gripDt) { gripDt = dt; gripFactor = dexp(-EDGE_GRIP * dt); }
     const grip = gripFactor;
@@ -205,6 +207,14 @@ export function stepSkater(s: SkaterState, m: Movement, dt: number, drive: Drive
       s.vel.x = fx * newAlong - fy * newLat;
       s.vel.y = fy * newAlong + fx * newLat;
       s.mode = hasGoal && Math.abs(wrapAngle(travel - s.facing)) > BACKWARD_FROM ? 'backward' : 'crossover';
+    }
+    // Task 14: on his feet nothing holds him above his own top speed. What a shove or a slide across his blades adds
+    // beyond it his edges shed at his braking rate (it was added on top: up to 1.27 times his top speed).
+    const now = hypot2(s.vel.x, s.vel.y);
+    if (now > m.topSpeed) {
+      const k = Math.max(m.topSpeed, now - m.brake * dt) / now;
+      s.vel.x *= k;
+      s.vel.y *= k;
     }
   }
 

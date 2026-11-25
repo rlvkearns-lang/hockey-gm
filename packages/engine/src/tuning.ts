@@ -52,6 +52,7 @@ export const TUNING = deepFreeze({
     /** Calm (scales the shot's chance): 1 - pressure * (base - perPoise * poise). */
     calm: { base: 0.555, perPoise: 0.0015 },
     /** Speed cap while carrying: base + perPoint * puckHandling; in the zone he attacks (no breakaway) times inZone. */
+    /** Task 14: a share of his effort: TUNING.effort.sprint (hard skating), or allOut on a breakaway or an odd-man rush. */
     carrySpeed: { base: 0.86, perPoint: 0.001, inZone: 0.75 },
     /** A shot's chance is scaled by openNetWeight[0] with the goalie square, up to the sum of both with him shaded openNetShade m off. */
     openNetWeight: [0.85, 0.5] as [number, number],
@@ -124,6 +125,14 @@ export const TUNING = deepFreeze({
      */
     topSpeed: { base: 7.51, perPoint: 0.03475 },
     accel: { base: 7.8 * SPEED_SCALE, perPoint: 0.02 * SPEED_SCALE },
+    /**
+     * Task 14 (real effort; the addendum's headline 3): the share of his acceleration gone at his top speed. His push is
+     * accel * (1 - accelFade * speed / top speed): an all-70 skater is at half his top speed in 0.7 s, at 90% after about
+     * 2.3 s and 15 m of straight ice, at 99% after 4.5 s. Before, acceleration was constant (top speed in 0.95 s), which
+     * is why skaters spent a quarter of their time at 90% of top speed or more (6,850 bursts over 20 mph a game against
+     * an NHL game's few dozen).
+     */
+    accelFade: 0.95,
     glideDecel: 0.6,
     easeDecel: 2.5 * SPEED_SCALE,
     brake: { base: 6 * SPEED_SCALE, perPoint: 0.03 * SPEED_SCALE },
@@ -143,7 +152,14 @@ export const TUNING = deepFreeze({
    * Effort (commit.ts): the share of top speed each effort wants. A positional job sprints to a spot more than
    * sprintFrom (m) away and glides within glideWithin, else skates. Below sprintMinEnergy only the puck jobs sprint.
    */
-  effort: { glide: 0.55, skate: 0.8, sprint: 1, sprintFrom: 8, glideWithin: 3, sprintMinEnergy: 0.2 },
+  /**
+   * Task 14 (real effort; NHL EDGE: a team's skaters pass 20 mph about 20 times a game and 22 mph about once, so a
+   * game is played well under top speed): glide 0.5, skate 0.68 (cruising), sprint 0.8 (skating hard: 17.8 mph for
+   * the mean skater), allOut 1 where a stride decides it: inside a race for a loose puck or a hit (the contests set
+   * it), getting back onside (commit.ts ALL_OUT) and a carrier on a breakaway or an odd-man rush (brain.ts). They were
+   * 0.55 / 0.8 / 1, with every cover and puck job at 1: skaters spent a quarter of their time at 90% of top speed or more.
+   */
+  effort: { glide: 0.5, skate: 0.68, sprint: 0.8, allOut: 1, sprintFrom: 8, glideWithin: 3, sprintMinEnergy: 0.2 },
   /**
    * Jobs (jobs.ts): a man holding a job is keep (m) nearer its anchor than anyone else when the jobs are handed out
    * (keepNet for the net-front defender: the man at the net stays there rather than swapping with his partner).

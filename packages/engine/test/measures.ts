@@ -28,7 +28,7 @@ import type { Tactics } from '../src/types';
 /** Raw sums over one game; every field is a count or a sum so games add up field by field. */
 export type PlayCounters = Record<PlayCounterKey, number>;
 export type PlayCounterKey =
-  | 'liveTicks' | 'skaterTicks' | 'stationaryTicks' | 'glideTicks' | 'topSpeedTicks' | 'sprintRuns' | 'sprintRunTicks'
+  | 'liveTicks' | 'skaterTicks' | 'stationaryTicks' | 'glideTicks' | 'topSpeedTicks' | 'sprintRuns' | 'sprintRunTicks' | 'cruiseTicks' | 'hardTicks'
   | 'backwardTicksWithPuck' | 'ticksWithPuck' | 'spotTicks' | 'retargets'
   | 'passes' | 'passesCompleted' | 'pointPasses' | 'pointPassesKept' | 'pointPassesCompleted'
   | 'attempts' | 'defenceAttempts' | 'saves' | 'reboundChances' | 'goals'
@@ -51,7 +51,7 @@ export type PlayCounterKey =
   | 'attemptsBackhand' | 'attemptsInReach' | 'attemptsOddManFar' | 'attemptsOddManClose' | 'attemptsLowClose' | 'attemptsLowFar' | 'attemptsNormalFar' | 'attemptsNormalFarBare' | 'attemptsNormalClose' | 'attemptsBreakaway' | 'attemptsOther';
 
 export const PLAY_COUNTER_KEYS: readonly PlayCounterKey[] = [
-  'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks',
+  'liveTicks', 'skaterTicks', 'stationaryTicks', 'glideTicks', 'topSpeedTicks', 'sprintRuns', 'sprintRunTicks', 'cruiseTicks', 'hardTicks',
   'backwardTicksWithPuck', 'ticksWithPuck', 'spotTicks', 'retargets',
   'passes', 'passesCompleted', 'pointPasses', 'pointPassesKept', 'pointPassesCompleted',
   'attempts', 'defenceAttempts', 'saves', 'reboundChances', 'goals',
@@ -82,6 +82,11 @@ const addInto = (c: PlayCounters, k: PlayCounterKey, v: number): void => { c[k] 
 export type PlayMeasures = {
   stationaryShare: number; glideShare: number; topSpeedShare: number; sprintRunSeconds: number; backwardShareWithPuck: number; retargetShare: number;
   /**
+   * Real effort (Task 14): the share of live skater time under CRUISE_SHARE (0.75) of his own top speed (gliding,
+   * cruising, battling), and from there up to TOP_SPEED_SHARE (0.9) of it (skating hard); topSpeedShare is the rest.
+   */
+  cruiseShare: number; hardShare: number;
+  /**
    * Real-world scale (Task 13b): the fastest skater's top speed in a game (mph, held for SUSTAIN_TICKS: a push or a hit
    * does not count), the mean of the games' and the largest; bursts over 20 and over 22 mph a game (both teams: a skater
    * going over the speed, again after dropping 1 mph under it); mean and largest release speed (mph) by shot type.
@@ -106,6 +111,8 @@ export const emptyCounters = (): PlayCounters => Object.fromEntries(PLAY_COUNTER
 // ---- definitions ----
 const STATIONARY_SPEED = 0.5;
 const TOP_SPEED_SHARE = 0.9;
+/** Task 14: under this share of his own top speed he is gliding or cruising. */
+const CRUISE_SHARE = 0.75;
 const GLIDE_MIN_SPEED = 2;
 /** m/s per second: a glide changes speed by less than this. */
 const GLIDE_MAX_ACCEL = 1;
@@ -402,11 +409,18 @@ export function createObserver(setup: GameSetup): Observer {
         // Real-world scale (Task 13b): his speed held over the last SUSTAIN_TICKS, and his bursts over 20 and 22 mph.
         let r = rings.get(s.id);
         if (r === undefined) { r = { v: new Float64Array(SUSTAIN_TICKS), i: 0, n: 0, b20: false, b22: false }; rings.set(s.id, r); }
-        r.v[r.i] = speed; r.i = (r.i + 1) % SUSTAIN_TICKS; if (r.n < SUSTAIN_TICKS) r.n++;
-        if (r.n === SUSTAIN_TICKS) { let lo = Infinity; for (let k = 0; k < SUSTAIN_TICKS; k++) if (r.v[k]! < lo) lo = r.v[k]!; if (lo * MPH > c.fastestMph) c.fastestMph = lo * MPH; }
-        const mph = speed * MPH;
-        if (mph > 20 && !r.b20) { c.bursts20++; r.b20 = true; } else if (mph < 19) r.b20 = false;
-        if (mph > 22 && !r.b22) { c.bursts22++; r.b22 = true; } else if (mph < 21) r.b22 = false;
+        // Task 14: skating speed is read on his feet (a man knocked down slides at whatever the hit gave him), and a
+        // burst is a speed sustained over the threshold for SUSTAIN_TICKS (NHL EDGE: "a sustained speed above a given
+        // threshold"), not one tick above it.
+        if (s.downT > 0) r.n = 0;
+        else {
+          r.v[r.i] = speed; r.i = (r.i + 1) % SUSTAIN_TICKS; if (r.n < SUSTAIN_TICKS) r.n++;
+          let lo = 0;
+          if (r.n === SUSTAIN_TICKS) { lo = Infinity; for (let k = 0; k < SUSTAIN_TICKS; k++) if (r.v[k]! < lo) lo = r.v[k]!; if (lo * MPH > c.fastestMph) c.fastestMph = lo * MPH; }
+          const held = lo * MPH, mph = speed * MPH;
+          if (held > 20 && !r.b20) { c.bursts20++; r.b20 = true; } else if (mph < 19) r.b20 = false;
+          if (held > 22 && !r.b22) { c.bursts22++; r.b22 = true; } else if (mph < 21) r.b22 = false;
+        }
       } else { const r = rings.get(s.id); if (r !== undefined) r.n = 0; }
       const p = prev.get(s.id);
       const before = p !== undefined && p.tick === tick - 1 ? p : null;
@@ -422,6 +436,8 @@ export function createObserver(setup: GameSetup): Observer {
         c.skaterTicks++;
         if (spot) c.spotTicks++;
         if (speed < STATIONARY_SPEED) c.stationaryTicks++;
+        const ownTop = topSpeed.get(s.id) ?? Infinity;
+        if (speed < CRUISE_SHARE * ownTop) c.cruiseTicks++; else if (speed < TOP_SPEED_SHARE * ownTop) c.hardTicks++;
         if (speed >= TOP_SPEED_SHARE * (topSpeed.get(s.id) ?? Infinity)) {
           c.topSpeedTicks++;
           // Task 10 close-out ruling 2: a sprint run counts only free skating: not while he is in an engagement or a
@@ -753,6 +769,7 @@ export function measuresOf(games: { counters: PlayCounters; maxPuckJump: number 
     stationaryShare: ratio(c.stationaryTicks, c.skaterTicks),
     glideShare: ratio(c.glideTicks, c.skaterTicks),
     topSpeedShare: ratio(c.topSpeedTicks, c.skaterTicks),
+    cruiseShare: ratio(c.cruiseTicks, c.skaterTicks), hardShare: ratio(c.hardTicks, c.skaterTicks),
     sprintRunSeconds: ratio(c.sprintRunTicks * DT, c.sprintRuns),
     backwardShareWithPuck: ratio(c.backwardTicksWithPuck, c.ticksWithPuck),
     retargetShare: ratio(c.retargets, c.spotTicks),

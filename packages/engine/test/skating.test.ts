@@ -91,6 +91,26 @@ describe('skating', () => {
     const runOn = (slow: SlowMode): number => { const s = movingAt(8, 0); s.target = { x: -10, y: 1 }; let far = 0; for (let t = 0; t < 90; t++) { stepFor(s, DT, fresh, { slow, through: false }); far = Math.max(far, s.pos.x); } return far; };
     expect(runOn('stop')).toBeLessThan(5); expect(runOn('coast')).toBeGreaterThan(runOn('stop') + 2);
   });
+  // Task 14 (the addendum's headline 3): real effort. His push falls off as he nears his top speed, so he is quick off
+  // the mark and reaches 90% of it only on a straight run of seconds, and nothing carries him past it on his feet.
+  it('quick off the mark, slow to the top: half his top speed inside 0.8 s, 90% only after 1.8 to 3.2 s, near all of it by 5 s', () => {
+    const top = movementOf(def({}), 1).topSpeed;
+    const s = at(-28, 0); s.target = { x: 1000, y: 0 };
+    let tHalf = -1, t90 = -1, t = 0;
+    while (t < 5) { stepFor(s, DT); t += DT; const v = len(s.vel); if (tHalf < 0 && v >= 0.5 * top) tHalf = t; if (t90 < 0 && v >= 0.9 * top) t90 = t; }
+    expect(tHalf).toBeGreaterThan(0); expect(tHalf).toBeLessThan(0.8);
+    expect(t90).toBeGreaterThan(1.8); expect(t90).toBeLessThan(3.2);
+    expect(len(s.vel)).toBeGreaterThan(0.97 * top); expect(len(s.vel)).toBeLessThanOrEqual(top + 1e-9);
+  });
+  it('on his feet he never holds more than his top speed: a shove across his line is shed, not added', () => {
+    const top = movementOf(def({}), 1).topSpeed;
+    const s = movingAt(top, 0); s.target = { x: 1000, y: 0 }; s.vel.y = 3;
+    stepFor(s, 0.25);
+    expect(len(s.vel)).toBeLessThanOrEqual(top + 1e-6);
+    const c = movingAt(0, 0); c.facing = Math.PI / 2; c.target = { x: 1000, y: 0 }; c.faceTarget = { x: c.pos.x, y: 1000 }; c.vel.x = top; c.vel.y = 4;
+    stepFor(c, 0.3);
+    expect(len(c.vel)).toBeLessThanOrEqual(top + 1e-6);
+  });
   it('never NaN: on his target, at rest, with no speed cap', () => { const s = at(0, 0); s.speedCap = 0; stepFor(s, 1); expect(Number.isFinite(s.pos.x + s.vel.x + s.facing)).toBe(true); });
   it('retreating defencemen face the puck (final review measure, two whole games)', () => {
     const m = retreatMeasure([1, 2]);

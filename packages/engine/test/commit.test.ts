@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { TUNING } from '../src/tuning';
 import { commitTo, committedPhase, effortToReach, holdJob, setTeamPhase, speedFor, updateTeamPhase, type Want } from '../src/commit';
 import { assignJobs } from '../src/team-play';
 import { resolveGoalies } from '../src/bodies';
@@ -60,7 +61,11 @@ describe('commitment', () => {
   });
   it('effort is chosen by need: a sprint to a far spot, a glide near it, and no sprint on empty legs', () => {
     expect(effortToReach(12)).toBe('sprint'); expect(effortToReach(5)).toBe('skate'); expect(effortToReach(2)).toBe('glide');
-    expect(speedFor('sprint', 'f3', 0.1)).toBeLessThan(1); expect(speedFor('sprint', 'chase', 0.1)).toBe(1);
+    // Task 14 (real effort): a sprint is hard skating (TUNING.effort.sprint), flat out only to get back onside; on
+    // empty legs only the puck jobs still skate hard.
+    expect(speedFor('sprint', 'f3', 0.1)).toBe(TUNING.effort.skate); expect(speedFor('sprint', 'chase', 0.1)).toBe(TUNING.effort.sprint);
+    expect(speedFor('sprint', 'f3', 1)).toBe(TUNING.effort.sprint); expect(speedFor('sprint', 'tagUp', 1)).toBe(1);
+    expect(TUNING.effort.sprint).toBeLessThan(0.9); expect(TUNING.effort.skate).toBeLessThanOrEqual(0.75); expect(TUNING.effort.glide).toBeGreaterThanOrEqual(0.45);
   });
   it('a skater is pushed out of the goalie', () => {
     const st = stateWith({ carrier: null, puckX: 0 }); const s = skater(st, 'away', 'C'); s.pos = { x: -26.4, y: 0.1 }; s.vel = { x: -3, y: 0 };

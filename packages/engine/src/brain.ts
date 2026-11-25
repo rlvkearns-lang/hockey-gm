@@ -251,7 +251,8 @@ export function brainTick(state: GameState, defs: Map<string, PlayerDef>, rng: R
       // In the zone he attacks (but on a breakaway) he skates with it at T.carrySpeed.inZone of his carrying speed: he
       // looks for the play rather than outskating it.
       s.speedCap = d.lane === 'hold' ? T.protectSpeedCap
-        : clamp(T.carrySpeed.base + me.attrs.puckHandling * T.carrySpeed.perPoint, 0, 1) * (sit.zone === 'O' && !sit.breakaway ? T.carrySpeed.inZone : 1);
+        : clamp(T.carrySpeed.base + me.attrs.puckHandling * T.carrySpeed.perPoint, 0, 1) * (sit.zone === 'O' && !sit.breakaway ? T.carrySpeed.inZone : 1)
+          * (sit.breakaway || sit.oddMan ? TUNING.effort.allOut : TUNING.effort.sprint);
       return;
     case 'protect': {
       if (busy) return;
