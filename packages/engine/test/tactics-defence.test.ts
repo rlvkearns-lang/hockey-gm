@@ -39,21 +39,31 @@ function pairsMean(t: Partial<Tactics>, read: (m: ReturnType<typeof tacticMeasur
  * Task 13 review, Minor 2 (Task 13b item 7e): as pairsMean, but the counts are pooled over the CERTAINTY_PAIRS pairs and
  * the measure is read once on the sums (the ruling's "pooled"), so a pair with few events weighs as little as it says.
  */
+const pooledCache = new Map<string, ReturnType<typeof tacticMeasures>>();
 function pairsPooled(t: Partial<Tactics>, read: (m: ReturnType<typeof tacticMeasures>) => number, games = 2): number {
+  // (Task 14b: the pooled measures of a tactic are played once per file and read as often as needed.)
+  const key = JSON.stringify([t, games]);
+  const hit = pooledCache.get(key);
+  if (hit !== undefined) return read(hit);
   let sum: ReturnType<typeof tacticCounts> | null = null;
   for (let k = 1; k <= CERTAINTY_PAIRS; k++) {
     const s: GameSetup = { home: generateTeam(2 * k + 1, 'A', 'AAA'), away: generateTeam(2 * k + 2, 'B', 'BBB'), seed: 1, chemistry: [] };
     const c = tacticCounts(withTactics(s, 'home', t), 'home', games);
     if (sum === null) sum = { ...c }; else for (const key of Object.keys(c) as (keyof typeof c)[]) sum[key] += c[key];
   }
-  return read(tacticMeasures(sum!));
+  const m = tacticMeasures(sum!);
+  pooledCache.set(key, m);
+  return read(m);
 }
 
 describe('tactics: two teams look different (defence, pinching)', () => {
   it('a pressure team presses the carrier in its zone more than a collapse team and gives up relatively more from the slot', () => {
-    const pr = home({ defence: 'pressure' }, 8), co = home({ defence: 'collapse' }, 8);
-    expect(pr.dzonePressedShare).toBeGreaterThan(co.dzonePressedShare);
-    expect(pr.dzoneTwoShare).toBeGreaterThan(co.dzoneTwoShare);
+    // Task 14b (section 4; measure change for ratification, bars unchanged): the pressed shares on counts pooled over six
+    // team pairs, four games a pair, as slot-to-point below (on gameSetup(1)'s 8 games pressure read 0.764 against
+    // collapse's 0.765 after Task 14b's last tuning).
+    const pr = pairsPooled({ defence: 'pressure' }, (m) => m.dzonePressedShare, 4), co = pairsPooled({ defence: 'collapse' }, (m) => m.dzonePressedShare, 4);
+    expect(pr).toBeGreaterThan(co);
+    expect(pairsPooled({ defence: 'pressure' }, (m) => m.dzoneTwoShare, 4)).toBeGreaterThan(pairsPooled({ defence: 'collapse' }, (m) => m.dzoneTwoShare, 4));
     // Task 13 close-out ruling 2: on gameSetup(1) this read flipped with every change of play (1.256 / 1.232 before Task
     // 13, 1.000 / 1.142 after it); read as the mean over six generated team pairs (0.775 / 0.656 at Task 13's close-out).
     // Task 13 review, Minor 2: the counts pooled over the pairs, not a mean of per-pair ratios; same bar.

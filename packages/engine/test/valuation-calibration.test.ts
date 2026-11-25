@@ -17,7 +17,9 @@ const LONG = 900_000;
 const BV = TUNING.badges.value;
 let cache: Attempt[] | null = null;
 // Task 14 (Task 13b review, Important 2): 64 games, not 32, so the tighter tolerances below are read, not noise.
-const GAMES = 64;
+// Task 14b (section 4; sample change for ratification, tolerances unchanged): 128 games. With 64 the 0-5 m band held
+// 129 to 147 free shots and read 0.068 and 0.039 at two commits a tuning apart (se 0.02), failing the two-se clause.
+const GAMES = 128;
 const attempts = (): Attempt[] => (cache ??= Array.from({ length: GAMES }, (_, i) => attemptsOf(gameSetup(i + 1))).flat());
 
 describe('the valuation matches execution (Task 13b)', () => {
